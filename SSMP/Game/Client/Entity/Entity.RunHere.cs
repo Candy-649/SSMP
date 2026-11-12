@@ -48,14 +48,17 @@ namespace SSMP.Game.Client.Entity;
 /// to drain their silk, a maw that takes a thing of theirs - goes further in another way: the game of the player it
 /// caught leads it. What the creature does with them from there is theirs to decide: whether they struggle free,
 /// whether they are eaten, how much silk they have left to be drained. Played by the scene host by itself, without
-/// them, it waited for struggles that nobody made and chewed on nobody for good. So the copy tells the scene host each
-/// state it goes to, and the scene host's FSM goes there too and nowhere else, but out of the catch by its own way - its
-/// death, a stun, the catch ending by its own clock (see <see cref="TakeCatchState"/>). The copy moves by its own body
-/// meanwhile, as the room's own creature does, so that one that leaps up with the player lands again (see
-/// <see cref="GiveTheCopyItsBody"/>). A way out of the catch that still has to do with the player - the creature dies
-/// of their struggles and lets them go - is played on by the copy in either game's case, for the player it held, as
-/// far as it does anything to them (see <see cref="GoesIntoTheAftermath"/>). Stopped any other way, the copy lets
-/// them go itself, and gives them back the sound of the game as the creature would have (see
+/// them, it waited for struggles that nobody made and chewed on nobody for good. So the copy plays it on them here
+/// by itself to its end, whatever the scene host answers or its creature does meanwhile, and tells the scene host
+/// each state it goes to; the scene host's FSM goes there too if its creature is free for it, and nowhere else, but
+/// out of the catch by its own way - its death, a stun, the catch ending by its own clock (see
+/// <see cref="TakeCatchState"/>). The copy moves by its own body meanwhile, as the room's own creature does, so that
+/// one that leaps up with the player lands again (see <see cref="GiveTheCopyItsBody"/>). A way out of the catch that
+/// still has to do with the player - the creature dies of their struggles, or of a blow over there, and lets them
+/// go - is played on by the copy, for the player it held, as far as it does anything to them (see
+/// <see cref="GoesIntoTheAftermath"/>), and so is the move that the creature ends its catch with, like a tendril
+/// reeled back in (see <see cref="GoesIntoItsEnding"/>). Switched off or gone before its end, the copy lets them go
+/// itself, and gives them back the sound of the game as the creature would have (see
 /// <see cref="FreeTheLocalPlayer"/>).
 ///
 /// The end of a boss goes on further still, and for good: from the state that its registry entry names, each game
@@ -249,8 +252,10 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether <see cref="_runHere"/> runs for a catch that one of the copy's parts felt for itself, which this game
-    /// leads: every state it goes to is said to the scene host, whose FSM goes there too (see
-    /// <see cref="TellCatchWentOn"/>). <see cref="_runHereCombo"/> is then every state that the catch alone leads to.
+    /// leads: it plays the catch to its end by itself, whatever the scene host answers (see
+    /// <see cref="PlaysACatchByItself"/>), and every state it goes to is said to the scene host, whose FSM goes there
+    /// too if its creature is free for it (see <see cref="TellCatchWentOn"/>). <see cref="_runHereCombo"/> is then
+    /// every state that the catch alone leads to.
     /// </summary>
     private bool _runHereLed;
 
@@ -265,8 +270,7 @@ internal partial class Entity {
     private byte _runHereStep;
 
     /// <summary>
-    /// The state out of the catch this game leads that the scene host has been told of, which <see cref="_runHere"/>
-    /// waits for the scene host to go to first, or null.
+    /// The state out of the catch this game leads that the scene host has been told of, or null.
     /// </summary>
     private FsmState? _runHereExit;
 
@@ -391,13 +395,15 @@ internal partial class Entity {
     private bool PlaysACombo => _runHere != null && !_runHereLed && !_runHereForGood && _runHereCombo != null;
 
     /// <summary>
-    /// Whether the FSM of the copy that runs here plays the combo of a catch of the local player, which it plays by
-    /// itself to its end, whatever the scene host's creature does (see <see cref="PlayTheCatchByItself"/>): what the
-    /// scene host says meanwhile of where its creature is, how it moves by itself, its colours, whether its parts hurt
-    /// and which move it starts waits until the copy is through (UpdatePosition, UpdateData,
-    /// <see cref="StartsAMove"/>).
+    /// Whether the FSM of the copy that runs here plays a catch of the local player, which it plays by itself to its
+    /// end whatever the scene host's creature does: the combo of a catch, one that a part of the room told it of (see
+    /// <see cref="PlayTheCatchByItself"/>), or one that this game leads (see <see cref="_runHereLed"/>). What the scene
+    /// host says meanwhile of where its creature is, how it moves by itself, its colours, whether its parts hurt and
+    /// which move it starts waits until the copy is through (UpdatePosition, UpdateData, <see cref="StartsAMove"/>):
+    /// what catches a player is their own game's to say, and the scene host's game never takes it back from them
+    /// (USER 11-12 "凭什么一切风险都要客机承担呢").
     /// </summary>
-    private bool PlaysAComboByItself => PlaysACombo && _runHereAlone;
+    private bool PlaysACatchByItself => _runHereAlone || _runHereLed;
 
     /// <summary>
     /// The states of catches that the partner's game leads which came before the input they belong to - the packet of
@@ -827,6 +833,19 @@ internal partial class Entity {
             PlayTheCatchByItself("this game caught them");
         }
 
+        // So is a catch that this game leads, of which the scene host is told each state, to play it along if its
+        // creature is free for it (TellCatchWentOn). Waiting on its answer, a player was let go of at once where it
+        // had not taken the catch - its creature held its own player, or had gone on - or never heard of it, and as
+        // soon as its creature went on to anything else meanwhile (USER 11-12 "我觉得还是都本地演，外加一些状态同步给房主这
+        // 样", "凭什么一切风险都要客机承担呢")
+        if (_runHereLed) {
+            _runHereAwaited = 0;
+            Logger.Info(
+                $"The copy of entity {Id} plays the catch of the local player here to its end, whatever the scene " +
+                "host answers"
+            );
+        }
+
         return input;
     }
 
@@ -842,9 +861,9 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Tells the scene host, once, the way out of a catch this game leads that the FSM that runs here would now take
-    /// from the state of the catch it is in. It is kept where it is (see <see cref="OnSwitchState"/>) until the scene
-    /// host's FSM has gone that way, and follows it again from there.
+    /// Tells the scene host, once, the way out of a catch this game leads that the FSM that runs here takes from the
+    /// state of the catch it is in, which the scene host's FSM, playing the catch along, goes out by too (see
+    /// <see cref="FollowCatch"/>).
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="toState">The state out of the catch.</param>
@@ -922,11 +941,10 @@ internal partial class Entity {
     /// go. That is theirs as much as the catch was - being let go, the last bite, the music coming back - and it is
     /// played here, where they are, as far as it does anything to them; the creature's own death, or its coming back,
     /// it follows the scene host through again (see <see cref="UpdateAftermath"/>). Held there instead until the scene
-    /// host went that way, as a way back to the creature's own ways is, the copy only ever let them go with a plain
-    /// release when it followed the scene host again: the scene host leaves its own player out of all of it, and the
-    /// music of the player who had been held stayed muffled for good. The scene host is told the state once and goes
-    /// there too, still without its own player (see <see cref="FollowCatch"/>), and what it sends of what the copy
-    /// plays is not played here again.
+    /// host went that way, the copy only ever let them go with a plain release when it followed the scene host again:
+    /// the scene host leaves its own player out of all of it, and the music of the player who had been held stayed
+    /// muffled for good. The scene host is told the state once and goes there too, still without its own player (see
+    /// <see cref="FollowCatch"/>), and what it sends of what the copy plays is not played here again.
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="toState">The state it is about to go to.</param>
@@ -940,6 +958,41 @@ internal partial class Entity {
         CatchWentOn?.Invoke(this, _runHereIndex, _runHereCatch, ++_runHereStep, toState.Name);
         BeginAftermath(after, $"went from '{state.Name}' to '{toState.Name}'");
         return true;
+    }
+
+    /// <summary>
+    /// Lets the FSM that runs here for a catch this game leads go out of it its own way into the move that the creature
+    /// ends its catch with, if the way out starts one that its registry entry has the copy play by itself (see
+    /// <see cref="EntityRegistryEntry.RunsHere"/>): the tendril that reels itself back in, ready to catch again. The
+    /// scene host is told the way out once (see <see cref="TellCatchLeft"/>), and the copy plays the move through by
+    /// itself as what follows the catch (see <see cref="_aftermath"/>), then follows the scene host again; out of the
+    /// catch any other way, it follows the scene host again at once. Left to the scene host, a copy whose catch the
+    /// scene host had not taken kept its tendril out, never reeled in, and it caught nobody again until the scene
+    /// host's own was reeled in (USER 11-09 "它不拉我").
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="toState">The state it is about to go to, out of the catch.</param>
+    /// <returns>Whether it goes there.</returns>
+    private bool GoesIntoItsEnding(HutongGames.PlayMaker.Fsm fsm, FsmState toState) {
+        if (!_runHereLed || _aftermath != null || _runHere is not { } copyFsm || fsm.ActiveState is not { } state ||
+            _runHereCombo?.Contains(state) != true) {
+            return false;
+        }
+
+        TellCatchLeft(fsm, toState);
+        if (EntityRegistry.TryGetRunHere(Type, copyFsm.FsmName, toState.Name, out var names) &&
+            StatesOfTheMove(copyFsm, toState.Name, names) is { } move) {
+            BeginAftermath(move, $"went from '{state.Name}' to '{toState.Name}', a move it plays by itself,");
+            return true;
+        }
+
+        // Through, and over at once (UpdateAftermath)
+        _aftermath = [];
+        _aftermathDone = true;
+        Logger.Info(
+            $"The copy of entity {Id} went from '{state.Name}' to '{toState.Name}', out of the catch this game led"
+        );
+        return false;
     }
 
     /// <summary>
@@ -1165,7 +1218,7 @@ internal partial class Entity {
         // A creature that holds this game's own player in the same catch does not take the partner's: one that
         // pounces on the player whole takes its grab from wherever it is, and started over on the partner, it would
         // leave this game's player held for good, with the part that lets them go kept off them. The partner's game
-        // lets them go when it hears (HearEcho).
+        // plays its catch on them by itself all the same (PlayHere).
         if (start.Path is { Length: > 0 } && _leads.Find(led => led.Fsm == fsm) == null &&
             EntityFsmActions.StatesOnlyThrough(fsm, into).Contains(state)) {
             Logger.Info(
@@ -1295,8 +1348,8 @@ internal partial class Entity {
     /// Takes the scene host's answer to an input played here (see <see cref="SendEcho"/>). If it is the answer to the
     /// last one and its FSM went where the copy's went, what was held is dropped - the copy has done all of it - and
     /// the copy runs on in step with the scene host until it says more of that FSM. If not, the copy follows the scene
-    /// host again at once, with all that was held. The combo of a catch of the local player waits for no answer (see
-    /// <see cref="PlayTheCatchByItself"/>).
+    /// host again at once, with all that was held. A catch of the local player waits for no answer (see
+    /// <see cref="PlayHere"/>).
     /// </summary>
     /// <param name="data">The echo.</param>
     private void HearEcho(EntityNetworkData data) {
@@ -1581,16 +1634,17 @@ internal partial class Entity {
     /// the flea too - and the copy follows it again from here; but not for a state of the combo of a catch, which the
     /// copy plays by itself (see <see cref="_runHereCombo"/>), nor for the part that each game runs by itself, nor
     /// while it plays what follows a catch that this game led, after which it follows the scene host again anyway (see
-    /// <see cref="_aftermath"/>). Out of a catch that this game leads into what still has to do with the local player,
-    /// the copy goes that way instead (see <see cref="FollowIntoTheAftermath"/>). What it sent of a state that its FSM
-    /// came to by itself out of a move that the copy plays by itself comes here once the copy is through the move too
-    /// (see <see cref="KeepsForLater"/>).
+    /// <see cref="_aftermath"/>), nor in a catch that this game leads, which it plays to its end by itself, holding
+    /// what it hears of other states until then (see <see cref="HoldsForTheAftermath"/>). Out of a catch that this
+    /// game leads into what still has to do with the local player, the copy goes that way instead (see
+    /// <see cref="FollowIntoTheAftermath"/>). What it sent of a state that its FSM came to by itself out of a move that
+    /// the copy plays by itself comes here once the copy is through the move too (see <see cref="KeepsForLater"/>).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="state">The state of the action.</param>
     private void HearFromSceneHost(PlayMakerFSM fsm, FsmState state) {
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
-            _runHereCombo?.Contains(state) != true && !FollowIntoTheAftermath(state.Name)) {
+            _runHereCombo?.Contains(state) != true && !FollowIntoTheAftermath(state.Name) && !_runHereLed) {
             CatchUpWithSceneHost($"the scene host sent what its FSM did in '{state.Name}'");
         }
     }
@@ -1789,13 +1843,13 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether what the scene host sent of the FSM that runs here, from the given state, is held until the copy has
-    /// played what follows a catch that this game led (see <see cref="_aftermath"/>): what the copy does not play of
-    /// it itself.
+    /// Whether what the scene host sent of the FSM that runs here, from the given state, is held until the copy is
+    /// through what it plays by itself - a catch that this game leads, or what follows a catch (see
+    /// <see cref="_aftermath"/>): what the copy does not play of it itself.
     /// </summary>
     /// <param name="state">The state.</param>
     private bool HoldsForTheAftermath(FsmState state) {
-        return _aftermath != null && _runHereCombo?.Contains(state) != true;
+        return (_aftermath != null || _runHereLed) && _runHereCombo?.Contains(state) != true;
     }
 
     /// <summary>
@@ -1807,8 +1861,8 @@ internal partial class Entity {
     /// game runs by itself starts that here from its first state (see <see cref="RunEachGamePart"/>), after a player
     /// lying in their cocoon is stood up for it (<see cref="EachGamePartBegan"/>). Any of them, as only the latest
     /// state of the scene host's FSM is sent, and the short one that the part is gone into by can be passed over. While
-    /// the copy plays what follows a catch that this game led, it follows the scene host again only once it is through
-    /// (see <see cref="UpdateAftermath"/>).
+    /// the copy plays a catch that this game leads, or what follows a catch, it follows the scene host again only once
+    /// it is through (see <see cref="UpdateAftermath"/>).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>
@@ -1871,10 +1925,11 @@ internal partial class Entity {
         // killed, or by what told the FSM from outside - or with all that the copy was behind with taken in at once
         // (CatchUpWithWhatCameSince), the copy follows the scene host again from here, as it does back where an input
         // found it: the scene host's FSM is through with that, even where the copy is there already and saw nothing
-        // new (see HearEcho)
+        // new (see HearEcho). Not in a catch that this game leads, which the copy plays to its end whatever the scene
+        // host's creature does, unless that went out of it into what still has to do with the local player
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
             (stateName != fsm.ActiveStateName || CameBackToWhereItWasFound(stateName)) && !IsInCombo(stateName) &&
-            !FollowIntoTheAftermath(stateName)) {
+            !FollowIntoTheAftermath(stateName) && !_runHereLed) {
             CatchUpWithSceneHost($"the scene host's FSM went to '{stateName}'");
         }
 
@@ -1898,10 +1953,10 @@ internal partial class Entity {
     /// once that it was behind with (see <see cref="_catchingUp"/>), nor while the local player talks to the creature
     /// or the copy runs the part of the FSM that each game runs by itself, nor while it runs another of the creature's
     /// FSMs here, nor for a move that the copy's FSM goes through another way (see <see cref="StatesOfTheMove"/>),
-    /// which it follows the scene host through. Nor while the copy plays the combo of a catch of the local player by
-    /// itself, which goes to its end first (see <see cref="PlaysAComboByItself"/>): the scene host's creature, which
-    /// nobody else saw catch them, sets off on its next move or is stunned on its own, and cut there, the copy would
-    /// let go of the player half way. It follows the scene host through the move once it is through.
+    /// which it follows the scene host through. Nor while the copy plays a catch of the local player by itself, which
+    /// goes to its end first (see <see cref="PlaysACatchByItself"/>): the scene host's creature, which nobody else saw
+    /// catch them, sets off on its next move or is stunned on its own, and cut there, the copy would let go of the
+    /// player half way. It follows the scene host through the move once it is through.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state the scene host's FSM went to.</param>
@@ -1918,7 +1973,7 @@ internal partial class Entity {
         first = stateName;
         move = null;
         if (FromRoomState || _catchingUp || _eachGamePartWaiting != null || _runHereTalk || _runHereForGood ||
-            _runHere != null && _runHere != fsm || PlaysAComboByItself) {
+            _runHere != null && _runHere != fsm || PlaysACatchByItself) {
             return false;
         }
 
@@ -3516,8 +3571,9 @@ internal partial class Entity {
     /// the FSM of the room's own object that plays a catch that the partner's game leads on the way that game says (see
     /// <see cref="LetsLedFsmGo"/>). The state it was about to go to is cleared, as the game clears it once it has gone
     /// there, so that the game does not try again. For a catch this game leads, every state the copy goes to is said
-    /// to the scene host, and so is the way out it waits at (see <see cref="TellCatchWentOn"/>). Out of it, the copy
-    /// goes by itself only through what follows it for the local player, and once (see <see cref="_aftermath"/>).
+    /// to the scene host, and so is the way out it takes (see <see cref="TellCatchWentOn"/>). Out of it, the copy goes
+    /// by itself only through what follows it for the local player, or the move the creature ends it with, and once
+    /// (see <see cref="_aftermath"/>).
     /// </summary>
     private static void OnSwitchState(
         Action<HutongGames.PlayMaker.Fsm, FsmState> orig,
@@ -3569,8 +3625,9 @@ internal partial class Entity {
                 return;
             }
 
-            // Out of a catch this game leads into what still has to do with the player, it goes on by itself
-            if (entity.GoesIntoTheAftermath(self, toState)) {
+            // Out of a catch this game leads into what still has to do with the player, it goes on by itself, and so
+            // it does into the move that the creature ends its catch with
+            if (entity.GoesIntoTheAftermath(self, toState) || entity.GoesIntoItsEnding(self, toState)) {
                 orig(self, toState);
                 return;
             }
@@ -3579,7 +3636,8 @@ internal partial class Entity {
             entity.TellCatchLeft(self, toState);
 
             // Through what it plays, it waits at the end for the scene host's FSM: the combo of a catch, played on by
-            // itself after all, is over at once then (PlayTheCatchByItself)
+            // itself after all, is over at once then (PlayTheCatchByItself), and so is a catch that this game leads
+            // (GoesIntoItsEnding)
             entity._aftermathDone = true;
 
             // A move that the copy plays by itself waits at its end for the scene host's FSM (UpdateMoveEnd), standing

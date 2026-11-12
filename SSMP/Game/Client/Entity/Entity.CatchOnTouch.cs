@@ -317,8 +317,8 @@ internal partial class Entity {
     /// way that gives it back itself, and says that it was cut short either way (see <see cref="CatchGivenBack"/>).
     /// One that came to its end gave it back itself, or took the player to another room, where the game gives it back.
     /// </summary>
-    /// <param name="cut">Whether the copy stopped before the catch came to its end: the scene host did not take the
-    /// catch, never answered, or the copy went away while it held the player.</param>
+    /// <param name="cut">Whether the copy stopped before the catch came to its end: it was switched off, went away,
+    /// or ran out of time while it held the player.</param>
     private void GiveBackWhatTheCatchTook(bool cut) {
         var before = _beforeTheCatch;
         _beforeTheCatch = null;
@@ -342,8 +342,8 @@ internal partial class Entity {
     /// which it blacks out, and what shows them their health, which it sends away. A creature that holds the player
     /// through the grab of the player character's own FSM lets go of them with a release
     /// (EntityFsmActions.LetGoOfTheHeldLocalPlayer); one that takes all of this itself, like the one that cages the
-    /// player, would give none of it back when its catch is cut short - the scene host did not take it, never answered,
-    /// or the copy went away - and leave the player hidden in the air without control, unable to pause, in the dark,
+    /// player, would give none of it back when its catch is cut short - the copy switched off or gone before its end -
+    /// and leave the player hidden in the air without control, unable to pause, in the dark,
     /// for good. Only what the states of the catch take is given back, and nothing while the game holds the player in
     /// another way that takes the same: lying in their cocoon, or sitting on a bench.
     /// </summary>

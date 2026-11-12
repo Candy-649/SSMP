@@ -4853,11 +4853,11 @@ internal partial class Entity {
             return;
         }
 
-        // Nor while the copy plays the combo of a catch of the local player, which it plays by itself whatever the
-        // scene host's creature does (PlaysAComboByItself): the copy strikes the player where it caught them. Held
-        // only once the scene host had answered, they were taken in between, and the boss was put straight over to
-        // where the scene host's was, away from the player it had just pulled in (USER 11-11 "这局被莫名其妙拉过去的次数更多了")
-        if ((!AcceptsWhileAnticipating(anticipation) || PlaysAComboByItself) && RunHereMovesTheCopy) {
+        // Nor while the copy plays a catch of the local player, which it plays by itself whatever the scene host's
+        // creature does (PlaysACatchByItself): the copy strikes or holds the player where it caught them. Held only
+        // once the scene host had answered, they were taken in between, and the boss was put straight over to where
+        // the scene host's was, away from the player it had just pulled in (USER 11-11 "这局被莫名其妙拉过去的次数更多了")
+        if ((!AcceptsWhileAnticipating(anticipation) || PlaysACatchByItself) && RunHereMovesTheCopy) {
             _positionsHeldBack += packetsCovered;
             return;
         }
@@ -5345,11 +5345,11 @@ internal partial class Entity {
 
             // How the entity moves by itself, the colours its FSMs leave it in, and whether the damage of its parts is
             // on, are its own FSM's to say while that runs here doing more than decide where it goes, and held until
-            // the scene host has answered the input (PlayHere), or through the combo of a catch that the copy plays
-            // by itself (PlaysAComboByItself): the scene host's creature, at another move, would switch the slashes
-            // of the combo off on the player it strikes, or its own on
+            // the scene host has answered the input (PlayHere), or through a catch that the copy plays by itself
+            // (PlaysACatchByItself): the scene host's creature, at another move, would switch the slashes of a combo
+            // off on the player it strikes, or its own on
             if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint or
-                    EntityComponentType.DamageHero) && (WaitsForEcho || PlaysAComboByItself) && RunHereActs) {
+                    EntityComponentType.DamageHero) && (WaitsForEcho || PlaysACatchByItself) && RunHereActs) {
                 HoldForEcho(data);
                 continue;
             }

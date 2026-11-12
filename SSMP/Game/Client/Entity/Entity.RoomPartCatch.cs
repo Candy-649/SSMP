@@ -186,7 +186,7 @@ internal partial class Entity {
                 continue;
             }
 
-            if (_runHereAlone) {
+            if (PlaysACatchByItself) {
                 Logger.Info(
                     $"'{sender.GameObjectName}' of the room caught the local player too, of whom the copy of entity " +
                     $"{Id} ({Type}) plays a catch already"
