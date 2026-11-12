@@ -20,8 +20,8 @@ namespace SSMP.Game.Client.Entity;
 /// player who struck it whomever it fights (GamePatcher.AnswerWound). A blow that the creature is immune to, that
 /// extracts from it, or that leaves it no health sets off nothing here (CoopHits): the game tells it nothing more of
 /// the first two, and the scene host's game tells it of the last along with its death. Nor does a wound that takes
-/// the creature into a choice of what it does next: the scene host's game chooses that (see
-/// <see cref="ChoosesOnAWound"/>).
+/// the creature into a choice of what it does next, nor anything else of the local player's that does: the scene
+/// host's game chooses that (see <see cref="LeadsIntoAChoice"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -44,8 +44,8 @@ internal partial class Entity {
     /// while it runs here. A state machine that each game runs by itself heard of the wound here already, and one that
     /// a wound takes into a state that counts it is told of it by the game that runs the creature (HitCounters).
     /// </summary>
-    internal List<(byte FsmIndex, string EventName, bool Chooses)> FindWoundReactions() {
-        var reactions = new List<(byte, string, bool)>();
+    internal List<(byte FsmIndex, string EventName)> FindWoundReactions() {
+        var reactions = new List<(byte, string)>();
         if (!_isControlled || Object.Client == null || !Object.Client.activeInHierarchy) {
             return reactions;
         }
@@ -69,7 +69,7 @@ internal partial class Entity {
                 }
 
                 if (!HitCounters.Counts(next)) {
-                    reactions.Add(((byte) index, eventName, ChoosesOnAWound(next)));
+                    reactions.Add(((byte) index, eventName));
                 }
 
                 break;
@@ -80,18 +80,37 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether a wound that takes an FSM of the creature to a state has it choose what it does next: that state, or
+    /// Whether an event takes the FSM at the given index of the copy, from the state it is in - its own, if it runs
+    /// here, and otherwise the one the scene host says it is in - into a choice of what the creature does next (see
+    /// <see cref="ChoosesWhatItDoesNext"/>). The copy only sends such an input of the local player, whatever it is: a
+    /// wound, a touch, coming near, a sign, a tool or a struck part (CoopHits.PlayOrSend).
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="eventName">The event.</param>
+    public bool LeadsIntoAChoice(byte fsmIndex, string eventName) {
+        if (fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null) {
+            return false;
+        }
+
+        var fsm = copyFsm.Fsm;
+        var fromName = _runHere == copyFsm ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm);
+        return fromName != null && fsm.GetState(fromName) is { } from &&
+               EntityFsmActions.FindTransition(fsm, from, eventName) is { } next && ChoosesWhatItDoesNext(next);
+    }
+
+    /// <summary>
+    /// Whether an input that takes an FSM of the creature to a state has it choose what it does next: that state, or
     /// the first past those that only pass it on, does nothing but look about, decide and wait, and goes on one of
     /// several ways - a boss at rest that a blow sends to pick its next move at once, a check of its health for its
     /// next phase, the choice of how to answer the blow. About a thousand of the some 7500 ways that the game's FSMs go
     /// on a wound are such (FsmScan --events, 11-12). What a creature does next is the scene host's game's to choose,
-    /// with its own dice, whoever struck it: the copy is not to choose it. One that did, with this game's dice and
+    /// with its own dice, whoever set it off: the copy is not to choose it. One that did, with this game's dice and
     /// where it saw the local player, mostly started another move than the scene host's creature had chosen already,
     /// which then refused it, and jumped from its own to that one (13 of 16 late blows on a boss at rest, 11-05 to
     /// 11-11; USER 11-12 "客机就不应该挑招啊", "挑招也不能让客机来啊", "拒绝了就好了呀").
     /// </summary>
-    /// <param name="state">The state that the wound takes it to.</param>
-    private static bool ChoosesOnAWound(FsmState state) {
+    /// <param name="state">The state that the input takes it to.</param>
+    private static bool ChoosesWhatItDoesNext(FsmState state) {
         var passed = new HashSet<FsmState>();
         for (FsmState? at = state; at != null && passed.Add(at);) {
             if (!OnlyDecides(at)) {

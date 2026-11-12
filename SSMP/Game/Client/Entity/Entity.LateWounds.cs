@@ -26,7 +26,7 @@ namespace SSMP.Game.Client.Entity;
 /// sees as the partner's blow breaking into the start of a move. A catch of the partner's for a combo that comes
 /// late is put back the same way, to the very step of the FSM that their copy took it in, told by its number (see
 /// <see cref="PutBackWhereTheCatchCameIn"/>). A wound that takes the creature into a choice of what it does next
-/// their copy does not answer at all, and the creature here chooses (see <see cref="ChoosesOnAWound"/>).
+/// their copy does not answer at all, and the creature here chooses (see <see cref="LeadsIntoAChoice"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>

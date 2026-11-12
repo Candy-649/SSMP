@@ -2943,8 +2943,7 @@ internal partial class CoopHits {
     /// Plays at once what a wound of the local player makes the copy of an entity do, in each FSM of it that goes
     /// somewhere on it (see Entity.FindWoundReactions), and sends the scene host the same, where the creature answers
     /// it at the local player as the copy does (see PlaySetOff). One that takes the creature into a choice of what it
-    /// does next is only sent: the creature chooses in the scene host's game, with its dice, if the wound still leads
-    /// anywhere there, and takes no notice of it otherwise (USER 11-12 "客机就不应该挑招啊").
+    /// does next is only sent (see <see cref="PlayOrSend"/>).
     /// </summary>
     /// <param name="struck">The entity.</param>
     private void SetOffByWound(Entity.Entity struck) {
@@ -2958,15 +2957,8 @@ internal partial class CoopHits {
             GamePatcher.SetTargetOf(struck.Object.Client, HeroController.instance.gameObject);
         }
 
-        foreach (var (fsmIndex, eventName, chooses) in reactions) {
-            if (chooses) {
-                Logger.Info(
-                    $"'{eventName}' takes the copy of entity {struck.Id} into a choice of what it does next, which " +
-                    "the scene host's game makes, so it is not played here"
-                );
-            }
-
-            PlayOrSend(struck, fsmIndex, eventName, "wounded", setOff: true, here: !chooses);
+        foreach (var (fsmIndex, eventName) in reactions) {
+            PlayOrSend(struck, fsmIndex, eventName, "wounded", setOff: true);
         }
     }
 
@@ -3004,7 +2996,10 @@ internal partial class CoopHits {
     /// otherwise sends it only the event, and the copy shows what the scene host's game then does. A catch of the local
     /// player is played here even while nobody is there to be sent it, as it waits for no answer: what catches a player
     /// is their own game's to say. Anything else needs someone to send it to: played here alone, the copy would go off
-    /// by itself and wait for an answer that never comes.
+    /// by itself and wait for an answer that never comes. Anything but a catch that takes the creature into a choice
+    /// of what it does next is only sent: the creature chooses in the scene host's game, with its dice, if it still
+    /// leads anywhere there, and takes no notice of it otherwise (Entity.LeadsIntoAChoice; USER 11-12
+    /// "客机就不应该挑招啊", "挑招也不能让客机来啊").
     /// </summary>
     /// <param name="copied">The entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
@@ -3019,7 +3014,6 @@ internal partial class CoopHits {
     /// creature, and has the creature go after them in the scene host's game.</param>
     /// <param name="goAfter">Whether the creature goes after them in the scene host's game, where that is not what
     /// <paramref name="setOff"/> says.</param>
-    /// <param name="here">Whether the copy may play it here at all; one that it may not is only sent.</param>
     private void PlayOrSend(
         Entity.Entity copied,
         byte fsmIndex,
@@ -3028,13 +3022,12 @@ internal partial class CoopHits {
         Entity.ToldValues? caught = null,
         bool grabbedThePlayer = false,
         bool setOff = false,
-        bool? goAfter = null,
-        bool here = true
+        bool? goAfter = null
     ) {
         if (!CanSendEntityTouch()) {
             // A catch is played here all the same, and nothing of it sent: between the scene host leaving the room and
             // this game taking the creature over, a player was let go of as soon as they were caught
-            if (caught != null && here && copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } alone) {
+            if (caught != null && copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } alone) {
                 Logger.Info(
                     $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                     $"went to '{alone.State}', with nobody in the room to be sent it"
@@ -3052,8 +3045,16 @@ internal partial class CoopHits {
             return;
         }
 
+        var chooses = caught == null && copied.LeadsIntoAChoice(fsmIndex, eventName);
+        if (chooses) {
+            Logger.Info(
+                $"'{eventName}' takes the copy of entity {copied.Id} into a choice of what it does next, which the " +
+                "scene host's game makes, so it is not played here"
+            );
+        }
+
         var wentAfter = goAfter ?? setOff;
-        if (here && copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } input) {
+        if (!chooses && copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } input) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
