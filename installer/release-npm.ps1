@@ -213,8 +213,10 @@ try {
     }
     Write-Ok "npm serves $version"
 
+    # As long as the workflow's sync-mirror.ps1 may take once npm serves the version: three tries of up to 3 minutes
+    # each, and the looks between. Five minutes gave up on 0.4.162 seconds before the mirror had it (11-12)
     Write-Step "Waiting for the mainland mirror to serve $version"
-    if (-not (Wait-Latest $Mirror $version 5)) {
+    if (-not (Wait-Latest $Mirror $version 12)) {
         $syncScript = Join-Path $PSScriptRoot 'sync-mirror.ps1'
         throw ("The mirror does not serve $version yet. Have it copy npm with:" +
                "`n      pwsh -NoProfile -ExecutionPolicy Bypass -File $syncScript")
