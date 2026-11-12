@@ -145,28 +145,6 @@ internal static class PlayerTargetRegistry {
     }
 
     /// <summary>
-    /// The figure of the one other player in the room, or null when there is none or more than one: what the game
-    /// that runs a creature names of its own player character does not say which player that is (see
-    /// EntityFsmActions.HeroPartOnFigure).
-    /// </summary>
-    public static GameObject? TheOtherPlayer() {
-        GameObject? found = null;
-        foreach (var playerObject in RemotePlayerObjects) {
-            if (playerObject == null || !playerObject.activeInHierarchy) {
-                continue;
-            }
-
-            if (found != null) {
-                return null;
-            }
-
-            found = playerObject;
-        }
-
-        return found;
-    }
-
-    /// <summary>
     /// Gets a list of all currently tracked active player root objects.
     /// </summary>
     /// <returns>A pre-allocated list containing the local hero root and active registered remote player roots.</returns>

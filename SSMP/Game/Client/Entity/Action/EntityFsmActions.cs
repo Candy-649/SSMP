@@ -890,7 +890,7 @@ internal static partial class EntityFsmActions {
 
                     // Else left to what the copy's variable holds, the same part of this game's own character, which
                     // the action is then kept off (see ActsOnTheLocalPlayer)
-                    if (HeroPartOnFigure(action, heroPath) is { } figurePart) {
+                    if (HeroPartOnFigure(action, heroPath, data.SenderId) is { } figurePart) {
                         variable.Value = figurePart;
                     }
 
@@ -902,7 +902,7 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// The part of the figure of the player whose game runs a creature that an action of the creature switches on or
     /// off there, on that player's own character - their part with that path under it (see <see cref="WriteSubject"/>)
-    /// - or null for any other action, or when there is not one other player in the room.
+    /// - or null for any other action, or when that player has no figure here.
     ///
     /// At the end of a fight a boss strikes its last blow by the player who beat it: it hides the player, switches on
     /// the flash of a parry and then the strike of a cross slash, both parts of the player's own character, and those
@@ -912,9 +912,10 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="action">The action about to be replayed.</param>
     /// <param name="path">The path of the part under the character, in the game that runs the creature.</param>
-    private static GameObject? HeroPartOnFigure(FsmStateAction action, string path) {
+    /// <param name="playerId">The ID of the player whose game runs the creature and sent the action.</param>
+    private static GameObject? HeroPartOnFigure(FsmStateAction action, string path, ushort playerId) {
         if (action is not (ActivateGameObject or HutongGames.PlayMaker.Actions.ActivateAllChildren) ||
-            PlayerTargetRegistry.TheOtherPlayer() is not { } figure) {
+            Entity.FigureOf?.Invoke(playerId) is not { } figure) {
             return null;
         }
 
@@ -923,8 +924,9 @@ internal static partial class EntityFsmActions {
         Logger.Info(
             $"[Figures] '{(owner == null ? "?" : owner.name)}'s {action.GetType().Name} in '{action.State?.Name}' " +
             (part == null
-                ? $"works on '{path}' of the other player's character, which this game's character has no part like"
-                : $"works on '{path}' of the other player's character, and so on that part of their figure here")
+                ? $"works on '{path}' of the character of player {playerId}, which this game's character has no " +
+                  "part like"
+                : $"works on '{path}' of the character of player {playerId}, and so on that part of their figure here")
         );
         return part;
     }
