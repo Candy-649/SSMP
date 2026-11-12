@@ -181,7 +181,9 @@ internal class SkinManager {
         // Its own library, those of its crests, which it plays from in place of its own, and those of its parts
         var sheets = new HashSet<string>(StringComparer.Ordinal);
         foreach (var heroLibrary in SlashPictures.HeroLibraries(hero)) {
-            AddSheetsOf(heroLibrary, sheets);
+            foreach (var sheet in SlashPictures.SheetsOf(heroLibrary)) {
+                sheets.Add(sheet.name);
+            }
         }
 
         foreach (var sprite in hero.GetComponentsInChildren<tk2dBaseSprite>(true)) {
@@ -213,33 +215,13 @@ internal class SkinManager {
             }
 
             foreach (var animator in prefab.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
-                AddSheetsOf(animator.Library, sheets);
-            }
-        }
-
-        return _thingSheets = sheets;
-    }
-
-    /// <summary>
-    /// Adds the names of the sheets of sprites that a library of clips draws from.
-    /// </summary>
-    private static void AddSheetsOf(tk2dSpriteAnimation? library, HashSet<string> sheets) {
-        if (library == null || library.clips == null) {
-            return;
-        }
-
-        foreach (var clip in library.clips) {
-            if (clip?.frames == null) {
-                continue;
-            }
-
-            foreach (var frame in clip.frames) {
-                var sheet = frame?.spriteCollection;
-                if (sheet != null) {
+                foreach (var sheet in SlashPictures.SheetsOf(animator.Library)) {
                     sheets.Add(sheet.name);
                 }
             }
         }
+
+        return _thingSheets = sheets;
     }
 
     /// <summary>

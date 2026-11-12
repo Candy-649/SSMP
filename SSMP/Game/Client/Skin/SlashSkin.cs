@@ -205,16 +205,28 @@ internal static class SlashPictures {
     public static HashSet<tk2dSpriteCollectionData> HeroSheets(HeroController hero) {
         var sheets = new HashSet<tk2dSpriteCollectionData>();
         foreach (var library in HeroLibraries(hero)) {
-            foreach (var clip in library.clips ?? []) {
-                foreach (var frame in clip?.frames ?? []) {
-                    if (frame?.spriteCollection != null) {
-                        sheets.Add(frame.spriteCollection);
-                    }
-                }
-            }
+            sheets.UnionWith(SheetsOf(library));
         }
 
         return sheets;
+    }
+
+    /// <summary>
+    /// The sheets of sprites that the clips of the given library draw from, one for each frame that draws from one.
+    /// </summary>
+    public static IEnumerable<tk2dSpriteCollectionData> SheetsOf(tk2dSpriteAnimation? library) {
+        if (library == null || library.clips == null) {
+            yield break;
+        }
+
+        foreach (var clip in library.clips) {
+            foreach (var frame in clip?.frames ?? []) {
+                var sheet = frame?.spriteCollection;
+                if (sheet != null) {
+                    yield return sheet;
+                }
+            }
+        }
     }
 
     /// <summary>
