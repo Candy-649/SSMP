@@ -83,7 +83,7 @@ internal class Bind : DamageAnimationEffect {
                 PlayBeastBindStart(bindEffects);
                 break;
             case CrestType.Witch:
-                PlayWitchAnimationAntic(bindEffects);
+                PlayWitchAnimationAntic(bindEffects, flags);
                 break;
             case CrestType.Shaman:
                 var shouldContinue = PickShamanAnimation(playerObject, bindEffects, flags);
@@ -245,9 +245,11 @@ internal class Bind : DamageAnimationEffect {
     }
 
     /// <summary>
-    /// Plays the Witch Crest silk bind animation
+    /// Plays the Witch Crest silk bind animation. The game's "Witch" state plays the long silk for the multibinder
+    /// alone and the quick silk for the injector band alone ("Witch Multibind", "Witch Quickbind"); with neither or
+    /// both, the silk plays as it starts. A partner with either showed the plain silk (USER 11-13 "这些动画同步了吗").
     /// </summary>
-    private void PlayWitchAnimationAntic(GameObject bindEffects) {
+    private void PlayWitchAnimationAntic(GameObject bindEffects, Flags flags) {
         Logger.Debug("Playing Witch Crest bind antic");
         var silkAntic = CreateEffectIfNotExists(bindEffects, WitchBindObjectName);
         if (silkAntic == null) {
@@ -256,6 +258,11 @@ internal class Bind : DamageAnimationEffect {
 
         silkAntic.SetActive(false);
         silkAntic.SetActive(true);
+        if (flags.MultiBind != flags.QuickBind) {
+            silkAntic.GetComponent<Animator>().Play(
+                flags.MultiBind ? "Witch Bind Antic Silk Long" : "Witch Bind Antic Silk Quick"
+            );
+        }
     }
 
     /// <summary>
@@ -336,7 +343,8 @@ internal class Bind : DamageAnimationEffect {
             (byte) (ToolItemManager.IsToolEquipped("Dazzle Bind Upgraded") ? 1 : 0),
             (byte) (ToolItemManager.IsToolEquipped("Quickbind") ? 1 : 0),
             (byte) ((ToolItemManager.IsToolEquipped("Reserve Bind") && !ToolItemManager.GetToolByName("Reserve Bind").IsEmpty) ? 1 : 0),
-            (byte) (ShookOffMaggots() ? 1 : 0)
+            (byte) (ShookOffMaggots() ? 1 : 0),
+            (byte) (ToolItemManager.IsToolEquipped("Multibind") ? 1 : 0)
         ];
         return effectInfo;
     }
@@ -501,6 +509,11 @@ internal class Bind : DamageAnimationEffect {
         /// </summary>
         public readonly bool Maggoted;
 
+        /// <summary>
+        /// Whether the multibinder is on, which the silk and the tendrils of the Witch crest's bind play by.
+        /// </summary>
+        public readonly bool MultiBind;
+
         public Flags(byte[]? info) {
             if (info == null) return;
             BindBell = info[0] == 1;
@@ -509,6 +522,7 @@ internal class Bind : DamageAnimationEffect {
             QuickBind = info[3] == 1;
             ReserveBind = info[4] == 1;
             Maggoted = info[5] == 1;
+            MultiBind = info[6] == 1;
         }
     }
 }

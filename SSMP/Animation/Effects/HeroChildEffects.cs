@@ -427,8 +427,9 @@ internal class HeroChildEffects : AnimationEffect {
     /// Hides the own sprite of the character of another player while the game hides the hero's own sprite there - while
     /// the copy of the stand-in is on, which shows in its place, while a creature holds them or the room has them (see
     /// <see cref="HeroHidden"/>), while the room shows them by a figure of its own (see
-    /// <see cref="HeroRoomFigure"/>), and while the curse of a bind shows in its place (see
-    /// <see cref="Bind.ShowsCurse"/>) - and shows it otherwise.
+    /// <see cref="HeroRoomFigure"/>), while the curse of a bind shows in its place (see
+    /// <see cref="Bind.ShowsCurse"/>), and while the whip of a lash pulls them in (see <see cref="WitchLash"/>) - and
+    /// shows it otherwise.
     /// </summary>
     internal static void ShowBodyUnlessHidden(GameObject playerObject) {
         if (!playerObject.TryGetComponent<MeshRenderer>(out var body)) {
@@ -437,7 +438,8 @@ internal class HeroChildEffects : AnimationEffect {
 
         var standIn = GetCopy(playerObject, StandInPath, false);
         body.enabled = (standIn == null || !standIn.activeSelf) && !HeroHidden.IsHidden(playerObject) &&
-                       !HeroRoomFigure.IsShown(playerObject) && !Bind.ShowsCurse(playerObject);
+                       !HeroRoomFigure.IsShown(playerObject) && !Bind.ShowsCurse(playerObject) &&
+                       !WitchLash.Shows(playerObject);
     }
 
     /// <summary>

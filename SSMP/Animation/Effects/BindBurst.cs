@@ -53,7 +53,7 @@ internal class BindBurst : Bind {
                 break;
             case CrestType.Witch:
                 if (!flags.Maggoted) {
-                    PlayWitchEnd(bindEffects);
+                    PlayWitchEnd(bindEffects, flags);
                 } else {
                     PlayWitchMaggoted(bindEffects);
                 }
@@ -188,19 +188,23 @@ internal class BindBurst : Bind {
     }
 
     /// <summary>
-    /// Plays the Witch Crest tentancles animation.
+    /// Plays the Witch Crest tentancles animation, in the version that the game's "Witch Tentancles!" picks by the
+    /// multibinder and the injector band. A partner with either showed the plain one (USER 11-13 "这些动画同步了吗").
     /// Yes it's called Tentancles internally. Thanks TC.
     /// </summary>
-    private void PlayWitchEnd(GameObject bindEffects) {
+    private void PlayWitchEnd(GameObject bindEffects, Flags flags) {
         // Get bind effect
         var effectWasCreated = CreateEffectIfNotExists(bindEffects, WitchBindObjectName, out var witchBind);
         if (witchBind == null) {
             return;
         }
 
-        // Remove camera controls if object was created
+        // Remove camera controls if object was created, and what the tendrils do to the hero (WitchBindEffects): on the
+        // copy it healed this game's player for each creature it touched, flashed them, and stopped and shook this
+        // game, while it is the binding player's, whose own game does it
         if (effectWasCreated) {
             witchBind.DestroyComponent<CameraControlAnimationEvents>();
+            witchBind.DestroyComponent<WitchBindEffects>();
         }
 
         // Toggle damage depending on if PVP is on or not
@@ -212,6 +216,13 @@ internal class BindBurst : Bind {
 
         witchBind.SetActive(false);
         witchBind.SetActive(true);
+        witchBind.GetComponent<Animator>().Play(
+            flags.MultiBind
+                ? flags.QuickBind ? "Witch Bind Multi Quickened" : "Witch Bind Multi"
+                : flags.QuickBind ? "Witch Bind Quick" : "Witch Bind",
+            0,
+            0f
+        );
     }
 
     /// <summary>

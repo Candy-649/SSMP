@@ -835,5 +835,10 @@ internal enum AnimationClip {
     /// <summary>
     /// Grinding into what the fully charged down attack of the Architect crest landed on
     /// </summary>
-    DrillGrindCharged
+    DrillGrindCharged,
+
+    /// <summary>
+    /// The lash of the down attack of the Witch crest, said as the game lays its whip (see Effects.WitchLash)
+    /// </summary>
+    WitchLash
 }
