@@ -63,6 +63,25 @@ internal partial class CoopSave {
     private const float RescueInvulnerabilityTime = 2f;
 
     /// <summary>
+    /// How long after standing up the sand of the creatures that drag a player under is told that the player came
+    /// into it, in seconds (see <see cref="LetTheSandSeeThePlayer"/>): their bite takes 0.6 s to drag a player under,
+    /// which then still falls in the seconds that take no health.
+    /// </summary>
+    private const float SandEntryTime = 1f;
+
+    /// <summary>
+    /// The trigger through which a group of the creatures that live in the sand bites the player.
+    /// </summary>
+    private static readonly FieldInfo SandBiteTriggerField =
+        typeof(RangeAttackGroup).GetField("customDamageTrigger", InstanceFlags)!;
+
+    /// <summary>
+    /// What the physics calls on a trigger as something comes into it.
+    /// </summary>
+    private static readonly MethodInfo TriggerEnterMethod =
+        typeof(TriggerEnterEvent).GetMethod("OnTriggerEnter2D", InstanceFlags)!;
+
+    /// <summary>
     /// The layer of the body of the player.
     /// </summary>
     private const int PlayerLayer = (int) GlobalEnums.PhysLayers.PLAYER;
@@ -2130,6 +2149,11 @@ internal partial class CoopSave {
             hero.cState.hazardDeath = false;
             hero.cState.recoiling = false;
 
+            // The switch that keeps every hurt off the player while something holds them, which the game's own respawn
+            // turns off (HeroController.Respawn). A wound turns it on ('Roar and Wound States', Wound Start) and leaves
+            // it to the end of the wound, which a hurt in the middle of it skips
+            playerData.isInvincible = false;
+
             playerData.disablePause = false;
 
             hero.ResetMotion();
@@ -2173,6 +2197,7 @@ internal partial class CoopSave {
             hero.SetTakeNoDamage();
             _rescueHoldsBuildup = true;
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
+            MonoBehaviourUtil.Instance.StartCoroutine(LetTheSandSeeThePlayer(hero));
 
             if (!IsHeroTakenByGame(hero)) {
                 if (GiveBackHeroControl != null) {
@@ -2339,6 +2364,46 @@ internal partial class CoopSave {
 
         Logger.Info("The camera was still held where the player went down: letting it follow them again");
         camera.StopFreeze(true);
+    }
+
+    /// <summary>
+    /// The sand of the creatures that drag a player under bites only a player who comes into it (RangeAttackGroup, as
+    /// its damage trigger is entered), and the friend, pulled back up where it had dragged her under, stood in it
+    /// unbitten for as long as she liked (USER 11-13 "我朋友又出现了之前那个可以死了被救活之后可以直接站在沙地的虫子堆里的bug",
+    /// once already on 10-04). So for a moment after standing up, every such sand that the hit box of the player is in
+    /// is told of them coming in, the way the physics tells it, until it has them or they are out of it. Its own bite
+    /// drags them under, and the game's own way back puts them at its safe place without the health (USER 10-18,
+    /// 11-05).
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    private static IEnumerator LetTheSandSeeThePlayer(HeroController hero) {
+        var box = hero.heroBox.box;
+        var inside = new List<Collider2D>();
+        var told = new HashSet<RangeAttackGroup>();
+        var end = Time.time + SandEntryTime;
+        while (Time.time < end) {
+            yield return new WaitForFixedUpdate();
+
+            // Off while the game's own way back takes the player from the sand
+            if (!box.enabled) {
+                yield break;
+            }
+
+            box.Overlap(new ContactFilter2D().NoFilter(), inside);
+            foreach (var collider in inside) {
+                if (!collider.TryGetComponent<TriggerEnterEvent>(out var trigger) ||
+                    collider.GetComponentInParent<RangeAttackGroup>() is not { } sand ||
+                    SandBiteTriggerField.GetValue(sand) as TriggerEnterEvent != trigger) {
+                    continue;
+                }
+
+                if (told.Add(sand)) {
+                    Logger.Info($"Stood up in the sand of '{sand.name}': it is told the player came into it");
+                }
+
+                TriggerEnterMethod.Invoke(trigger, [box]);
+            }
+        }
     }
 
     /// <summary>
