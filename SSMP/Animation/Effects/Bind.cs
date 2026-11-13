@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Animation.Effects.Tools;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
@@ -444,6 +445,18 @@ internal class Bind : DamageAnimationEffect {
     protected GameObject? CreateEffectIfNotExists(GameObject bindEffects, string objectName) {
         CreateEffectIfNotExists(bindEffects, objectName, out var effect);
         return effect;
+    }
+
+    /// <summary>
+    /// Lets out the white flash of a heal ("White Flash R") at a place on the character of another player, as the game
+    /// lets it out on the hero: a copy that plays none of the shaking of the controller that the game's own plays as it
+    /// comes out, which is for the player who heals. It fades and goes by itself, as the game's own does.
+    /// </summary>
+    /// <param name="prefab">The flash, as the game lets it out.</param>
+    /// <param name="playerObject">The character.</param>
+    /// <param name="position">Where it comes out.</param>
+    protected static void SpawnHealFlash(GameObject prefab, GameObject playerObject, Vector3 position) {
+        HeroCopies.Make(ToolCopies.GetCopyPrefab(prefab), playerObject, position, Quaternion.identity).SetActive(true);
     }
 
     /// <summary>

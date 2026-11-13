@@ -63,7 +63,7 @@ internal class BindBurst : Bind {
                 break;
         }
 
-        PlayNormalEnd(bindEffects);
+        PlayNormalEnd(playerObject, bindEffects, flags);
     }
 
     /// <summary>
@@ -254,19 +254,33 @@ internal class BindBurst : Bind {
     }
 
     /// <summary>
-    /// Plays particles and shows a flash. Happens at the end of a normal bind.
+    /// Plays the end of a bind of any crest but the Witch crest's, as the game's "Heal" and "Bind Burst" play it on the
+    /// hero: the player flashes white and lets out the sparks of a heal, and unless the bind shook their maggots off
+    /// instead of healing them ("Skip Heal"), a white flash and the burst of the heal come out on them. The flashes
+    /// never showed on the character (USER 11-13, with the heals of the Witch crest's tendrils, see
+    /// <see cref="WitchHeal"/>).
     /// </summary>
-    private void PlayNormalEnd(GameObject bindEffects) {
+    private void PlayNormalEnd(GameObject playerObject, GameObject bindEffects, Flags flags) {
+        playerObject.GetComponent<SpriteFlash>().flashFocusHeal();
+
         // Play particle effect
         CreateEffectIfNotExists(bindEffects, HealParticleObjectName, out var healParticle);
         if (healParticle != null) {
             healParticle.GetComponent<ParticleSystem>().Play();
         }
-        
-        // Play silk animation
-        var healAnim = CreateEffectIfNotExists(bindEffects, HealAnimObjectName);
-        if (healAnim != null) {
-            healAnim.SetActive(true);
+
+        if (!flags.Maggoted) {
+            SpawnHealFlash(
+                GetOrFindBindFsm().GetFirstAction<SpawnObjectFromGlobalPool>("Heal").gameObject.Value,
+                playerObject,
+                playerObject.transform.position
+            );
+
+            // Play silk animation
+            var healAnim = CreateEffectIfNotExists(bindEffects, HealAnimObjectName);
+            if (healAnim != null) {
+                healAnim.SetActive(true);
+            }
         }
 
         // Disable mesh renderer because the game does that. Is this needed?

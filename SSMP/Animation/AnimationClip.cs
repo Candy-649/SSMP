@@ -840,5 +840,10 @@ internal enum AnimationClip {
     /// <summary>
     /// The lash of the down attack of the Witch crest, said as the game lays its whip (see Effects.WitchLash)
     /// </summary>
-    WitchLash
+    WitchLash,
+
+    /// <summary>
+    /// A heal, or the flash of a lash, of the tendrils of a bind of the Witch crest (see Effects.WitchHeal)
+    /// </summary>
+    WitchHeal
 }

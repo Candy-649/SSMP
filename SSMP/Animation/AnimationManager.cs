@@ -708,6 +708,7 @@ internal class AnimationManager {
     private static readonly Dictionary<AnimationClip, IAnimationEffect> SubAnimationEffects = new() {
         { AnimationClip.WitchTentacles, BindBurst.Instance },
         { AnimationClip.WitchLash, WitchLash.Instance },
+        { AnimationClip.WitchHeal, WitchHeal.Instance },
         { AnimationClip.ShamanCancel, new Bind { BindState = Bind.State.ShamanCancel } },
         { AnimationClip.BindInterrupt, BindInterrupt.Instance },
         { AnimationClip.Bench, new Bench() },
@@ -1496,6 +1497,7 @@ internal class AnimationManager {
         HeroHarpoon.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHarpoon, effectInfo));
         HeroHit.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHit, effectInfo));
         WitchLash.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.WitchLash, effectInfo));
+        WitchHeal.Watch(effectInfo => SendSubAnimation(AnimationClip.WitchHeal, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
 
         // Find bind FSM
