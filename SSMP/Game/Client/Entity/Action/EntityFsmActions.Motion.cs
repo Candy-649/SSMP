@@ -1046,15 +1046,7 @@ internal static partial class EntityFsmActions {
                 }
 
                 foreach (var stateAction in actions) {
-                    var letGo = stateAction switch {
-                        SetParent { gameObject: not null } setParent when IsNoParent(setParent.parent) =>
-                            fsm.Fsm.GetOwnerDefaultTarget(setParent.gameObject),
-                        SetTransformParent { gameObject: not null } setTransformParent
-                            when IsNoParent(setTransformParent.parent) =>
-                            fsm.Fsm.GetOwnerDefaultTarget(setTransformParent.gameObject),
-                        _ => null
-                    };
-
+                    var letGo = LetGoIntoTheRoomBy(fsm.Fsm, stateAction);
                     if (letGo != null && letGo != creature && !IsAPlayer(letGo) && !parts.Contains(letGo)) {
                         parts.Add(letGo);
                     }
@@ -1063,6 +1055,23 @@ internal static partial class EntityFsmActions {
         }
 
         return parts;
+    }
+
+    /// <summary>
+    /// What an action of an FSM lets go of into the room by giving it no parent, as the FSM's variables hold it now;
+    /// null for an action that does nothing of the kind.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="action">The action, one of the FSM's.</param>
+    internal static GameObject? LetGoIntoTheRoomBy(HutongGames.PlayMaker.Fsm fsm, FsmStateAction action) {
+        return action switch {
+            SetParent { gameObject: not null } setParent when IsNoParent(setParent.parent) =>
+                fsm.GetOwnerDefaultTarget(setParent.gameObject),
+            SetTransformParent { gameObject: not null } setTransformParent
+                when IsNoParent(setTransformParent.parent) =>
+                fsm.GetOwnerDefaultTarget(setTransformParent.gameObject),
+            _ => null
+        };
     }
 
     /// <summary>

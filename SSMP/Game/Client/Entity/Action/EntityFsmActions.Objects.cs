@@ -339,6 +339,7 @@ internal static partial class EntityFsmActions {
             data.Packet.Write(place.z);
         }
 
+        WriteWhereInTheRoom(data, child, action.parent.Value);
         return true;
     }
 
@@ -349,6 +350,7 @@ internal static partial class EntityFsmActions {
             hostPlace = new Vector3(data.Packet.ReadFloat(), data.Packet.ReadFloat(), data.Packet.ReadFloat());
         }
 
+        var inTheRoom = ReadWhereInTheRoom(data);
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
             return;
@@ -378,6 +380,10 @@ internal static partial class EntityFsmActions {
             if (action.resetLocalRotation.Value) {
                 moved.transform.localRotation = Quaternion.identity;
             }
+
+            if (inTheRoom is { } where) {
+                PutWhereInTheRoom(moved.transform, where);
+            }
         }
 
         if (parent == null) {
@@ -392,11 +398,13 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetTransformParent action) {
+        WriteWhereInTheRoom(data, action.Fsm.GetOwnerDefaultTarget(action.gameObject), action.parent.Value);
         return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetTransformParent action) {
+        var inTheRoom = ReadWhereInTheRoom(data);
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
             return;
@@ -407,12 +415,79 @@ internal static partial class EntityFsmActions {
         if (moved != null) {
             LetGoParts.NoteLetGo(moved, parent);
             moved.transform.SetParent(parent != null ? parent.transform : null, action.worldPositionStays.Value);
+            if (inTheRoom is { } where) {
+                PutWhereInTheRoom(moved.transform, where);
+            }
         }
 
         if (parent == null) {
             SayIfStillGivingOff(gameObject, action);
             LetOutIntoTheWorld(gameObject);
         }
+    }
+
+    /// <summary>
+    /// Writes, after the data of an action that puts a part under another parent, where the part is in the room if the
+    /// action let go of it into the room and is said again for a player who walked in after it ran (see
+    /// LetGoParts.SayAgain): their copy lets go of its own part then, wherever the copy is by then, and puts it where
+    /// the scene host's is. As the action runs, the copy's own part is let go of where the copy has it, the way the
+    /// scene host's creature had its own.
+    /// </summary>
+    /// <param name="data">The data that goes with the action.</param>
+    /// <param name="part">What the action put under another parent, or null.</param>
+    /// <param name="parent">What it put it under, or null for nothing.</param>
+    private static void WriteWhereInTheRoom(EntityNetworkData data, GameObject? part, GameObject? parent) {
+        var said = LetGoParts.SayingAgain && part != null && parent == null;
+        data.Packet.Write(said);
+        if (!said) {
+            return;
+        }
+
+        var transform = part!.transform;
+        var position = transform.position;
+        var rotation = transform.rotation;
+        var scale = transform.localScale;
+        data.Packet.Write(position.x);
+        data.Packet.Write(position.y);
+        data.Packet.Write(position.z);
+        data.Packet.Write(rotation.x);
+        data.Packet.Write(rotation.y);
+        data.Packet.Write(rotation.z);
+        data.Packet.Write(rotation.w);
+        data.Packet.Write(scale.x);
+        data.Packet.Write(scale.y);
+        data.Packet.Write(scale.z);
+    }
+
+    /// <summary>
+    /// Where a part is in the room: where it sits, how it is turned, and how big it is.
+    /// </summary>
+    private readonly record struct RoomPlace(Vector3 Position, Quaternion Rotation, Vector3 Scale);
+
+    /// <summary>
+    /// Reads what <see cref="WriteWhereInTheRoom"/> wrote: where the scene host's part is in the room, or null if that
+    /// was not said.
+    /// </summary>
+    private static RoomPlace? ReadWhereInTheRoom(EntityNetworkData? data) {
+        if (data == null || !data.Packet.ReadBool()) {
+            return null;
+        }
+
+        var packet = data.Packet;
+        return new RoomPlace(
+            new Vector3(packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat()),
+            new Quaternion(packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat()),
+            new Vector3(packet.ReadFloat(), packet.ReadFloat(), packet.ReadFloat())
+        );
+    }
+
+    /// <summary>
+    /// Puts a part that the copy just let go of into the room where the scene host's is (see
+    /// <see cref="ReadWhereInTheRoom"/>).
+    /// </summary>
+    private static void PutWhereInTheRoom(Transform part, RoomPlace where) {
+        part.SetPositionAndRotation(where.Position, where.Rotation);
+        part.localScale = where.Scale;
     }
 
     /// <summary>

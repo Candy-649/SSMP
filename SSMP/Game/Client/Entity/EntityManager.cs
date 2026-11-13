@@ -257,6 +257,7 @@ internal class EntityManager {
             entity.SendShownClip();
             if (someoneIsHere) {
                 entity.SendGrownPartsAgain();
+                entity.SendLetGoPartsAgain();
             }
         });
         _sceneRoleDetermined = true;
@@ -295,8 +296,9 @@ internal class EntityManager {
 
     /// <summary>
     /// Called when another player walks into the scene of this game. As its scene host, this game sends again how the
-    /// things that move by themselves are moving (<see cref="Entity.SendOwnMotionAgain"/>), and what the creatures grew
-    /// onto themselves (<see cref="Entity.SendGrownPartsAgain"/>).
+    /// things that move by themselves are moving (<see cref="Entity.SendOwnMotionAgain"/>), what the creatures grew
+    /// onto themselves (<see cref="Entity.SendGrownPartsAgain"/>), and what they let go of into the room
+    /// (<see cref="Entity.SendLetGoPartsAgain"/>).
     /// </summary>
     public void OnPlayerEnterScene() {
         if (!_sceneRoleDetermined) {
@@ -311,6 +313,7 @@ internal class EntityManager {
         foreach (var entity in _entities.Values) {
             entity.SendOwnMotionAgain();
             entity.SendGrownPartsAgain();
+            entity.SendLetGoPartsAgain();
         }
     }
 

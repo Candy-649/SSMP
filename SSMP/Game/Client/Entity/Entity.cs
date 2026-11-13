@@ -3335,6 +3335,7 @@ internal partial class Entity {
         // Not from a copy that is off already, like one that died: what it dropped as it went stays, as it does in the
         // room's own creature's game, which never let go of anything of its own in its place
         if (Object.Client.activeSelf) {
+            HandOverWhatTheCopyLetGo();
             EntityFsmActions.SwitchOffWhatTheCopyLetGo(Object.Client, Object.Host, _madeWithCopy);
         }
 

@@ -63,6 +63,32 @@ internal static class LetGoParts {
     private static bool _failed;
 
     /// <summary>
+    /// Whether the actions by which a creature let go of its parts into the room are said again just now, for a player
+    /// who walked in after it let go of them (Entity.SendLetGoPartsAgain): what goes with each says where its part is
+    /// in the room by then.
+    /// </summary>
+    public static bool SayingAgain { get; private set; }
+
+    /// <summary>
+    /// Has the actions that are written until it ends say where the parts they let go of are in the room (see
+    /// <see cref="SayingAgain"/>).
+    /// </summary>
+    /// <returns>What ends it.</returns>
+    public static IDisposable SayAgain() {
+        SayingAgain = true;
+        return new EndsSayingAgain();
+    }
+
+    /// <summary>
+    /// Ends <see cref="SayAgain"/>.
+    /// </summary>
+    private sealed class EndsSayingAgain : IDisposable {
+        public void Dispose() {
+            SayingAgain = false;
+        }
+    }
+
+    /// <summary>
     /// Registers the hooks on the actions that give an object another parent, to note a part as it is let go of.
     /// </summary>
     public static void RegisterHooks() {
