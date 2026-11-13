@@ -53,6 +53,13 @@ internal class CoopHitUpdate : IPacketData {
     public byte Index { get; set; }
 
     /// <summary>
+    /// For a hit on something that breaks, or on a part that passes its hits on to it: that the thing did not count
+    /// the hit in the game it comes from, as it came in the moment after another one. The replay doesn't count it
+    /// either (see CoopHits).
+    /// </summary>
+    public bool Uncounted { get; set; }
+
+    /// <summary>
     /// The hit itself, or the direction and magnitude of the knockback of an enemy, which only the games of the
     /// players read.
     /// </summary>
@@ -72,6 +79,7 @@ internal class CoopHitUpdate : IPacketData {
             Path = Path,
             Responder = Responder,
             Index = Index,
+            Uncounted = Uncounted,
             Hit = Hit
         };
     }
@@ -86,6 +94,7 @@ internal class CoopHitUpdate : IPacketData {
         packet.Write(Path);
         packet.Write(Responder);
         packet.Write(Index);
+        packet.Write(Uncounted);
         packet.Write((ushort) Hit.Length);
         packet.Write(Hit);
     }
@@ -100,6 +109,7 @@ internal class CoopHitUpdate : IPacketData {
         Path = packet.ReadString();
         Responder = packet.ReadString();
         Index = packet.ReadByte();
+        Uncounted = packet.ReadBool();
         Hit = packet.ReadBytes(packet.ReadUShort());
     }
 }

@@ -232,6 +232,12 @@ internal partial class CoopHits {
     private bool _isReplaying;
 
     /// <summary>
+    /// Whether the hit being replayed did not count on the thing that breaks in the partner's game, so it doesn't count
+    /// here either (see <see cref="CoopHitUpdate.Uncounted"/>).
+    /// </summary>
+    private bool _replayUncounted;
+
+    /// <summary>
     /// How long a replay of the partner's hit or touch waits at most for a thing that counts hits to wait for hits again,
     /// in seconds (see <see cref="HoldReplay"/>). The walls and the vines are back within a few tenths of a second after
     /// a hit; one that is not by then won't be, and the replay is made all the same.
@@ -821,6 +827,7 @@ internal partial class CoopHits {
         var response = default(IHitResponder.HitResponse);
         bool answered;
         _isReplaying = true;
+        _replayUncounted = update.Uncounted;
         try {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
             SetReplayedRanges(target, source.Ranges);
@@ -833,6 +840,7 @@ internal partial class CoopHits {
             return;
         } finally {
             _isReplaying = false;
+            _replayUncounted = false;
             ReplayedRanges.Clear();
 
             if (_movingHitSource != null) {
@@ -1033,8 +1041,14 @@ internal partial class CoopHits {
                 return;
             }
 
-            // When the last hit came, or when the moment after it ends, as long ago as can be for a replayed hit
-            c.EmitDelegate<Func<double, double>>(time => _isReplaying ? double.NegativeInfinity : time);
+            // When the last hit came, or when the moment after it ends, as long ago as can be for a replayed hit. A
+            // thing that breaks and didn't count the hit in the partner's game is still in that moment for it here
+            if (type == typeof(Breakable)) {
+                c.EmitDelegate<Func<double, double>>(time => !_isReplaying ? time
+                    : _replayUncounted ? double.PositiveInfinity : double.NegativeInfinity);
+            } else {
+                c.EmitDelegate<Func<double, double>>(time => _isReplaying ? double.NegativeInfinity : time);
+            }
         } catch (Exception e) {
             Logger.Error($"Could not change the moment after a hit in {type.Name}#{il.Method.Name}:\n{e}");
         }
@@ -1328,10 +1342,13 @@ internal partial class CoopHits {
             var hitName = update != null ? NextHitName() : null;
             var seeds = update != null ? new NamedSeeds() : null;
 
-            // Something that breaks, struck itself or through the part that passes its hits on to it, answers a hit in
-            // the moment after another one without counting it. The partner's game counts every hit it is sent (see
-            // LetReplaysPastHitPause), so only one that counted here goes, or one that moved a state machine on.
-            var breakable = responder as Breakable ?? (responder as HitResponse)?.passHitToBreakable;
+            // Something that breaks, struck itself or through a part that passes its hits on to it, answers a hit in
+            // the moment after another one without counting it. Only one that counted here goes, or one that moved a
+            // state machine on, which says that the thing didn't count it, and the partner's game doesn't either (see
+            // LetReplaysPastHitPause). A lantern that swings on every hit sent both hits of one slash, and the other
+            // game counted both and broke it a hit early (USER 11-13, "我打碎了一个，她那边没碎")
+            var breakable = responder as Breakable ?? (responder as HitResponse)?.passHitToBreakable ??
+                (responder as HitRigidbody2D)?.passHitToBreakable;
             var wasBroken = breakable != null && breakable.isBroken;
             var hitsLeft = breakable != null ? breakable.hitsLeft : 0;
             var answered = AnswersAttack(
@@ -1339,11 +1356,14 @@ internal partial class CoopHits {
             ) || response.response != IHitResponder.Response.None &&
                 (breakable == null || wasBroken || breakable.isBroken || breakable.hitsLeft != hitsLeft);
             if (update != null && answered && _netClient.IsConnected) {
+                update.Uncounted = breakable != null && breakable.isBroken == wasBroken &&
+                    breakable.hitsLeft == hitsLeft;
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
                 SendToRoomMembers(update);
                 NoteTraffic(
                     update.Scene, update.Path,
-                    $"sent a hit on {update.Responder} {DescribeStriker(damager)} ({DescribeMoves(component)})"
+                    $"sent a hit on {update.Responder} {DescribeStriker(damager)}" +
+                    $"{(update.Uncounted ? ", which its breakable did not count" : "")} ({DescribeMoves(component)})"
                 );
             } else if (update != null && !answered) {
                 NoteTraffic(
@@ -3955,6 +3975,7 @@ internal partial class CoopHits {
         float? waited = null
     ) {
         var did = string.IsNullOrEmpty(moves) ? "" : $" ({moves})";
+        var uncounted = update.Uncounted ? ", which its breakable did not count there, nor here" : "";
         var late = waited is { } time
             ? $" after waiting {time.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} s for " +
               "the object to take hits again"
@@ -3963,9 +3984,9 @@ internal partial class CoopHits {
             update.Scene,
             update.Path,
             answered
-                ? $"got a {what} through {update.Responder}, replayed{late}{did}"
-                : $"got a {what} through {update.Responder}, replayed{late}, but the object did not answer it " +
-                  $"here{did}"
+                ? $"got a {what} through {update.Responder}{uncounted}, replayed{late}{did}"
+                : $"got a {what} through {update.Responder}{uncounted}, replayed{late}, but the object did not " +
+                  $"answer it here{did}"
         );
     }
 
