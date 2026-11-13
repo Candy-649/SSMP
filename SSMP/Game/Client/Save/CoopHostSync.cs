@@ -281,18 +281,6 @@ internal static class CoopHostSync {
     public const int RevisionBreak = 28104;
 
     /// <summary>
-    /// The crest of the curse, which the hero wears from the curse until it is cured, and the crest the cure gives.
-    /// </summary>
-    private const string CursedCrest = "Cursed";
-
-    private const string CuredCrest = "Witch";
-
-    /// <summary>
-    /// The crest that every save starts with.
-    /// </summary>
-    private const string FirstCrest = "Hunter";
-
-    /// <summary>
     /// The kind of the place where a save wakes that is a bench (PlayerData.respawnType): 0 is a marker of a room,
     /// which is where the game has a save wake at the start of the last act (GameManager.StartAct3).
     /// </summary>
@@ -402,7 +390,6 @@ internal static class CoopHostSync {
             UseUpStoryItems();
             MergeSpecials();
             SetCounts();
-            FixCrest();
             NoteArrivals();
 
             _merged["version"] = version;
@@ -1169,49 +1156,6 @@ internal static class CoopHostSync {
 
                     mergedSlots.Add(copy);
                 }
-            }
-        }
-
-        /// <summary>
-        /// Puts the hero on the crest that the story has them on: the crest of the curse while the host's world has them
-        /// cursed, and off it once it hasn't, onto the crest the cure gives if it was cured.
-        /// </summary>
-        private void FixCrest() {
-            var cursed = Bool(_merged, "gainedCurse") && !Bool(_merged, "BelltownDoctorCuredCurse");
-            var crest = (string?) _merged["CurrentCrestID"] ?? "";
-            if (cursed && crest != CursedCrest) {
-                if (ByName(NamedList(_host, "ToolEquips")).TryGetValue(CursedCrest, out var hostCrest) &&
-                    hostCrest["Data"] is JObject hostCrestData) {
-                    // The host's crest with the tools that the joining player has, and none in place of the others
-                    var data = (JObject) hostCrestData.DeepClone();
-                    foreach (var tool in data.Descendants().OfType<JProperty>().Where(p => p.Name == "EquippedTool")
-                                 .ToList()) {
-                        if ((string?) tool.Value is { Length: > 0 } toolName &&
-                            !IsUnlocked(_merged, "Tools", toolName)) {
-                            tool.Value = "";
-                        }
-                    }
-
-                    var list = NamedList(_merged, "ToolEquips", true)!;
-                    if (ByName(list).TryGetValue(CursedCrest, out var mine)) {
-                        mine["Data"] = data;
-                    } else {
-                        list.Add(new JObject { ["Name"] = CursedCrest, ["Data"] = data });
-                    }
-                }
-
-                _merged["PreviousCrestID"] = crest;
-                _merged["CurrentCrestID"] = CursedCrest;
-                _report.Lines.Add($"crest {crest} -> {CursedCrest}");
-            } else if (!cursed && crest == CursedCrest) {
-                var previous = (string?) _merged["PreviousCrestID"] ?? "";
-                var next = Bool(_merged, "BelltownDoctorCuredCurse") && IsUnlocked(_merged, "ToolEquips", CuredCrest)
-                    ? CuredCrest
-                    : previous.Length > 0 && previous != CursedCrest && IsUnlocked(_merged, "ToolEquips", previous)
-                        ? previous
-                        : FirstCrest;
-                _merged["CurrentCrestID"] = next;
-                _report.Lines.Add($"crest {CursedCrest} -> {next}");
             }
         }
 
