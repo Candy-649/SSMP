@@ -366,6 +366,9 @@ internal class MapManager : IMapManager {
         // they stopped, the way the game tells it when they stop with the map open
         EventRegister.SendEvent(MapWalkEndEvent, null);
 
+        // Which way the map is shown decides where the heads of partners count as outside it
+        MapHeadPointer.Listen(gameMap);
+
         // Otherwise, we have opened the map
         _displayingIcons = true;
 
