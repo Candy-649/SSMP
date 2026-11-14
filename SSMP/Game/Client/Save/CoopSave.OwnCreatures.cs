@@ -24,7 +24,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// went to, how many times its actions had rolled before, and where it was. A creature of theirs that took the same
 /// step, a moment before or after, but stood somewhere else as it did, is moved by as much as it was off. One that did
 /// not take it is put where the scene host's was and takes it, from the same rolls. A member who comes into the room
-/// is told where each one is and what it does, or that it is dead, which theirs then is too.
+/// is told where each one is and what it does, or that it is dead, which theirs then is too. One that dies in any
+/// game dies in the others as well, whatever killed it there: a blow that killed it in one game took less in another
+/// that took the blows of both players in another order (see EnemyHealthCoop).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -45,20 +47,37 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, List<OwnStep>> _ownSteps = new();
 
     /// <summary>
-    /// The hook that sees the creatures that every game runs by itself go from one state to another.
+    /// The hooks that see the creatures that every game runs by itself go from one state to another and die.
     /// </summary>
     private readonly List<Hook?> _ownCreatureHooks = [];
 
     /// <summary>
-    /// Watches the creatures that every game runs by itself go from one state to another.
+    /// Whether a creature that every game runs by itself dies as another game told, which is not told back.
+    /// </summary>
+    private bool _dyingAsTold;
+
+    /// <summary>
+    /// Watches the creatures that every game runs by itself go from one state to another and die.
     /// </summary>
     private void RegisterOwnCreatureHooks() {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         _ownCreatureHooks.Add(CreateHook(
-            typeof(Fsm).GetMethod(
-                "SwitchState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
-                [typeof(FsmState)], null
-            ),
+            typeof(Fsm).GetMethod("SwitchState", flags, null, [typeof(FsmState)], null),
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnOwnCreatureStep)
+        ));
+
+        // The largest of the ways to die, which the others call
+        _ownCreatureHooks.Add(CreateHook(
+            typeof(HealthManager).GetMethod(
+                nameof(HealthManager.Die), flags, null,
+                [
+                    typeof(float?), typeof(AttackTypes), typeof(NailElements), typeof(GameObject), typeof(bool),
+                    typeof(float), typeof(bool), typeof(bool)
+                ],
+                null
+            ),
+            new Action<Action<HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool>,
+                HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool>(OnOwnCreatureDie)
         ));
     }
 
@@ -68,9 +87,10 @@ internal partial class CoopSave {
     /// state starts, so that a step that the state takes at once is told after it.
     /// </summary>
     private void OnOwnCreatureStep(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
-        if (OwnCreatures.Count == 0 || self.FsmComponent is not { } machine || machine == null ||
+        // A switch to no state, which the game makes nothing of, is passed on as it is
+        if (OwnCreatures.Count == 0 || toState == null || self.FsmComponent is not { } machine || machine == null ||
             !OwnCreatures.Has(machine.gameObject)) {
-            orig(self, toState);
+            orig(self, toState!);
             return;
         }
 
@@ -99,6 +119,43 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Hook for the death of a creature, which tells the members in the room that a creature that every game runs by
+    /// itself died here, unless it died as another game told.
+    /// </summary>
+    private void OnOwnCreatureDie(
+        Action<HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool> orig,
+        HealthManager self,
+        float? attackDirection,
+        AttackTypes attackType,
+        NailElements nailElements,
+        GameObject source,
+        bool ignoreEvasion,
+        float corpseFlingMultiplier,
+        bool overrideSpecialDeath,
+        bool disallowDropFlying
+    ) {
+        var tells = !_dyingAsTold && !self.isDead && OwnCreatures.Has(self.gameObject);
+        orig(
+            self, attackDirection, attackType, nailElements, source, ignoreEvasion, corpseFlingMultiplier,
+            overrideSpecialDeath, disallowDropFlying
+        );
+        if (!tells || !self.isDead) {
+            return;
+        }
+
+        var creature = self.gameObject;
+        var place = OwnCreatures.PlaceOf(creature);
+        Logger.Info($"[Own creatures] '{place}' died here, as the members in the room are told");
+        SendToRoomMembers(new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.OwnCreature,
+            Scene = creature.scene.name,
+            ObjectPath = place,
+            PartCount = 2,
+            Values = attackDirection is { } direction ? [direction] : []
+        });
+    }
+
+    /// <summary>
     /// The word of a step that a creature that every game runs by itself took here.
     /// </summary>
     private static CoopSaveUpdate OwnCreatureUpdate(PlayMakerFSM machine, OwnStep step) {
@@ -120,7 +177,7 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="player">The member.</param>
     private void SendOwnCreaturesTo(ClientPlayerData player) {
-        if (OwnCreatures.Count == 0 || IsSceneHost?.Invoke() != true) {
+        if (OwnCreatures.Count == 0 || !_checkedMembers.Contains(player.Id) || IsSceneHost?.Invoke() != true) {
             return;
         }
 
@@ -135,6 +192,11 @@ internal partial class CoopSave {
                     ObjectPath = pair.Value.Place,
                     PartCount = 1
                 });
+                continue;
+            }
+
+            // One that has not come out of where the room keeps it, as the save has it, does nothing yet
+            if (!creature.activeInHierarchy) {
                 continue;
             }
 
@@ -169,17 +231,36 @@ internal partial class CoopSave {
             return;
         }
 
-        if (!creature.activeSelf) {
+        var health = creature.GetComponent<HealthManager>();
+        if (!creature.activeInHierarchy || health.isDead) {
             Logger.Info(
-                $"[Own creatures] {player.Username}'s game told of '{place}', which is dead here" +
-                (update.PartCount == 1 ? " too" : $" and went to '{update.StateName}' there")
+                $"[Own creatures] {player.Username}'s game told of '{place}', which is dead or not out here" +
+                (update.PartCount > 0 ? ", and dead there too" : $", and went to '{update.StateName}' there")
             );
             return;
         }
 
+        // Dead there before the member came in: taken away, as the room has it there
         if (update.PartCount == 1) {
             Logger.Info($"[Own creatures] '{place}' is dead in {player.Username}'s game and is taken away here");
             creature.SetActive(false);
+            return;
+        }
+
+        // Died there just now: it dies here too, as the game has a creature die, though the blow that killed it there
+        // did not here, or has not come yet
+        if (update.PartCount == 2) {
+            Logger.Info($"[Own creatures] '{place}' died in {player.Username}'s game and dies here too");
+            _dyingAsTold = true;
+            try {
+                health.Die(
+                    update.Values.Count > 0 ? update.Values[0] : null, AttackTypes.Generic, NailElements.None, null,
+                    true, 1f, false, false
+                );
+            } finally {
+                _dyingAsTold = false;
+            }
+
             return;
         }
 

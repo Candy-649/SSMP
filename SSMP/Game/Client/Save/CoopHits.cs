@@ -1333,8 +1333,10 @@ internal partial class CoopHits {
 
             // The local player's own hit: one that the game counts as the hero's, or one of the needle that a throw
             // left in the room, which the game doesn't (USER 10-26: a lamp that the needle struck broke in the game of
-            // the player who threw it only)
-            var own = hit.IsHeroDamage || HeroHarpoon.IsLocalNeedlePart(damager.transform);
+            // the player who threw it only). A creature that every game runs by itself also counts what the local
+            // player threw or set with a tool, as any creature does (see OwnCreatures).
+            var own = hit.IsHeroDamage || HeroHarpoon.IsLocalNeedlePart(damager.transform) ||
+                      OwnCreatures.Has(component.gameObject) && LocalToolComponent.IsLocalTool(hit.Source);
 
             // A tink that tells a state machine of the room of being struck is no longer the hitter's alone: the bell
             // that it knocks away fell on in the other game
