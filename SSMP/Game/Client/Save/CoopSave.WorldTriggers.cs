@@ -485,15 +485,18 @@ internal partial class CoopSave {
     /// and stay that way until the room loads again (<see cref="WorldTriggerKind.Lasting"/>). Otherwise what goes off
     /// is only sent at the moment it does, which a partner who came in later never hears: the character that the room
     /// had them rescue stayed cowering in their game, and the conversation that follows was lost to them. Also that the
-    /// local hero is maggoted (see CoopSave.Maggots), and how the things here that break and count as creatures stand
-    /// (see CoopSave.BreakingCreatures).
+    /// local hero is maggoted (see CoopSave.Maggots), the looks of the deliveries it carries (see
+    /// CoopSave.DeliveryLooks), and how the things here that break and count as creatures stand (see
+    /// CoopSave.BreakingCreatures).
     /// </summary>
     /// <param name="player">The player who walked in.</param>
     /// <param name="cameIn">Whether they just came in, which their game loaded the room for, rather than were here
     /// already as this game came in or without this game having heard of them.</param>
     internal void OnPlayerEnterScene(ClientPlayerData player, bool cameIn) {
-        // Their game makes the character of the local player anew, without the maggots of the local hero
+        // Their game makes the character of the local player anew, without the maggots of the local hero or the looks
+        // of the deliveries it carries
         SendMaggotsTo(player);
+        SendDeliveryLooksTo(player);
 
         // The heat lamps are whole in their game, which just loaded the room (see CoopSave.HeatLamps)
         if (cameIn) {

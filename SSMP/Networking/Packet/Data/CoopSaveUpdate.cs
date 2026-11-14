@@ -892,5 +892,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.PartCount"/> is 1 if it is broken, and <see cref="CoopSaveUpdate.Amounts"/> holds the
     /// hits it has left.
     /// </summary>
-    BreakingCreature
+    BreakingCreature,
+
+    /// <summary>
+    /// The deliveries whose looks the hero of the sender shows - the gravy dripping off the meat of a courier's
+    /// delivery - by the names of the items in <see cref="CoopSaveUpdate.Names"/>, none if it shows none (see
+    /// CoopSave.DeliveryLooks). The character of the sender shows the same.
+    /// </summary>
+    DeliveryLooks
 }
