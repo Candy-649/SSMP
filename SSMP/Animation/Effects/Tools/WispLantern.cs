@@ -16,8 +16,8 @@ internal static class WispLantern {
     private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     /// <summary>
-    /// The haze around the hero and the wisps that drift about them, of the lantern (HeroWispLantern), which it switches
-    /// on and off together.
+    /// The haze around the hero and the wisps that drift about them, of the lantern (HeroWispLantern), which it
+    /// switches on and off together.
     /// </summary>
     private static readonly FieldInfo? HazeField = typeof(HeroWispLantern).GetField("haze", Flags);
 
@@ -28,6 +28,13 @@ internal static class WispLantern {
     /// The characters of the players whose glow shows here, by their instance ID.
     /// </summary>
     private static readonly HashSet<int> Glowing = [];
+
+    /// <summary>
+    /// Where the haze and the drifting wisps are under the hero, and whether the drifting wisps are switched on there,
+    /// which the lantern only plays and stops: read from the local hero's lantern the first time, the same on every
+    /// hero, so that a glow is taken away from a character also when there is no local hero.
+    /// </summary>
+    private static (string Haze, string Drift, bool DriftOn)? _parts;
 
     /// <summary>
     /// Writes the message that the glow of the local hero's lantern went on or off.
@@ -64,24 +71,23 @@ internal static class WispLantern {
     /// under the character.
     /// </summary>
     private static void Show(GameObject playerObject, bool on) {
-        var hero = HeroController.SilentInstance;
-        var lantern = hero != null ? hero.GetComponentInChildren<HeroWispLantern>(true) : null;
-        if (hero == null || lantern == null || HazeField?.GetValue(lantern) is not GameObject haze ||
-            DriftField?.GetValue(lantern) is not ParticleSystem drift) {
-            Logger.Warn($"[Tools] There is no lantern on the local hero to show the glow of '{playerObject.name}' with");
+        if (PartsOfTheGlow() is not { } parts) {
+            Logger.Warn(
+                $"[Tools] There is no lantern on the local hero to show the glow of '{playerObject.name}' with"
+            );
             return;
         }
 
-        var hazeCopy = HeroChildEffects.GetCopy(playerObject, PathOf(haze.transform, hero.transform), on);
+        var hazeCopy = HeroChildEffects.GetCopy(playerObject, parts.Haze, on);
         if (hazeCopy != null) {
             hazeCopy.SetActive(on);
         }
 
-        // A copy is made switched off, and is on as the local hero's is, which the lantern only plays and stops
-        var driftCopy = HeroChildEffects.GetCopy(playerObject, PathOf(drift.transform, hero.transform), on);
+        // A copy is made switched off, and is on as the local hero's is
+        var driftCopy = HeroChildEffects.GetCopy(playerObject, parts.Drift, on);
         if (driftCopy != null && driftCopy.TryGetComponent<ParticleSystem>(out var particles)) {
             if (on) {
-                driftCopy.SetActive(drift.gameObject.activeSelf);
+                driftCopy.SetActive(parts.DriftOn);
                 particles.Play(true);
             } else {
                 particles.Stop(true, ParticleSystemStopBehavior.StopEmitting);
@@ -95,6 +101,27 @@ internal static class WispLantern {
         }
 
         Logger.Info($"[Tools] The wisp lantern glow of '{playerObject.name}' goes {(on ? "on" : "off")}");
+    }
+
+    /// <summary>
+    /// Where the haze and the drifting wisps are under the hero (see <see cref="_parts"/>), or null while that was
+    /// never read and there is no local hero with a lantern to read it from.
+    /// </summary>
+    private static (string Haze, string Drift, bool DriftOn)? PartsOfTheGlow() {
+        if (_parts != null) {
+            return _parts;
+        }
+
+        var hero = HeroController.SilentInstance;
+        var lantern = hero != null ? hero.GetComponentInChildren<HeroWispLantern>(true) : null;
+        if (hero == null || lantern == null || HazeField?.GetValue(lantern) is not GameObject haze ||
+            DriftField?.GetValue(lantern) is not ParticleSystem drift) {
+            return null;
+        }
+
+        _parts = (PathOf(haze.transform, hero.transform), PathOf(drift.transform, hero.transform),
+            drift.gameObject.activeSelf);
+        return _parts;
     }
 
     /// <summary>
