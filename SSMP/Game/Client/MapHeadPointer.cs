@@ -1,3 +1,4 @@
+using System.Reflection;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -9,9 +10,12 @@ namespace SSMP.Game.Client;
 /// place nearest to where it is, with the game's own arrow pointing the rest of the way. The quick map gets it too,
 /// where the game points at nothing: it shows only the area the local player is in, and a partner in another area was
 /// nowhere on it (USER 10-28: "我们都带罗盘看不到对方的头像了，在地图上"; then "茧和任务图标不在视野里的时候会有一个指向它们的
-/// 图标，用那个"). What the quick map shows is the whole screen: the edge the game keeps its markers within is the frame
-/// of the inventory, a good way in from the edges of the screen, and a head right beside the local player's own, near
-/// the edge of the screen, got the ring (USER 11-13 "明明她就在我旁边，为什么会有不在画面中的情况下才有的大圆圈").
+/// 图标，用那个"). The quick map shows all that the map's own camera sees, as much of it as the screen holds: the edge the
+/// game keeps its markers within is the frame of the inventory, a good way in from that, and a head right beside the
+/// local player's own got the ring (USER 11-13 "明明她就在我旁边，为什么会有不在画面中的情况下才有的大圆圈"). The camera of
+/// the screen does not see the map at all, which lies far from what it sees, so a head judged by it was off the screen
+/// wherever it was and waited at the left edge (USER 11-14 "我俩在同一个地方显示她在很远的地方", "大地图上头像是好的，小地图上
+/// 头像是坏的").
 /// </summary>
 internal sealed class MapHeadPointer : MonoBehaviour {
     /// <summary>
@@ -24,6 +28,25 @@ internal sealed class MapHeadPointer : MonoBehaviour {
     /// The map that is listened to for which way it is shown.
     /// </summary>
     private static GameMap? _listenedTo;
+
+    /// <summary>
+    /// The map's own camera, which draws the map into a picture on the screen, and that picture, which is what the
+    /// quick map shows (CameraRenderToMesh).
+    /// </summary>
+    private static Camera? _mapCamera;
+
+    /// <inheritdoc cref="_mapCamera" />
+    private static Renderer? _picture;
+
+    /// <summary>
+    /// The camera and the picture of the map's own camera (CameraRenderToMesh's targetCamera and meshRenderer).
+    /// </summary>
+    private static readonly FieldInfo CameraField =
+        typeof(CameraRenderToMesh).GetField("targetCamera", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    /// <inheritdoc cref="CameraField" />
+    private static readonly FieldInfo PictureField =
+        typeof(CameraRenderToMesh).GetField("meshRenderer", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
     /// <summary>
     /// The map the head is on.
@@ -74,6 +97,12 @@ internal sealed class MapHeadPointer : MonoBehaviour {
 
         map.UpdateQuickMapDisplay += (quickMap, _) => _quickMap = quickMap;
         _listenedTo = map;
+
+        // The map's own camera is beside the map, under the same parent
+        var drawer = map.transform.parent.GetComponentInChildren<CameraRenderToMesh>(true);
+        _mapCamera = (Camera) CameraField.GetValue(drawer);
+        _picture = (Renderer) PictureField.GetValue(drawer);
+        Logger.Info($"[Map] The quick map is what '{_mapCamera.name}' draws into '{_picture.name}'");
     }
 
     /// <summary>
@@ -150,7 +179,7 @@ internal sealed class MapHeadPointer : MonoBehaviour {
 
         var middle = parent.TransformPoint(_place + _middle);
         var outside = _quickMap
-            ? IsOffScreen(middle, _arrowReach * Mathf.Abs(parent.lossyScale.x), out var nearest)
+            ? IsOffQuickMap(middle, _arrowReach * Mathf.Abs(parent.lossyScale.x), out var nearest)
             : IsOutsideFrame(_map.ViewportEdge, middle, out nearest);
         var shownAt = outside ? (Vector2) parent.InverseTransformPoint(nearest) - _middle : _place;
 
@@ -195,27 +224,45 @@ internal sealed class MapHeadPointer : MonoBehaviour {
     }
 
     /// <summary>
-    /// Whether the middle of the head is off the screen, which the quick map fills, and the nearest place where it is
-    /// on the screen with the ring around it whole.
+    /// Whether the middle of the head is off the part of the quick map that is on the screen, and the nearest place on
+    /// that part with the ring around it whole. The map's own camera draws the map into a picture on the screen at
+    /// least as wide as 16:9 (CameraRenderToMesh), so a narrower screen shows the picture without its sides.
     /// </summary>
-    /// <param name="middle">The middle of the head, in the world.</param>
-    /// <param name="reach">How far the ring and its arrow reach out from the middle, in the world.</param>
-    /// <param name="nearest">The nearest such place, in the world.</param>
-    private static bool IsOffScreen(Vector3 middle, float reach, out Vector3 nearest) {
+    /// <param name="middle">The middle of the head, in the world of the map.</param>
+    /// <param name="reach">How far the ring and its arrow reach out from the middle, in the world of the map.</param>
+    /// <param name="nearest">The nearest such place, in the world of the map.</param>
+    private static bool IsOffQuickMap(Vector3 middle, float reach, out Vector3 nearest) {
         nearest = middle;
-        var camera = GameCameras.instance.hudCamera;
-        var view = camera.WorldToViewportPoint(middle);
-        if (view.x is >= 0f and <= 1f && view.y is >= 0f and <= 1f) {
+        var mapCamera = _mapCamera!;
+        var picture = _picture!.bounds;
+        var screen = GameCameras.instance.hudCamera;
+
+        // The part of the picture on the screen, from the picture's bottom left corner (0, 0) to its top right (1, 1)
+        var depth = screen.WorldToViewportPoint(picture.center).z;
+        var screenLow = screen.ViewportToWorldPoint(new Vector3(0f, 0f, depth));
+        var screenHigh = screen.ViewportToWorldPoint(new Vector3(1f, 1f, depth));
+        var low = new Vector2(
+            Mathf.Max(0f, (screenLow.x - picture.min.x) / picture.size.x),
+            Mathf.Max(0f, (screenLow.y - picture.min.y) / picture.size.y)
+        );
+        var high = new Vector2(
+            Mathf.Min(1f, (screenHigh.x - picture.min.x) / picture.size.x),
+            Mathf.Min(1f, (screenHigh.y - picture.min.y) / picture.size.y)
+        );
+
+        var view = mapCamera.WorldToViewportPoint(middle);
+        if (view.x >= low.x && view.x <= high.x && view.y >= low.y && view.y <= high.y) {
             return false;
         }
 
-        var low = camera.ViewportToWorldPoint(new Vector3(0f, 0f, view.z));
-        var high = camera.ViewportToWorldPoint(new Vector3(1f, 1f, view.z));
-        nearest = new Vector3(
-            Mathf.Clamp(middle.x, low.x + reach, high.x - reach),
-            Mathf.Clamp(middle.y, low.y + reach, high.y - reach),
-            middle.z
-        );
+        // How far the ring reaches, as a part of the width and of the height of what the map's camera sees
+        var seen = mapCamera.orthographicSize * 2f;
+        var margin = new Vector2(reach / (seen * mapCamera.aspect), reach / seen);
+        nearest = mapCamera.ViewportToWorldPoint(new Vector3(
+            Mathf.Clamp(view.x, low.x + margin.x, high.x - margin.x),
+            Mathf.Clamp(view.y, low.y + margin.y, high.y - margin.y),
+            view.z
+        ));
         return true;
     }
 }
