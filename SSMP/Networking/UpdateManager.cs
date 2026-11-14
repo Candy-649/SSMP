@@ -743,10 +743,15 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         _heldUpSince = 0;
 
         _cancellationTokenSource = new CancellationTokenSource();
+        // Above the game's own threads, as the threads that receive are: a send to Steam's relay holds Steam's lock
+        // while it runs, and on a busy machine the game's threads kept this one from finishing it for 5 to 62 ms. Past
+        // about 50 ms Steam's own thread, kept waiting for the lock, writes down the state of the whole game, which
+        // stops it: nothing arrived for 4 s and the picture stood still for 2 s of them (USER 11-14 "这个断连还是会让
+        // 我卡住一下，整个画面卡住"). The threads that receive, above the game's, were never seen holding the lock long.
         _sendThread = new Thread(SendLoop) {
             IsBackground = true,
             Name = "SSMP Send Loop",
-            Priority = ThreadPriority.Normal
+            Priority = ThreadPriority.AboveNormal
         };
         _sendThread.Start();
         _isUpdating = true;
