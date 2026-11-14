@@ -251,6 +251,7 @@ internal partial class CoopSave {
         // did not here, or has not come yet
         if (update.PartCount == 2) {
             Logger.Info($"[Own creatures] '{place}' died in {player.Username}'s game and dies here too");
+            OwnCreatures.AwardJournalKill(health);
             _dyingAsTold = true;
             try {
                 health.Die(

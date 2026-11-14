@@ -842,6 +842,12 @@ internal partial class CoopHits {
         hit.Source = sourceObject;
         PutThrownWhereItWas(target, update);
 
+        // A blow of the partner on a creature that every game runs by itself counts for this player's journal too, as a
+        // blow of the player does (see OwnCreatures.AwardJournalKill)
+        if (component is HealthManager ownHealth && OwnCreatures.Has(ownHealth.gameObject)) {
+            OwnCreatures.AwardJournalKill(ownHealth);
+        }
+
         var response = default(IHitResponder.HitResponse);
         bool answered;
         _isReplaying = true;

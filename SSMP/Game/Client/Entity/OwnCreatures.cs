@@ -82,6 +82,18 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// Has the death of a creature that every game runs by itself go into the journal of the local player, as the game
+    /// has it when a blow of the player's struck it (HealthManager.TakeDamage, by the AwardJournalKill of the
+    /// DamageEnemies that struck). A blow of another player is replayed here by a stand-in that is no attack of the
+    /// player's, and a death that another game told comes with no blow at all: the creature went into the journal of
+    /// the player who killed it only, where a copy of it had gone into both (USER 11-14 "我打的只算我的，她打的只算她的，
+    /// 感觉还是需要同步，不然的话沿用到一些只能打一次的怪上会有问题").
+    /// </summary>
+    public static void AwardJournalKill(HealthManager health) {
+        health.WillAwardJournalKill = true;
+    }
+
+    /// <summary>
     /// Forgets the creatures, as the room is left.
     /// </summary>
     public static void Clear() {
