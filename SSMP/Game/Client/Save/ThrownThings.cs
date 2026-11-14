@@ -990,8 +990,14 @@ internal sealed class ThrownMark : MonoBehaviour {
     public bool Chasing { get; set; }
 
     /// <summary>
-    /// The state that the thing last waited to go into for the scene host's word (CoopHits.Chasers), which the log
-    /// says once, or null.
+    /// Whether the scene host's game told this game of the thing's chase (CoopHits.Chasers): its steps then wait here
+    /// for the host's word.
+    /// </summary>
+    public bool ToldChase { get; set; }
+
+    /// <summary>
+    /// The state that the thing waits here to go into for the scene host's word (CoopHits.Chasers), or null: it stays
+    /// in the state it is in until the word comes, or until this game runs the room.
     /// </summary>
     public string? HeldStep { get; set; }
 
@@ -1029,6 +1035,7 @@ internal sealed class ThrownMark : MonoBehaviour {
         Target = target;
         Table = table;
         Chasing = false;
+        ToldChase = false;
         HeldStep = null;
         _thrown.Clear();
         _rolls.Clear();
@@ -1042,6 +1049,7 @@ internal sealed class ThrownMark : MonoBehaviour {
         Target = null;
         Table = null;
         Chasing = false;
+        ToldChase = false;
         HeldStep = null;
     }
 

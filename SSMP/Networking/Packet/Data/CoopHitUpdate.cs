@@ -249,8 +249,9 @@ internal enum CoopHitKind : byte {
     /// A thing put out to go after a player by itself, found by its name in <see cref="CoopHitUpdate.Path"/> with where
     /// it was (see ThrownThings.PathOf): whom it goes after in the scene host's game, as a throw says it
     /// (ThrownThings.CodeOf) in <see cref="CoopHitUpdate.Hit"/>, and the state it went into there by the host's own
-    /// say - its rush, or, circling, its notice of a player - in <see cref="CoopHitUpdate.Responder"/>, or "" for whom
-    /// it goes after alone. The other games take their own of it there (CoopHits.Chasers).
+    /// say - circling, its notice of a player; its rush; its dying away; its end - in
+    /// <see cref="CoopHitUpdate.Responder"/>, or "" for whom it goes after alone. The other games take their own of it
+    /// there (CoopHits.Chasers).
     /// </summary>
     ThrownChase
 }
