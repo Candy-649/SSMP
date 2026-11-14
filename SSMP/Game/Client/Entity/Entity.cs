@@ -835,7 +835,7 @@ internal partial class Entity {
 
         HandleComponents(types);
 
-        HandleEnemyDeathEffects();
+        GiveFurmItsCorpse(Object.Client, _fsms.Client);
 
         foreach (var component in _components.Values) {
             if (component == null) {
@@ -1328,12 +1328,6 @@ internal partial class Entity {
                 }
             );
         }
-    }
-
-    /// <summary>
-    /// Handle specifics for a set of enemies that rely on EnemyDeathEffects for additional enemies.
-    /// </summary>
-    private void HandleEnemyDeathEffects() {
     }
 
     /// <summary>
@@ -2980,24 +2974,32 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Gives a bell creature that burrows, as this game takes it over, the corpse and the animations that its state
-    /// deciding whether it is a silver one sets as properties ("Normal" or "Silver" of "Control"). The room has neither
-    /// on it: the creature gets them from that state, which it goes through before anything can kill it. The room's own
-    /// creature never went through it here while the other game ran the room, so once taken over it had no corpse, the
-    /// first thing it does as it dies threw, and the rest of dying - going under the ground out of reach - never
-    /// happened. On spikes it was killed again every step, without end.
+    /// Gives a bell creature that burrows the corpse and the animations that its state deciding whether it is a silver
+    /// one sets as properties ("Normal" or "Silver" of "Control"): its copy as it is made, and the room's own creature
+    /// as this game takes it over. The room has neither on it: the creature gets them from that state, which it goes
+    /// through before anything can kill it. Without a corpse, the first thing it does as it dies throws. The room's own
+    /// creature never went through that state here while the other game ran the room, so once taken over the rest of
+    /// its dying - going under the ground out of reach - never happened, and on spikes it was killed again every step,
+    /// without end. The copy, made from the room's creature before that and following the scene host's states without
+    /// running them, died without a body thrown out, without the shake and the hold of the blow that killed it, and
+    /// into no journal (the friend's game on 11-13 at 21:50:32: "'Bell Goomba(Clone)'s SimulateDeath in 'Die' of
+    /// 'Control' could not be played here: NullReferenceException").
     /// </summary>
-    private void GiveTakenOverFurmItsCorpse() {
+    /// <param name="creature">The copy or the room's own creature.</param>
+    /// <param name="fsms">Its FSMs.</param>
+    private void GiveFurmItsCorpse(GameObject creature, List<PlayMakerFSM> fsms) {
         if (Type != EntityType.Furm) {
             return;
         }
 
-        foreach (var fsm in _fsms.Host) {
+        foreach (var fsm in fsms) {
             if (fsm == null || fsm.FsmName != "Control") {
                 continue;
             }
 
-            // Which of the two it is was said by the other game, whose variables were just put on it
+            // Which of the two it is: for the room's own creature taken over, as the other game said with the variables
+            // just put on it; for the copy as it is made, as the room has it, where none is silver ('Silver?' always
+            // says NORMAL, its roll switched off)
             var state = fsm.GetStateOrNull(fsm.FsmVariables.FindFsmBool("Is Silver") is { Value: true }
                 ? "Silver"
                 : "Normal");
@@ -3010,6 +3012,14 @@ internal partial class Entity {
                     property.TargetProperty.SetValue();
                 }
             }
+
+            var corpse = creature.TryGetComponent<EnemyDeathEffects>(out var deathEffects)
+                ? deathEffects.CorpsePrefab
+                : null;
+            SSMP.Logging.Logger.Info(
+                $"[Deaths] '{creature.name}' ({Id}) is given what '{state.Name}' of 'Control' sets: its corpse " +
+                $"'{(corpse == null ? "none" : corpse.name)}' and its animations"
+            );
         }
     }
 
@@ -3260,7 +3270,7 @@ internal partial class Entity {
             FillEmptyPlayerVariables(fsm);
         }
 
-        GiveTakenOverFurmItsCorpse();
+        GiveFurmItsCorpse(Object.Host, _fsms.Host);
 
         // Only now to where the copy stands. The setting up above is done where the room put the creature, as in a
         // game where it started with the room: a creature that lets go of the markers it hides at, so that they stay
