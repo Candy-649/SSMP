@@ -485,7 +485,8 @@ internal partial class CoopSave {
     /// and stay that way until the room loads again (<see cref="WorldTriggerKind.Lasting"/>). Otherwise what goes off
     /// is only sent at the moment it does, which a partner who came in later never hears: the character that the room
     /// had them rescue stayed cowering in their game, and the conversation that follows was lost to them. Also that the
-    /// local hero is maggoted (see CoopSave.Maggots).
+    /// local hero is maggoted (see CoopSave.Maggots), and how the things here that break and count as creatures stand
+    /// (see CoopSave.BreakingCreatures).
     /// </summary>
     /// <param name="player">The player who walked in.</param>
     /// <param name="cameIn">Whether they just came in, which their game loaded the room for, rather than were here
@@ -539,6 +540,18 @@ internal partial class CoopSave {
             }
         } catch (Exception e) {
             Logger.Warn($"Could not send the rings held here to {player.Username}, who came in: {e.Message}");
+        }
+
+        // Their game loaded these from its own save, as a creature of a room that others are in is not
+        if (cameIn) {
+            try {
+                if (_checkedMembers.Contains(player.Id) && GetCurrentMarker() is { } marker &&
+                    IsMember(player, marker)) {
+                    SendBreakingCreaturesTo(player);
+                }
+            } catch (Exception e) {
+                Logger.Warn($"Could not send how the lanterns stand to {player.Username}, who came in: {e.Message}");
+            }
         }
     }
 

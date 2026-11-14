@@ -883,5 +883,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// RuneRolls): <see cref="CoopSaveUpdate.Key"/> is the number of the cast and <see cref="CoopSaveUpdate.Bytes"/>
     /// holds the seeds by name. The other games play the sender's clusters from them.
     /// </summary>
-    SkillSeeds
+    SkillSeeds,
+
+    /// <summary>
+    /// How a thing that breaks and that the game counts as a creature stands in the sender's room, sent to a member who
+    /// walks in while it does not stand as the room loads it (see CoopSave.BreakingCreatures):
+    /// <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name its breakable part,
+    /// <see cref="CoopSaveUpdate.PartCount"/> is 1 if it is broken, and <see cref="CoopSaveUpdate.Amounts"/> holds the
+    /// hits it has left.
+    /// </summary>
+    BreakingCreature
 }

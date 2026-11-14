@@ -10,7 +10,9 @@ namespace SSMP.Game.Client.Save;
 /// room keeps the death of each of its creatures in its save as it dies, and leaves the creature out of the room while
 /// it is kept, until a rest or a death of either player clears them all (BenchCoop). A creature that one player killed
 /// while the partner was in another room was dead in one save only, and back in both games whenever the partner's game
-/// ran the room next. So each such death goes into the partner's save too, wherever the partner is.
+/// ran the room next. So each such death goes into the partner's save too, wherever the partner is. So does the break
+/// of a thing that breaks and that the game counts as a creature (see CoopSave.BreakingCreatures), which its room
+/// saves as the player leaves it.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -40,7 +42,8 @@ internal partial class CoopSave {
     /// Tells the partner of a creature that the game brings back after a rest and that died just now in this game: its
     /// item saves it as dead, and the save did not have it so yet. Only the game that runs the creature saves its item
     /// (Entity.KeepBoolSavesOfTheCopy), and only a creature that both games show as one is told of: one that each game
-    /// runs by itself is the partner's own to kill.
+    /// runs by itself is the partner's own to kill. A thing that breaks and counts as a creature is one in every game,
+    /// which counts the hits of all players on it (CoopHits).
     /// </summary>
     private void OnBoolItemSaveValue(
         Action<PersistentBoolItem, PersistentItemData<bool>> orig,
@@ -52,8 +55,8 @@ internal partial class CoopSave {
             died = data is { Value: true, IsSemiPersistent: true } && _checkedMembers.Count > 0 &&
                    SceneData.instance is { } sceneData &&
                    !(sceneData.PersistentBools.TryGetValue(data.SceneName, data.ID, out var saved) && saved.Value) &&
-                   self.TryGetComponent<HealthManager>(out _) &&
-                   SSMP.Game.Client.Entity.Entity.IsRoomObjectOfAnEntity(self.gameObject);
+                   (self.TryGetComponent<HealthManager>(out _) &&
+                    SSMP.Game.Client.Entity.Entity.IsRoomObjectOfAnEntity(self.gameObject) || CountsAsAKill(self));
         } catch (Exception e) {
             if (!_creatureDeathFailed) {
                 _creatureDeathFailed = true;
@@ -68,6 +71,7 @@ internal partial class CoopSave {
             update.ItemScenes.Add(data.SceneName);
             update.ItemIds.Add(data.ID);
             SendToMembers(update);
+            Logger.Info($"'{data.ID}' in {data.SceneName} died here, which goes into the saves of the members too");
         }
     }
 

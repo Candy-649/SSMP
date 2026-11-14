@@ -1217,6 +1217,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.SharedPurchase:
                 OnSharedPurchase(player, update);
                 break;
+            case CoopSaveUpdateKind.BreakingCreature:
+                OnBreakingCreature(player, update);
+                break;
         }
     }
 
