@@ -299,6 +299,7 @@ internal partial class CoopSave {
         ToldParts.IsFollowedInEveryState = machine =>
             FindMachineKind(machine.gameObject, machine.FsmName) is { IsDirector: true };
         ToldParts.IsPaced = machine => FindMachineKind(machine.gameObject, machine.FsmName) != null;
+        ThrownThings.RoundOf = fsm => _roundThrows.TryGetValue(fsm, out var round) ? round : null;
         RegisterHostSyncHooks();
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;

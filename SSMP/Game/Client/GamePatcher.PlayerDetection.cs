@@ -278,6 +278,12 @@ internal partial class GamePatcher {
     /// <param name="self">The alert range being queried.</param>
     /// <returns>True when the relevant tracked player is inside this alert range and visible; otherwise false.</returns>
     private static bool AnswerWhetherAPlayerIsInAlertRange(AlertRange self) {
+        // A thing put out to go after a player by itself asks about the player it goes after alone once it chases them,
+        // as a creature does (Save.CoopHits.Chasers, D107); before that its ranges are those of a piece of the world
+        if (Save.ThrownThings.TryGetMark(self.gameObject, out var thrown) && thrown.Chasing) {
+            return IsValidTargetForAlertRange(self, thrown.Target);
+        }
+
         // A range with nothing that can be fought above it is not asking which of two players something should
         // chase. It is a piece of the world - a barrel holding a trapped creature, a gate, a platform - asking
         // whether anybody is standing there, and either player is an answer to that. Sent down the path below it

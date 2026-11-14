@@ -187,6 +187,16 @@ internal partial class CoopSave {
         // tells them to in turn as a player comes. The controller has the same name before its own, but no round.
         new(["Zap Worm Lightning"], "Control", ["Antic"]),
 
+        // The lanterns of a room that summon a fireball over and over as long as any player is in their range, one
+        // fireball a round, at the rate the game gives one lantern however many players there are; the fireball is the
+        // same in every game, named after the round (USER 11-14, D107). Their only dice is the angle it flies out at.
+        // The host's word for the next round can come at any time after the last one, so one here never summons by
+        // itself while another game runs the room.
+        new(
+            ["Wisp Flame Lantern"], "Control", ["Summon Antic"], holdLimit: float.PositiveInfinity,
+            namesThrows: true
+        ),
+
         // Hazards that move by themselves with dice of their own (FsmScan --hazards): spiked pendulums that swing by
         // an angle and for a time they roll, a round from each swing to the left; and snowflakes that drift down with
         // a look, speeds and a side they roll, break on the ground and drift down again a moment later, a round from
@@ -280,6 +290,12 @@ internal partial class CoopSave {
     /// The machines that were said in the log to follow the scene host, so that it is said once for each.
     /// </summary>
     private readonly HashSet<Fsm> _machinesSaid = [];
+
+    /// <summary>
+    /// The rounds of the scene host's that the machines here that name their throws are in, which what they throw is
+    /// named after (see ThrownThings.RoundOf).
+    /// </summary>
+    private readonly Dictionary<Fsm, ThrownThings.RoundThrows> _roundThrows = new();
 
     /// <summary>
     /// The machine whose round of the scene host's is being started here, which is let through.
@@ -421,7 +437,13 @@ internal partial class CoopSave {
             return MachineStep.Catch;
         }
 
-        if (Array.IndexOf(kind.RoundStateNames, toState.Name) < 0 || !IsMemberInRoom()) {
+        if (Array.IndexOf(kind.RoundStateNames, toState.Name) < 0) {
+            return MachineStep.None;
+        }
+
+        // A round with nobody else in the room is none of the scene host's, and what it throws is named after none
+        if (!IsMemberInRoom()) {
+            _roundThrows.Remove(fsm);
             return MachineStep.None;
         }
 
@@ -567,6 +589,10 @@ internal partial class CoopSave {
             return;
         }
 
+        if (kind.NamesThrows) {
+            _roundThrows[fsm] = new ThrownThings.RoundThrows(word.Sequence);
+        }
+
         try {
             word.Amounts = [
                 .. SharedDice.Record(() => {
@@ -706,6 +732,9 @@ internal partial class CoopSave {
 
         NamedSeeds.Read(update.Bytes);
         SharedDice.RollByName(fsm.GameObject, RoundRollName(update));
+        if (kind.NamesThrows) {
+            _roundThrows[fsm] = new ThrownThings.RoundThrows(update.Sequence);
+        }
 
         var lastStarting = _startingMachineRound;
         _startingMachineRound = fsm;
@@ -1052,6 +1081,7 @@ internal partial class CoopSave {
         _pendingMachineRounds.Clear();
         _takenMachineRounds.Clear();
         _machinesSaid.Clear();
+        _roundThrows.Clear();
         _caughtGrinders.Clear();
         _caughtCogs.Clear();
         _cogsStoppedForLocal.Clear();
@@ -1309,7 +1339,8 @@ internal partial class CoopSave {
             bool showsParts = false,
             bool partsTold = false,
             float? holdLimit = null,
-            string[]? againFromStateNames = null
+            string[]? againFromStateNames = null,
+            bool namesThrows = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -1322,7 +1353,14 @@ internal partial class CoopSave {
             PartsTold = partsTold;
             HoldLimit = holdLimit;
             AgainFromStateNames = againFromStateNames;
+            NamesThrows = namesThrows;
         }
+
+        /// <summary>
+        /// Whether what a machine of this kind throws in a round is named after the round in every game (see
+        /// ThrownThings.RoundOf), as it is the same thing in each: a fireball of a lantern.
+        /// </summary>
+        public bool NamesThrows { get; }
 
         /// <summary>
         /// The states from which a machine of this kind goes into the start of its round again within the same round,

@@ -634,6 +634,7 @@ internal partial class CoopHits {
         RegisterSignalHooks();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += ReleaseHeldReplays;
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent += RetryEarlyChases;
     }
 
     /// <summary>
@@ -657,7 +658,9 @@ internal partial class CoopHits {
         _carriedHere.Clear();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= WatchKnocks;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= ReleaseHeldReplays;
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent -= RetryEarlyChases;
         _heldReplays.Clear();
+        _earlyChases.Clear();
         _releasingReplays.Clear();
         _knockWatches.Clear();
         DeregisterThrownHooks();
@@ -755,6 +758,11 @@ internal partial class CoopHits {
 
         if (update.Kind == CoopHitKind.ObjectHurtPlayer) {
             ReplayHurt(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.ThrownChase) {
+            ApplyThrownChase(update);
             return;
         }
 

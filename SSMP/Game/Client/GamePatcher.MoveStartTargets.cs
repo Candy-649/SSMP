@@ -807,7 +807,9 @@ internal partial class GamePatcher {
     /// <param name="owner">The creature.</param>
     /// <param name="turns">How it has turned.</param>
     /// <param name="held">The player it keeps going after.</param>
-    private static void RollBetweenTimes(GameObject owner, TargetTurns turns, GameObject held) {
+    /// <param name="thrown">Whether it is a thing put out to chase, which only the scene host's game asks about (see
+    /// <see cref="ChooseThrownTarget"/>), rather than a creature.</param>
+    private static void RollBetweenTimes(GameObject owner, TargetTurns turns, GameObject held, bool thrown = false) {
         var now = Time.unscaledTime;
         if (IsHolding(turns, now) || now - turns.RolledAt < TurnRollSpacing) {
             return;
@@ -817,7 +819,7 @@ internal partial class GamePatcher {
         // a second, not each time it is asked
         turns.RolledAt = now;
         if (_woundedNow == owner || Save.SharedDice.PlaysAnotherGame || Entity.Entity.OwnSign != null ||
-            !Entity.Entity.RunsCreatureHere(owner) || TryGetSongTarget(owner.GetInstanceID(), out _)) {
+            !thrown && !Entity.Entity.RunsCreatureHere(owner) || TryGetSongTarget(owner.GetInstanceID(), out _)) {
             return;
         }
 
@@ -867,10 +869,29 @@ internal partial class GamePatcher {
             return null;
         }
 
+        var nearest = NearestOf(owner, FindReachablePlayers(owner));
+        if (nearest != null && nearest != GetApprovedEnemyTarget(owner)) {
+            Logger.Info($"{owner.name} goes after {DescribePlayer(nearest)}, the nearest player it notices, {why}");
+            ApproveEnemyTarget(owner, nearest);
+        }
+
+        return nearest;
+    }
+
+    /// <summary>
+    /// The player nearest to a creature among some, or null for none.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    /// <param name="players">The players.</param>
+    private static GameObject? NearestOf(GameObject owner, List<GameObject> players) {
         var origin = (Vector2) owner.transform.position;
         GameObject? nearest = null;
         var nearestDistance = float.PositiveInfinity;
-        foreach (var player in FindReachablePlayers(owner)) {
+        foreach (var player in players) {
+            if (player == null || !player.activeInHierarchy) {
+                continue;
+            }
+
             var distance = ((Vector2) player.transform.position - origin).sqrMagnitude;
             if (distance < nearestDistance) {
                 nearestDistance = distance;
@@ -878,8 +899,50 @@ internal partial class GamePatcher {
             }
         }
 
-        if (nearest != null && nearest != GetApprovedEnemyTarget(owner)) {
-            Logger.Info($"{owner.name} goes after {DescribePlayer(nearest)}, the nearest player it notices, {why}");
+        return nearest;
+    }
+
+    /// <summary>
+    /// Whom a thing put out to go after a player by itself goes after, by the one rule for every creature (see
+    /// <see cref="KeptTarget"/>), worked out in the game of the scene host, whose pick the others take
+    /// (CoopHits.Chasers): as it starts its chase, the nearest player within its reach that it notices; after that the
+    /// one it goes after while it keeps them (see <see cref="KeepsTarget"/>), rolling now and then whether to turn to
+    /// another (see <see cref="RollBetweenTimes"/>), and the nearest again once it lets them go. With no one within its
+    /// reach it starts its chase after the nearest player, as it chased the player of its game before, and later keeps
+    /// whom it has.
+    /// </summary>
+    /// <param name="thing">The thing.</param>
+    /// <param name="starts">Whether it starts its chase now, which forgets how what the pool had in this object before
+    /// turned.</param>
+    /// <returns>The player it goes after, or null for no one.</returns>
+    public static GameObject? ChooseThrownTarget(GameObject thing, bool starts) {
+        var owner = GetEnemyTargetOwner(thing);
+        if (owner == null) {
+            return null;
+        }
+
+        if (starts) {
+            Turns.Remove(owner.GetInstanceID());
+        }
+
+        var turns = TurnsFor(owner);
+        var held = GetApprovedEnemyTarget(owner);
+        if (!starts && held != null && KeepsTarget(owner, turns, held)) {
+            RollBetweenTimes(owner, turns, held, thrown: true);
+            return GetApprovedEnemyTarget(owner) ?? held;
+        }
+
+        var nearest = NearestOf(owner, FindReachablePlayers(owner)) ??
+                      (starts ? NearestOf(owner, PlayerTargetRegistry.GetTrackedPlayers()) : null);
+        if (nearest == null) {
+            return held;
+        }
+
+        if (nearest != held) {
+            Logger.Info(
+                $"{owner.name} goes after {DescribePlayer(nearest)}, the nearest player " +
+                (starts ? "as it starts its chase" : "it notices, as it let go of whom it went after")
+            );
             ApproveEnemyTarget(owner, nearest);
         }
 

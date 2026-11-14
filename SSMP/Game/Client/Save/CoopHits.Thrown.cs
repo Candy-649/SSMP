@@ -177,7 +177,17 @@ internal partial class CoopHits {
             _ => null
         };
         if (action == null || thrownPrefab == null || thrownPrefab != prefab || action.Finished ||
-            !Entity.Entity.TryGetThrower(action, out var thrower) || !ThrownThings.CanBeThrown(prefab)) {
+            !ThrownThings.CanBeThrown(prefab)) {
+            return null;
+        }
+
+        // What a machine of the room that the scene host paces throws in a round of the host's, which every game names
+        // after the round alike (CoopSave.PacedMachines): a fireball of a room lantern
+        if (ThrownThings.RoundOf?.Invoke(action.Fsm) is { } round) {
+            return ThrownThings.ExpectRoundThrow(round, prefab);
+        }
+
+        if (!Entity.Entity.TryGetThrower(action, out var thrower)) {
             return null;
         }
 
@@ -365,7 +375,8 @@ internal partial class CoopHits {
     /// state on a replay of the partner's when that state, or one it goes on to by itself, works on the player. Such a
     /// state is about the player it touched or hurt, the partner, who has no character here: a catcher grabbed, a glob
     /// stuck to, a blob made sick this game's player, wherever they stood, for something the partner did. The thing
-    /// stays as it is here, as it did before the partner's touches and hurts were sent at all.
+    /// stays as it is here, as it did before the partner's touches and hurts were sent at all. A thing that goes after
+    /// a player by itself has its chase picked and paced by the scene host's game (see <see cref="ChaserTransition"/>).
     /// </summary>
     private bool OnThrownTransition(
         Func<Fsm, FsmTransition, bool, bool> orig,
@@ -373,12 +384,19 @@ internal partial class CoopHits {
         FsmTransition transition,
         bool isGlobal
     ) {
+        ThrownMark? chaser = null;
+        ChaserKind? chaserKind = null;
         try {
             if ((_isReplaying || _replayingDirection) && ThrownThings.Count > 0 && transition?.ToFsmState is { } to &&
                 self.FsmComponent is { } fsm && fsm != null && ThrownThings.TryGetMark(fsm.gameObject, out _) &&
                 WorksOnThePlayerFrom(to) is { } acting) {
                 SayKeptOutOfState(fsm, to, acting);
                 return false;
+            }
+
+            if (ThrownThings.Count > 0 && transition != null && IsChaserTransition(self, out var mark, out var kind)) {
+                chaser = mark;
+                chaserKind = kind;
             }
         } catch (Exception e) {
             if (!_thrownFailed) {
@@ -387,7 +405,9 @@ internal partial class CoopHits {
             }
         }
 
-        return orig(self, transition!, isGlobal);
+        return chaser != null && chaserKind != null
+            ? ChaserTransition(orig, self, transition!, isGlobal, chaser, chaserKind)
+            : orig(self, transition!, isGlobal);
     }
 
     /// <summary>

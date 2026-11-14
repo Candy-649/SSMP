@@ -111,6 +111,13 @@ internal static class ThrownThings {
     public static Func<ushort, ushort, GameObject?>? FigureOf { get; set; }
 
     /// <summary>
+    /// The round of the scene host's that a machine of the room with a state machine is in, as every game has it,
+    /// whose throws are named after it (set by CoopSave, see CoopSave.PacedMachines); null for a machine in no such
+    /// round.
+    /// </summary>
+    public static Func<HutongGames.PlayMaker.Fsm, RoundThrows?>? RoundOf { get; set; }
+
+    /// <summary>
     /// How many thrown things have a name now.
     /// </summary>
     public static int Count => ByKey.Count;
@@ -272,13 +279,15 @@ internal static class ThrownThings {
     }
 
     /// <summary>
-    /// Has a thrown thing go after a player from now on: the player who struck it, touched it or was hurt by it.
+    /// Has a thrown thing go after a player from now on, in what it does now as well: the player who struck it,
+    /// touched it or was hurt by it, or whom the scene host's game picked for it (CoopHits.Chasers).
     /// </summary>
     /// <param name="mark">The mark of the thing.</param>
     /// <param name="player">The player, or null for no one.</param>
     public static void TurnTo(ThrownMark mark, GameObject? player) {
         mark.Target = player;
         GamePatcher.AimThrownAt(mark.Owners, player);
+        GamePatcher.PointThrownNow(mark.gameObject);
     }
 
     /// <summary>
@@ -312,6 +321,18 @@ internal static class ThrownThings {
     /// <returns>What stops the naming once the throw is over.</returns>
     public static IDisposable ExpectChild(ThrownMark parent, GameObject prefab) {
         return Begin(new Pending(prefab, parent.Target, () => parent.NextChildKey(prefab.name), null));
+    }
+
+    /// <summary>
+    /// Has what a machine of the room throws in a round of the scene host's named after the round, which every game
+    /// does alike: the fireballs of a room lantern. It goes after no one in particular until the scene host's game
+    /// picks a player for it (CoopHits.Chasers).
+    /// </summary>
+    /// <param name="round">The round.</param>
+    /// <param name="prefab">What it throws.</param>
+    /// <returns>What stops the naming once the throw is over.</returns>
+    public static IDisposable ExpectRoundThrow(RoundThrows round, GameObject prefab) {
+        return Begin(new Pending(prefab, null, () => round.NextKey(prefab.name), null));
     }
 
     /// <summary>
@@ -841,6 +862,31 @@ internal static class ThrownThings {
     }
 
     /// <summary>
+    /// The names of what a machine of the room throws in one round of the scene host's (see
+    /// <see cref="ExpectRoundThrow"/>): the number of the host's word for the round, then what it is and how many of
+    /// those it threw before in the round. With no '|' in them, which starts the path of a part (see
+    /// <see cref="Find"/>).
+    /// </summary>
+    /// <param name="sequence">The number of the scene host's word for the round.</param>
+    public sealed class RoundThrows(ulong sequence) {
+        private readonly string _keyStart = "m." + sequence.ToString("x", CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// How many of each kind of thing it threw in the round, by name.
+        /// </summary>
+        private readonly Dictionary<string, int> _thrown = new();
+
+        /// <summary>
+        /// The name of the next thing of a kind that the machine throws in the round.
+        /// </summary>
+        public string NextKey(string prefabName) {
+            _thrown.TryGetValue(prefabName, out var times);
+            _thrown[prefabName] = times + 1;
+            return $"{_keyStart}/{prefabName}#{times}";
+        }
+    }
+
+    /// <summary>
     /// What an action of a creature that this game runs threw in one frame.
     /// </summary>
     private sealed class HostThrow(int frame, ushort target, string prefabName) {
@@ -938,6 +984,18 @@ internal sealed class ThrownMark : MonoBehaviour {
     public GameObject? Target { get; set; }
 
     /// <summary>
+    /// Whether the thing goes after a player by itself, as it was seen to start its chase (CoopHits.Chasers): its
+    /// ranges then ask about the player it goes after alone.
+    /// </summary>
+    public bool Chasing { get; set; }
+
+    /// <summary>
+    /// The state that the thing last waited to go into for the scene host's word (CoopHits.Chasers), which the log
+    /// says once, or null.
+    /// </summary>
+    public string? HeldStep { get; set; }
+
+    /// <summary>
     /// The seeds that the game that named the thing rolled for the first uses of its actions and its first bounces, or
     /// null for none (see SharedDice.Seeds).
     /// </summary>
@@ -970,6 +1028,8 @@ internal sealed class ThrownMark : MonoBehaviour {
         Key = key;
         Target = target;
         Table = table;
+        Chasing = false;
+        HeldStep = null;
         _thrown.Clear();
         _rolls.Clear();
     }
@@ -981,6 +1041,8 @@ internal sealed class ThrownMark : MonoBehaviour {
         Key = null;
         Target = null;
         Table = null;
+        Chasing = false;
+        HeldStep = null;
     }
 
     /// <summary>

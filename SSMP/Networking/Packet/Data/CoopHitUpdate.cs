@@ -243,5 +243,14 @@ internal enum CoopHitKind : byte {
     /// has. The other game shows the tag on its own of the enemy - its cloud, and the flash and spark of each tick -
     /// with ticks that take no health there: the sender's game counts them.
     /// </summary>
-    EnemyTag
+    EnemyTag,
+
+    /// <summary>
+    /// A thing put out to go after a player by itself, found by its name in <see cref="CoopHitUpdate.Path"/> with where
+    /// it was (see ThrownThings.PathOf): whom it goes after in the scene host's game, as a throw says it
+    /// (ThrownThings.CodeOf) in <see cref="CoopHitUpdate.Hit"/>, and the state it went into there by the host's own
+    /// say - its rush, or, circling, its notice of a player - in <see cref="CoopHitUpdate.Responder"/>, or "" for whom
+    /// it goes after alone. The other games take their own of it there (CoopHits.Chasers).
+    /// </summary>
+    ThrownChase
 }

@@ -349,6 +349,32 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Points what a thrown thing does now that aims at a player at the player it goes after (see
+    /// <see cref="AimThrownAt"/>), as each of its actions is pointed as it starts (see
+    /// <see cref="ForceApprovedTargetOnFsmAction"/>): a fireball turned to another player in the middle of its chase
+    /// would go on after the one before until its state ended.
+    /// </summary>
+    /// <param name="thing">The thing.</param>
+    public static void PointThrownNow(GameObject thing) {
+        foreach (var fsm in thing.GetComponentsInChildren<PlayMakerFSM>()) {
+            if (fsm.Fsm?.ActiveState?.Actions is not { } actions ||
+                GetFsmActionTarget(fsm.gameObject) is not { } target) {
+                continue;
+            }
+
+            foreach (var action in actions) {
+                if (action is not { Enabled: true } || !ActionRegistry.IsRetargeted(action.GetType().Name)) {
+                    continue;
+                }
+
+                RetargetFsmActionGameObjectFields(
+                    action, target, ActionRegistry.TargetedWherePlayerActionTypes.Contains(action.GetType().Name)
+                );
+            }
+        }
+    }
+
+    /// <summary>
     /// The player whom a creature's actions that aim at one are pointed at (see GetFsmActionTarget), or null when it
     /// goes after no one in particular.
     /// </summary>
