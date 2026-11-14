@@ -52,7 +52,12 @@ internal static class EntityInitializer {
         // lies on the way it went - a boss that is already beaten never passes the music it waits in - and a player
         // in the room when it does hears it from the replay
         typeof(ApplyMusicCue),
-        typeof(TransitionToAudioSnapshot)
+        typeof(TransitionToAudioSnapshot),
+        // How fast the creature moves: a copy goes where the scene host has it, and the room's own creature that this
+        // game takes over goes on as its body moves. Played here with nothing sent, it only ever threw before it set
+        // anything, at every copy made and every takeover in such a first state (USER 11-14, of the warning at a
+        // takeover in 'Dormant': "有报错总是值得警惕的")
+        typeof(SetVelocity2d)
     ];
 
     /// <summary>
