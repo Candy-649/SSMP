@@ -19,7 +19,9 @@ namespace SSMP.Game.Client.Entity;
 /// it, with where the part is in the room by now (see LetGoParts.SayAgain): the other game's copy lets go of its own
 /// part as it does when the action comes as it happens, and puts it there. As this game takes a creature over, the
 /// room's own creature, which slept here and never ran the action either, lets go of each part of its own that the copy
-/// let go of, where the copy's is (see <see cref="HandOverWhatTheCopyLetGo"/>).
+/// let go of, where the copy's is (see <see cref="HandOverWhatTheCopyLetGo"/>). And the room's own creature of a game
+/// that expected to run the room, and so ran its first states, takes back what it let go of meanwhile as it is put to
+/// sleep (see <see cref="TakeBackWhatItLetGo"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -54,6 +56,42 @@ internal partial class Entity {
                     $"room through '{hooked.Action.State?.Name}' of '{hooked.Action.Fsm.Name}', with where it is now"
                 );
             }
+        }
+    }
+
+    /// <summary>
+    /// Has the room's own creature take back each part it let go of while this game expected to run the room, as it is
+    /// put to sleep because the other game runs it after all: back at its place under it, where it is as it would have
+    /// been had the creature slept from the start, it sleeps with it, and the copy's part shows the other game's.
+    /// Left in the room, the crust of a creature that hides in coral stayed where the room's own creature had put it as
+    /// it settled in to wait, to be seen and to hurt there after the other game's creature broke out of its own crust,
+    /// whose copy here broke with it. It is found there too as this game takes the creature over (see
+    /// <see cref="HandOverWhatTheCopyLetGo"/>). The shallowest places first: a part let go of from under another such
+    /// part goes back under that one once it is back.
+    /// </summary>
+    private void TakeBackWhatItLetGo() {
+        var letGo = new List<GameObject>();
+        LetGoParts.PartsOf(Object.Host, letGo);
+        var places = new List<(Transform Part, string Place)>();
+        foreach (var part in letGo) {
+            if (LetGoParts.PlaceOf(Object.Host, part) is { } place) {
+                places.Add((part.transform, place));
+            }
+        }
+
+        places.Sort((a, b) => a.Place.Split('/').Length.CompareTo(b.Place.Split('/').Length));
+        foreach (var (part, place) in places) {
+            var cut = place.LastIndexOf('/');
+            var under = cut < 0 ? Object.Host.transform : Object.Host.transform.Find(place.Substring(0, cut));
+            if (under == null) {
+                continue;
+            }
+
+            part.SetParent(under, true);
+            Logger.Info(
+                $"[Let go] The room's own '{Object.Host.name}' ({Id}) takes back its part '{place}', which it let go " +
+                "of while this game expected to run the room, as it is put to sleep"
+            );
         }
     }
 

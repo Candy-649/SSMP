@@ -2787,11 +2787,12 @@ internal partial class Entity {
         ForgetPosePackets();
 
         // This game expected to run the room and left the room's own object running, but the other game runs it
-        // after all: it is put to sleep now, as it would have been from the start
+        // after all: it is put to sleep now, as it would have been from the start, with what it let go of meanwhile
         if (_keepsRunning) {
             _keepsRunning = false;
             if (Object.Host != null) {
                 RememberWhereTheHostFsmsAre();
+                TakeBackWhatItLetGo();
                 Object.Host.SetActive(false);
             }
         }
