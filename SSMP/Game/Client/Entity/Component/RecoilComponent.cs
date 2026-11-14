@@ -21,9 +21,13 @@ internal class RecoilComponent : EntityComponent {
     private readonly HostClientPair<Recoil> _recoil;
 
     /// <summary>
-    /// The ways and the hold that were last sent (see <see cref="WaysOf"/>).
+    /// The ways and the hold that were last sent (see <see cref="WaysOf"/>), or a value they never are before the first
+    /// time, which goes as this game starts to run the creature, like the layer: the copy in the other game may not
+    /// start from what this game's creature has. One summoned from a pool there is a creature of an earlier life, which
+    /// keeps the ways that life left it, and the room's own creature of a game that expected to run the room ran its
+    /// first states before it was put to sleep.
     /// </summary>
-    private byte _lastWays;
+    private byte _lastWays = byte.MaxValue;
 
     /// <summary>
     /// The speed that was last sent.
@@ -37,10 +41,6 @@ internal class RecoilComponent : EntityComponent {
         HostClientPair<Recoil> recoil
     ) : base(netClient, entityId, gameObject) {
         _recoil = recoil;
-
-        // The copy is made from the creature as the room loads, as it is then
-        _lastWays = WaysOf(recoil.Host);
-        _lastSpeed = recoil.Host.RecoilSpeedBase;
     }
 
     /// <summary>
