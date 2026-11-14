@@ -460,12 +460,16 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// How long the link may be held up either way before it is said to be, in seconds: nothing has arrived from the
-    /// other side for that long, or the newest of what this side sent that the other side says it had went that long
-    /// ago (<see cref="NoteSeen"/>), which grows while the way to the other side is held up although things still come
-    /// from it. On a link that is up the second is the first and a round trip more. In the logs of 11-01 to 11-04 the
-    /// longest wait between two packets in play was 0.75 s, on a night that lost a quarter to two fifths of them, and a
-    /// hit and its answer took 0.79 s at the most there; every wait past 1 s was the link held up, for 1 to 19 s (USER
-    /// 11-05, the host never knew that the line to the other player had broken: "只要能及时说出有人卡了").
+    /// other side for that long, or the other side has said for that long that it had nothing new of what this side
+    /// sent (<see cref="NoteSeen"/>), which grows while nothing gets through to the other side although things still
+    /// come from it (USER 11-05, the host never knew that the line to the other player had broken: "只要能及时说出有人
+    /// 卡了"). A way to the other side that is only slow, and still brings it new things late, holds nothing up: counted
+    /// from when the newest of what the other side had went, it told the host every few seconds that the other player
+    /// was stuck while only her own way out was slow and the other player's game was fine (USER 11-14 "我朋友那边一直
+    /// 在重复我好像卡了和我恢复了，但是我这里没有，我没卡", then "换第二个"). On a link that is up the second is hardly
+    /// longer than the first. In the logs of 11-01 to 11-04 the longest wait between two packets in play was 0.75 s,
+    /// on a night that lost a quarter to two fifths of them, and a hit and its answer took 0.79 s at the most there;
+    /// every wait past 1 s was the link held up, for 1 to 19 s.
     /// </summary>
     private const double HeldUpTold = 1.5;
 
@@ -527,9 +531,16 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// When the newest of what this side sent that the other side says it had went, in milliseconds of DateTime, or 0
-    /// until it said so of any. Written only where packets arrive.
+    /// until it said so of any: by it, what the other side says next is told to be newer or not. Only used where
+    /// packets arrive.
     /// </summary>
     private long _seenSentAtMs;
+
+    /// <summary>
+    /// When the other side last said that it had something new of what this side sent (<see cref="NoteSeen"/>), in
+    /// ticks of DateTime, or 0 until it said so of anything. Written where packets arrive, read by the send loop.
+    /// </summary>
+    private long _seenNewAt;
 
     /// <summary>
     /// Cached capability: whether the transport requires application-level sequencing.
@@ -812,7 +823,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         }
 
         // The newest of what this side sent that the other side had when it sent this
-        NoteSeen(packet.Ack);
+        NoteSeen(packet.Ack, now);
 
         // A transport without sequence numbers of its own times no round trip here: closing the round trip of the last
         // sent sequence, as this used to, timed the gap between sending and the next arrival of anything - the send
@@ -870,8 +881,8 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             // enemy ends up back where it was standing before a player hit it.
             CurrentUpdatePacket.Sequence = _localSequence;
 
-            // The newest packet that came from the other side, on every transport, by which the other side tells how
-            // long ago the newest of what it sent that got here went (NoteSeen)
+            // The newest packet that came from the other side, on every transport, by which the other side tells when
+            // anything new of what it sent last got here (NoteSeen)
             CurrentUpdatePacket.Ack = _remoteSequence;
 
             // Transports requiring sequencing: Configure ACK data
@@ -1626,6 +1637,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             // A new connection numbers its packets from 0 again, which the last one's must not be taken for
             Array.Clear(_sentAt, 0, SentAtKept);
             _seenSentAtMs = 0;
+            _seenNewAt = 0;
 
             _rttTracker?.Reset();
 
@@ -1822,16 +1834,20 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
-    /// Notes when the newest of what this side sent that the other side says it had went (<see cref="_seenSentAtMs"/>),
-    /// where packets arrive. A packet sent again later says what it said the first time, which is older, and one that
-    /// names a packet older than the last <see cref="SentAtKept"/> names none of them, so neither changes anything.
+    /// Notes, where packets arrive, when the other side says that it had something new of what this side sent
+    /// (<see cref="_seenNewAt"/>): a packet that went later than the newest it said it had before
+    /// (<see cref="_seenSentAtMs"/>). A packet sent again later says what it said the first time, which is older, and
+    /// one that names a packet older than the last <see cref="SentAtKept"/> names none of them, so neither changes
+    /// anything.
     /// </summary>
     /// <param name="ack">The sequence number of the newest packet of this side's that the other side had.</param>
-    private void NoteSeen(ushort ack) {
+    /// <param name="now">When the packet that says so arrived.</param>
+    private void NoteSeen(ushort ack, DateTime now) {
         var sent = Volatile.Read(ref _sentAt[ack & (SentAtKept - 1)]);
         var sentAtMs = sent >> 16;
         if ((ushort) sent == ack && sentAtMs > _seenSentAtMs) {
-            Volatile.Write(ref _seenSentAtMs, sentAtMs);
+            _seenSentAtMs = sentAtMs;
+            Volatile.Write(ref _seenNewAt, now.Ticks);
         }
     }
 
@@ -1852,10 +1868,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         }
 
         var lastReceive = _lastReceiveTime.Ticks;
-        var seenSent = Volatile.Read(ref _seenSentAtMs) * TimeSpan.TicksPerMillisecond;
+        var seenNew = Volatile.Read(ref _seenNewAt);
         if (_heldUpSince == 0) {
             var quiet = now - System.Math.Max(lastReceive, _wentOnAt);
-            var unseen = seenSent == 0 ? 0 : now - System.Math.Max(seenSent, _wentOnAt);
+            var unseen = seenNew == 0 ? 0 : now - System.Math.Max(seenNew, _wentOnAt);
             var held = System.Math.Max(quiet, unseen);
             if (held < HeldUpTold * TimeSpan.TicksPerSecond) {
                 return;
@@ -1864,7 +1880,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _heldUpSince = now - held;
             Logger.Info(
                 $"[Link] The link is held up: nothing has arrived for {new TimeSpan(quiet).TotalSeconds:F1}s, and the " +
-                $"newest of what was sent that the other side had went {new TimeSpan(unseen).TotalSeconds:F1}s ago" +
+                $"other side last said it had something new from here {new TimeSpan(unseen).TotalSeconds:F1}s ago" +
                 DescribeTransportSession()
             );
             LinkHeldUp?.Invoke(new TimeSpan(held).TotalSeconds);
@@ -1872,7 +1888,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         }
 
         // Over once both are short again, counted in full
-        var stillHeld = System.Math.Max(now - lastReceive, seenSent == 0 ? 0 : now - seenSent);
+        var stillHeld = System.Math.Max(now - lastReceive, seenNew == 0 ? 0 : now - seenNew);
         if (stillHeld >= HeldUpOverBelow * TimeSpan.TicksPerSecond) {
             return;
         }
