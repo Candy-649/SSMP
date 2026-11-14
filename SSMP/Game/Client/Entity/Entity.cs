@@ -2470,7 +2470,12 @@ internal partial class Entity {
 
         NotePose(clip, 0);
 
-        if (!_animationClipNameIds.TryGetValue(clip.name, out var animationId)) {
+        // A clip that the creature's animations do not have, which its FSM asks for all the same, is played as nothing
+        // by the game, which goes on with the rest of the state ('Fall' of the creature that hides in coral asks for
+        // "Fall"). Read here, it threw out of the FSM's action, and the rest of the state never ran: in the game that
+        // ran it, the creature never had its weight back nor broke its coral, and hung where it had hidden, curled up,
+        // until it was killed (USER 11-14, "也就是它从头到尾都没有走到要下来那一步")
+        if (clip == null || !_animationClipNameIds.TryGetValue(clip.name, out var animationId)) {
             return;
         }
 
