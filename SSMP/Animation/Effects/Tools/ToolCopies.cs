@@ -105,6 +105,13 @@ internal static class ToolCopies {
     private static readonly Dictionary<Fsm, (TrackedTool Tool, byte Index, ThrowerEventSet Events)> LocalFsms = new();
 
     /// <summary>
+    /// The state machines of the things of the local player's tools whose state goes all the time, with the thing: a
+    /// change of state of one goes at once rather than with the next send, as what the thing shows changes with it. The
+    /// wisp of a lantern that bursts on an enemy would otherwise fly on past it on the other screen until then.
+    /// </summary>
+    private static readonly Dictionary<Fsm, TrackedTool> StreamFsms = new();
+
+    /// <summary>
     /// The damagers of the things of the local player's tools that are watched for landed hits, which the pool keeps
     /// and hands out again.
     /// </summary>
@@ -173,6 +180,11 @@ internal static class ToolCopies {
     private static readonly FieldInfo? HurtSpawnsField = typeof(HeroDamageSpawn).GetField("spawns", InstanceFlags);
 
     /// <summary>
+    /// The wisp that the lantern a hero wears sends at the enemies near them.
+    /// </summary>
+    private static readonly FieldInfo? WispPrefabField = typeof(HeroWispLantern).GetField("wispPrefab", InstanceFlags);
+
+    /// <summary>
     /// The copied things that the local hero spawns as they are hurt with a tool on, read from <see cref="_hurtSpawnsOf"/>.
     /// </summary>
     private static readonly HashSet<GameObject> HurtSpawns = [];
@@ -239,6 +251,11 @@ internal static class ToolCopies {
     /// The seconds until the next list of what is out.
     /// </summary>
     private static float _liveListTimer;
+
+    /// <summary>
+    /// Whether the glow of the local hero's lantern shows, as the lantern last switched it.
+    /// </summary>
+    private static bool _lanternShown;
 
     /// <summary>
     /// Whether the poison pouch counts as equipped while a copy of the partner's thing checks for it, which is the
@@ -383,6 +400,10 @@ internal static class ToolCopies {
                 OnCustomStayTrigger
             )
         );
+        AddHook(
+            typeof(HeroWispLantern).GetMethod("ToggleLanternEffects", InstanceFlags, null, [typeof(bool)], null),
+            new Action<Action<HeroWispLantern, bool>, HeroWispLantern, bool>(OnLanternEffects)
+        );
     }
 
     /// <summary>
@@ -458,7 +479,12 @@ internal static class ToolCopies {
         LiveIds.Add(tracked.Id);
 
         var fsms = thing.GetComponentsInChildren<PlayMakerFSM>(true);
+        var streamed = ToolCopyRules.GetStreamInterval(prefabName) > 0f;
         for (var i = 0; i < fsms.Length; i++) {
+            if (streamed && fsms[i].Fsm != null) {
+                StreamFsms[fsms[i].Fsm] = tracked;
+            }
+
             var events = ToolCopyRules.GetThrowerEvents(prefabName, fsms[i].FsmName);
             if (events != null && fsms[i].Fsm != null) {
                 LocalFsms[fsms[i].Fsm] = (tracked, (byte) i, events);
@@ -517,12 +543,17 @@ internal static class ToolCopies {
 
         // What the thing is drawn with on the screen of the one who threw it, as its copy is said on the other screen:
         // the one poisoned spike ball of an evening stayed red there rather than turning purple (USER 11-01, of the
-        // partner's recording: "确实就那一个带毒，但是确实没有紫色的贴图")
+        // partner's recording: "确实就那一个带毒，但是确实没有紫色的贴图"). Not for a thing whose state goes all the
+        // time (see ThrownTool.SaysPictures)
+        var pictures = ThrownTool.SaysPictures(tracked.PrefabName);
         Logger.Info(
             $"[Tools] This player's '{tracked.PrefabName}' ({id}) is out, poisoned: " +
-            $"{Gameplay.PoisonPouchTool.IsEquipped}; {ThrownTool.DescribePictures(tracked.gameObject)}"
+            $"{Gameplay.PoisonPouchTool.IsEquipped}" +
+            (pictures ? $"; {ThrownTool.DescribePictures(tracked.gameObject)}" : "")
         );
-        ThrownTool.SayPicturesLater(tracked.gameObject, $"This player's '{tracked.PrefabName}' ({id})");
+        if (pictures) {
+            ThrownTool.SayPicturesLater(tracked.gameObject, $"This player's '{tracked.PrefabName}' ({id})");
+        }
     }
 
     /// <summary>
@@ -560,17 +591,25 @@ internal static class ToolCopies {
             }
         }
 
+        foreach (var pair in StreamFsms) {
+            if (pair.Value == tracked) {
+                (gone ??= []).Add(pair.Key);
+            }
+        }
+
         if (gone == null) {
             return;
         }
 
         foreach (var fsm in gone) {
             LocalFsms.Remove(fsm);
+            StreamFsms.Remove(fsm);
         }
     }
 
     /// <summary>
-    /// Sends the list of what of the local player's tools is out, and the element of the needle, every so often.
+    /// Sends the list of what of the local player's tools is out, the element of the needle and whether the lantern
+    /// glows, every so often.
     /// </summary>
     public static void Tick() {
         _liveListTimer -= Time.unscaledDeltaTime;
@@ -581,7 +620,7 @@ internal static class ToolCopies {
         _liveListTimer = LiveListInterval;
         var hero = HeroController.SilentInstance;
         var element = hero != null ? hero.NailImbuement.CurrentElement : NailElements.None;
-        MessageReady?.Invoke(ToolMessages.WriteLiveList(element, LiveIds));
+        MessageReady?.Invoke(ToolMessages.WriteLiveList(element, _lanternShown, LiveIds));
     }
 
     /// <summary>
@@ -630,6 +669,10 @@ internal static class ToolCopies {
         }
 
         var changed = orig(self, transition!, isGlobal);
+        if (changed && StreamFsms.TryGetValue(self, out var streamed)) {
+            streamed.QueueMotion();
+        }
+
         if (changed && eventName != null && LocalFsms.TryGetValue(self, out var local) &&
             local.Events.Has(from, eventName)) {
             local.Tool.QueueStateChange(local.Index, transition!.ToState, ReadCarriedFloats(self, local.Tool));
@@ -954,6 +997,18 @@ internal static class ToolCopies {
     }
 
     /// <summary>
+    /// Sends that the glow of the local hero's lantern goes on or off, which only the local hero has: as the lantern is
+    /// worn or taken off, as the hero comes into a room, and as the game clears the effects around the hero away and
+    /// brings them back.
+    /// </summary>
+    private static void OnLanternEffects(Action<HeroWispLantern, bool> orig, HeroWispLantern self, bool on) {
+        orig(self, on);
+        _lanternShown = on;
+        MessageReady?.Invoke(WispLantern.Write(on));
+        Logger.Info($"[Tools] This player's wisp lantern glow goes {(on ? "on" : "off")}");
+    }
+
+    /// <summary>
     /// Fades a snare: the local player's snare, which then sends it, and never a copy of the partner's snare by itself,
     /// which fades when the thrower's does rather than when this player rests or sets a snare next to it.
     /// </summary>
@@ -1025,6 +1080,10 @@ internal static class ToolCopies {
                 ThrownTool.SayPicturesLater(
                     spawned, $"The partner's '{prefab.name}' let out by the copy of their '{copy.PrefabName}'"
                 );
+            } else if (ToolCopyRules.LanternSpawns.Contains(prefab!.name)) {
+                // The wisps that the lantern the hero wears sends, which its own code spawns rather than the state
+                // machine that uses their tools; their blows are counted already, as the hero's
+                Track(spawned, prefab.name);
             } else if (IsHurtSpawn(prefab!)) {
                 // What the hero spawns with a tool on as they are hurt is theirs, as the hero's own code spawns it
                 // rather than the state machine that uses their tools
@@ -1174,8 +1233,8 @@ internal static class ToolCopies {
 
     /// <summary>
     /// Finds the prefabs of the copied things: what each copied tool throws, in either of its states for a tool that
-    /// can be switched between two, what the hero's handling of their tools spawns, and what the hero spawns as they are
-    /// hurt with a tool on.
+    /// can be switched between two, what the hero's handling of their tools spawns, what the hero spawns as they are
+    /// hurt with a tool on, and the wisps of the lantern.
     /// </summary>
     private static Dictionary<string, GameObject> FindPrefabs() {
         var prefabs = new Dictionary<string, GameObject>();
@@ -1203,6 +1262,10 @@ internal static class ToolCopies {
             foreach (var prefab in HurtSpawns) {
                 AddPrefab(prefabs, prefab);
             }
+
+            // From the lantern under the local hero, which every hero has, whether they wear it or not
+            var lantern = hero.GetComponentInChildren<HeroWispLantern>(true);
+            AddPrefab(prefabs, lantern != null ? WispPrefabField?.GetValue(lantern) as GameObject : null);
         }
 
         return prefabs;

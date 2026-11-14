@@ -605,6 +605,7 @@ internal class PlayerManager : IPlayerManager {
             HeroHarpoon.Reset(child.gameObject);
             HeroHit.Reset(child.gameObject);
             ImbuedNail.Stop(child.gameObject);
+            WispLantern.Stop(child.gameObject);
             ThrownTool.RemoveCopies(child.gameObject);
 
             foreach (Transform grandChild in child) {

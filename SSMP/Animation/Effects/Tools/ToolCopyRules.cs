@@ -70,6 +70,14 @@ internal static class ToolCopyRules {
     ];
 
     /// <summary>
+    /// The things that the hero's own code for a tool they wear spawns, rather than their handling of their tools, that
+    /// are copied, by the name of their prefab: the wisps that the lantern sends at the enemies near the hero.
+    /// </summary>
+    public static readonly HashSet<string> LanternSpawns = [
+        "Hero Wisp Fireball"
+    ];
+
+    /// <summary>
     /// The events of the bombs that come from anything but the room: an enemy, the attacks that knock them about, or a
     /// boss or a hazard that blows them up or away.
     /// </summary>
@@ -210,6 +218,7 @@ internal static class ToolCopyRules {
         ["Curve Claw Upgraded"] = ClawState.Instance,
         ["Hero Shakra Ring"] = RingState.Instance,
         ["Clockwork Hatchling"] = FlierState.Instance,
+        ["Hero Wisp Fireball"] = WispState.Instance,
         ["Geo Small Projectile"] = PelletState.Instance,
         ["Silk Snare"] = SnareState.Instance,
         ["Silk Snare Poison"] = SnareState.Instance,
@@ -222,7 +231,8 @@ internal static class ToolCopyRules {
     /// prefab, with the seconds between two sends.
     /// </summary>
     private static readonly Dictionary<string, float> StreamIntervals = new() {
-        ["Clockwork Hatchling"] = 0.1f
+        ["Clockwork Hatchling"] = 0.1f,
+        ["Hero Wisp Fireball"] = 0.1f
     };
 
     /// <summary>

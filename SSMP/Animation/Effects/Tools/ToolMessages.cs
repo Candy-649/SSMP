@@ -49,10 +49,15 @@ internal enum ToolMessageKind : byte {
     Imbue,
 
     /// <summary>
-    /// Which things of the thrower's tools are out and which element their needle has, every so often, which puts right
-    /// what a lost message left behind.
+    /// Which things of the thrower's tools are out, which element their needle has and whether their lantern glows,
+    /// every so often, which puts right what a lost message left behind.
     /// </summary>
-    LiveList
+    LiveList,
+
+    /// <summary>
+    /// The glow of the hero's lantern went on or off: see <see cref="WispLantern"/>.
+    /// </summary>
+    Lantern
 }
 
 /// <summary>
@@ -266,16 +271,17 @@ internal static class ToolMessages {
     }
 
     /// <summary>
-    /// Writes the list of which things of the thrower's tools are out, by their number, and which element the needle
-    /// has.
+    /// Writes the list of which things of the thrower's tools are out, by their number, which element the needle has
+    /// and whether the lantern glows.
     /// </summary>
-    public static byte[] WriteLiveList(NailElements element, ICollection<byte> ids) {
+    public static byte[] WriteLiveList(NailElements element, bool lanternShown, ICollection<byte> ids) {
         var count = ids.Count < byte.MaxValue ? ids.Count : byte.MaxValue;
-        var message = new byte[4 + count];
+        var message = new byte[5 + count];
         message[0] = (byte) ToolMessageKind.LiveList;
         message[2] = (byte) element;
-        message[3] = (byte) count;
-        var i = 4;
+        message[3] = (byte) (lanternShown ? 1 : 0);
+        message[4] = (byte) count;
+        var i = 5;
         foreach (var id in ids) {
             if (i == message.Length) {
                 break;

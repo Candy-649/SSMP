@@ -21,7 +21,7 @@ internal class FlierState : IToolState {
     /// <summary>
     /// The most parts of a flier that are sent, one bit each.
     /// </summary>
-    private const int MaxParts = 16;
+    protected const int MaxParts = 16;
 
     /// <inheritdoc/>
     public void PrepareCopyPrefab(GameObject copyPrefab) {
@@ -127,11 +127,13 @@ internal class FlierState : IToolState {
                 continue;
             }
 
+            // With what is under it, as the game plays and stops them; a part under it that is sent by itself comes
+            // after it, and is put right next
             var emits = (emitting & (1 << i)) != 0;
             if (emits && !particles.isEmitting) {
-                particles.Play(false);
+                particles.Play(true);
             } else if (!emits && particles.isEmitting) {
-                particles.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+                particles.Stop(true, ParticleSystemStopBehavior.StopEmitting);
             }
         }
     }
@@ -143,7 +145,7 @@ internal class FlierState : IToolState {
     /// <summary>
     /// The parts of a flier that show something, in the same order on the thrower's flier and on a copy of it.
     /// </summary>
-    private static List<GameObject> GetParts(GameObject thing) {
+    protected virtual List<GameObject> GetParts(GameObject thing) {
         var parts = new List<GameObject>();
         foreach (var transform in thing.GetComponentsInChildren<Transform>(true)) {
             if (transform == thing.transform || parts.Count >= MaxParts) {
@@ -152,6 +154,32 @@ internal class FlierState : IToolState {
 
             if (transform.TryGetComponent<Renderer>(out _) || transform.TryGetComponent<ParticleSystem>(out _)) {
                 parts.Add(transform.gameObject);
+            }
+        }
+
+        return parts;
+    }
+}
+
+/// <summary>
+/// The wisp that the lantern a player wears sends at an enemy near them: it comes out by the hero, rises, darts at the
+/// enemy and bursts. It goes by the enemy that the wearer's lantern picked and by what it touches in the wearer's game,
+/// so a copy of it does nothing by itself and follows what the wearer's game sends, as the flier does. Its parts are
+/// its own children, each with what is under it: its burst is a holder that switches on all that is in it, and it has
+/// more pictures than the flier's parts can hold.
+/// </summary>
+internal class WispState : FlierState {
+    /// <summary>
+    /// The single instance.
+    /// </summary>
+    public new static readonly WispState Instance = new();
+
+    /// <inheritdoc/>
+    protected override List<GameObject> GetParts(GameObject thing) {
+        var parts = new List<GameObject>();
+        foreach (Transform part in thing.transform) {
+            if (parts.Count < MaxParts) {
+                parts.Add(part.gameObject);
             }
         }
 

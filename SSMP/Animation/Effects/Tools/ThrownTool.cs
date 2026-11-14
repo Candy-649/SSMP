@@ -63,9 +63,12 @@ internal class ThrownTool : BaseAttackTool {
                     break;
                 case ToolMessageKind.End:
                     if (Copies.TryGetValue(key, out var copy) && copy != null) {
+                        var drawn = SaysPictures(copy.PrefabName)
+                            ? $"; it was drawn as {DescribePictures(copy.gameObject)}"
+                            : "";
                         Logger.Info(
                             $"[Tools] The copy of the partner's '{copy.PrefabName}' ({key.Item2}) goes, as the " +
-                            $"partner's is gone; it was drawn as {DescribePictures(copy.gameObject)}"
+                            $"partner's is gone{drawn}"
                         );
                         Object.Destroy(copy.gameObject);
                     }
@@ -80,6 +83,9 @@ internal class ThrownTool : BaseAttackTool {
                     break;
                 case ToolMessageKind.LiveList:
                     KeepLive(playerObject, reader);
+                    break;
+                case ToolMessageKind.Lantern:
+                    WispLantern.Keep(playerObject, reader.ReadByte() == 1);
                     break;
             }
         } catch (IOException) {
@@ -157,12 +163,25 @@ internal class ThrownTool : BaseAttackTool {
 
         Copies[key] = marker;
         var place = copy.transform.position;
+        var pictures = SaysPictures(spawn.PrefabName);
         Logger.Info(
             $"[Tools] The copy of the partner's '{spawn.PrefabName}' ({key.Item2}) comes out at ({place.x:0.00}, " +
             $"{place.y:0.00}, z {place.z:0.000}), scale ({spawn.Scale.x:0.00}, {spawn.Scale.y:0.00}), turned " +
-            $"{spawn.Snapshot.Rotation:0}, poisoned: {spawn.Poisoned}; {DescribePictures(copy)}"
+            $"{spawn.Snapshot.Rotation:0}, poisoned: {spawn.Poisoned}" + (pictures ? $"; {DescribePictures(copy)}" : "")
         );
-        SayPicturesLater(copy, $"The copy of the partner's '{spawn.PrefabName}' ({key.Item2})");
+        if (pictures) {
+            SayPicturesLater(copy, $"The copy of the partner's '{spawn.PrefabName}' ({key.Item2})");
+        }
+    }
+
+    /// <summary>
+    /// Whether the log says what the pictures of a thing, or of its copy, are drawn from. Not for a thing whose state
+    /// goes all the time: the wisps of a lantern, with a score of pictures each, come out every few seconds for as long
+    /// as an enemy is near, and said each time they would take some 18 KB of the log a wisp.
+    /// </summary>
+    /// <param name="prefabName">The name of the prefab of the thing.</param>
+    internal static bool SaysPictures(string prefabName) {
+        return ToolCopyRules.GetStreamInterval(prefabName) <= 0f;
     }
 
     /// <summary>
@@ -335,11 +354,12 @@ internal class ThrownTool : BaseAttackTool {
 
     /// <summary>
     /// Takes away the copies of a player's things that are gone in their game but whose end got lost on the way, and
-    /// puts the look of their needle's element right. A copy only just made is left alone, as the list may have been
-    /// written before its thing came out.
+    /// puts the look of their needle's element and the glow of their lantern right. A copy only just made is left
+    /// alone, as the list may have been written before its thing came out.
     /// </summary>
     private static void KeepLive(GameObject playerObject, BinaryReader reader) {
         ImbuedNail.Keep(playerObject, (NailElements) reader.ReadByte());
+        WispLantern.Keep(playerObject, reader.ReadByte() == 1);
 
         var live = new HashSet<byte>();
         for (var count = reader.ReadByte(); count > 0; count--) {
