@@ -33,6 +33,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// game in the middle of their own dialogue. A dialogue that looks at the wish to tell a first hearing from a later one
 /// then took the way of a later one for them and skipped what only the first hearing does: the second listener after
 /// the two dancers wasn't let out of the room (USER 10-08).
+///
+/// The step of dialogue that ends a delivery wish waits the same way (CoopSave.Deliveries), with one difference: a
+/// member who doesn't get there in time doesn't keep the wish from the others. The game that waited ends it in its own
+/// save alone, with its own reward, and the wish stays open in the members' saves for them to end in their own games.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -64,16 +68,18 @@ internal partial class CoopSave {
     private const int MaxEndedBegins = 8;
 
     /// <summary>
-    /// The step of dialogue that begins a wish and waits for the partner to read to the same step, or null.
+    /// The step of dialogue that begins a wish, or ends a delivery wish, and waits for the members to read to the same
+    /// step, or null.
     /// </summary>
-    private HeldBegin? _heldBegin;
+    private HeldStep? _heldStep;
 
     /// <summary>
-    /// The key dialogue that started last, kept after the character stops talking for as long as what it set going is
-    /// still running: a dialogue can end with a scene that plays out first and begins the wish only after it, like a
-    /// character fading out of the room. Null once its FSMs went back to waiting for the next talk.
+    /// The key or delivery dialogue that started last, kept after the character stops talking for as long as what it
+    /// set going is still running: a dialogue can end with a scene that plays out first and begins or ends the wish
+    /// only after it, like a character fading out of the room, or the cook's show after the meal is handed in. Null
+    /// once its FSMs went back to waiting for the next talk.
     /// </summary>
-    private WishTalk? _lastKeyTalk;
+    private WishTalk? _lastTalk;
 
     /// <summary>
     /// Wishes that both players said yes to at their own prompt, by name, with when. Some dialogues ask first and begin
@@ -99,8 +105,8 @@ internal partial class CoopSave {
     private readonly Dictionary<string, HashSet<ushort>> _wishReadBy = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Hooks the start of the steps of FSMs that do something with a wish, of which only those that begin one are
-    /// looked at.
+    /// Hooks the start of the steps of FSMs that do something with a wish, of which only those that begin one, or end
+    /// a delivery wish, are looked at.
     /// </summary>
     private void RegisterWishReadHook() {
         AddWishTalkHook(
@@ -114,21 +120,23 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Hook for the start of a step that does something with a wish. A step of key dialogue that begins a wish waits
-    /// for the partner to read to the same step, and one that the partner is already waiting at goes on for both.
+    /// Hook for the start of a step that does something with a wish. A step of key dialogue that begins a wish, or of
+    /// delivery dialogue that ends a delivery wish, waits for the members to read to the same step, and one that the
+    /// members are already waiting at goes on for all.
     /// </summary>
     private void OnWishStepEnter(
         Action<QuestPlaymakerActions.QuestFsmAction> orig,
         QuestPlaymakerActions.QuestFsmAction self
     ) {
-        if (self is not (QuestPlaymakerActions.BeginQuest or QuestPlaymakerActions.BeginQuestV2)) {
+        var isBegin = self is QuestPlaymakerActions.BeginQuest or QuestPlaymakerActions.BeginQuestV2;
+        if (!isBegin && self is not (QuestPlaymakerActions.EndQuest or QuestPlaymakerActions.EndQuestV2)) {
             orig(self);
             return;
         }
 
         var waits = false;
         try {
-            waits = HoldsBegin(self, orig);
+            waits = isBegin ? HoldsBegin(self, orig) : HoldsDeliveryEnd(self, orig);
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -193,14 +201,14 @@ internal partial class CoopSave {
         }
 
         if (_applyingPartnerTalk || !_everChecked || members.Count == 0 || GetCurrentMarker() == null ||
-            FindKeyTalkFor(step) is not { } talk) {
+            FindTalkFor(step, false) is not { } talk) {
             return false;
         }
 
         // One step waits at a time. One that waited and is entered again is simply waited at anew, and finishing it
         // would finish the step that was entered just now.
-        if (_heldBegin is { } older) {
-            EndHeldBegin(null, !ReferenceEquals(older.Step, step));
+        if (_heldStep is { } older) {
+            EndHeldStep(null, !ReferenceEquals(older.Step, step));
         }
 
         // Kept from the start, so that a game that closes while the step waits still knows its player read to it
@@ -209,9 +217,9 @@ internal partial class CoopSave {
         var ask = CreateConfirm(WishConfirmAccept);
         ask.Records.Add(WishConfirmRead);
         ask.WishNames.Add(wish);
-        var held = new HeldBegin(
+        var held = new HeldStep(
             members.ConvertAll(member => (member.Id, member.Username)), ask.Key, step, () => orig(step), wish,
-            GetWishKey((WishConfirmAccept, wish)), talk.Npc
+            GetWishKey((WishConfirmAccept, wish)), talk.Npc, false
         );
 
         // A member who read to it already said yes to it, and goes on once the rest of them have
@@ -219,7 +227,7 @@ internal partial class CoopSave {
             held.Yes.Add(wait.PartnerId);
         }
 
-        _heldBegin = held;
+        _heldStep = held;
         SendToMembers(ask);
         var missing = held.GetMissingNames();
         var missingNames = JoinNames(missing);
@@ -242,15 +250,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The key dialogue that a step belongs to: the one running now, or the last one while what it set going still
-    /// runs, or null when the step belongs to no key dialogue.
+    /// The key dialogue that a step belongs to, or for a step that ends a delivery wish the delivery dialogue: the one
+    /// running now, or the last one while what it set going still runs, or null when the step belongs to none.
     /// </summary>
-    private WishTalk? FindKeyTalkFor(QuestPlaymakerActions.QuestFsmAction step) {
-        if (_wishTalk is { IsKey: true } current && current.IsTalkFsm(step.Fsm)) {
+    /// <param name="step">The step.</param>
+    /// <param name="delivery">Whether the step ends a delivery wish rather than begins a wish.</param>
+    private WishTalk? FindTalkFor(QuestPlaymakerActions.QuestFsmAction step, bool delivery) {
+        if (_wishTalk is { } current && (delivery ? current.IsDelivery : current.IsKey) &&
+            current.IsTalkFsm(step.Fsm)) {
             return current;
         }
 
-        return _lastKeyTalk is { } last && last.IsTalkFsm(step.Fsm) && IsInConversation(last, GetHostFsm(step.Fsm))
+        return _lastTalk is { } last && (delivery ? last.IsDelivery : last.IsKey) && last.IsTalkFsm(step.Fsm) &&
+               IsInConversation(last, GetHostFsm(step.Fsm))
             ? last
             : null;
     }
@@ -264,8 +276,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether an FSM of key dialogue is still in the conversation that talking to its character started: in a state
-    /// the talk leads to, rather than back to waiting for the next talk.
+    /// Whether an FSM of key or delivery dialogue is still in the conversation that talking to its character started:
+    /// in a state the talk leads to, rather than back to waiting for the next talk.
     /// </summary>
     private bool IsInConversation(WishTalk talk, Fsm? fsm) {
         if (fsm == null || talk.Npc is not PlayMakerNPC npc || npc == null || fsm.ActiveStateName is not { } active) {
@@ -281,34 +293,47 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the last key dialogue once none of its FSMs is in its conversation any more.
+    /// Forgets the last key or delivery dialogue once none of its FSMs is in its conversation any more, and tells the
+    /// members that it ended if that waited for this (see EndWishTalk).
     /// </summary>
-    private void UpdateLastKeyTalk() {
-        if (_lastKeyTalk is not { } last || ReferenceEquals(last, _wishTalk)) {
+    private void UpdateLastTalk() {
+        if (_lastTalk is not { } last || ReferenceEquals(last, _wishTalk) || IsAnyInConversation(last)) {
             return;
         }
 
-        foreach (var component in last.Fsms) {
-            if (component != null && IsInConversation(last, component.Fsm)) {
-                return;
-            }
+        _lastTalk = null;
+        if (last.EndUnsent) {
+            SendWishTalkEnded(last);
         }
-
-        _lastKeyTalk = null;
     }
 
     /// <summary>
-    /// The partner read to the same step: the step that waited goes on and takes the wish, the way it would have
-    /// without the wait.
+    /// Whether any FSM of key or delivery dialogue is still in its conversation.
+    /// </summary>
+    private bool IsAnyInConversation(WishTalk talk) {
+        foreach (var component in talk.Fsms) {
+            if (component != null && IsInConversation(talk, component.Fsm)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The members read to the same step: the step that waited goes on and takes the wish, or ends the delivery wish
+    /// with this game's own reward, the way it would have without the wait.
     /// </summary>
     /// <param name="message">What to tell the local player, or null to tell them nothing.</param>
-    private void ReleaseHeldBegin(string? message) {
-        if (_heldBegin is not { } held) {
+    private void ReleaseHeldStep(string? message) {
+        if (_heldStep is not { } held) {
             return;
         }
 
-        _heldBegin = null;
-        ForgetWishRead(held.Wish);
+        _heldStep = null;
+        if (!held.IsEnd) {
+            ForgetWishRead(held.Wish);
+        }
 
         // The members who waited at it answered this wait, and go on with the yes of this player that reached them
         ForgetWishWaits(held.WishKey);
@@ -317,49 +342,78 @@ internal partial class CoopSave {
         }
 
         if (IsStepLive(held.Step)) {
-            Logger.Info($"Both players read to the step that begins '{held.Wish}', so it goes on");
+            Logger.Info(held.IsEnd
+                ? $"[Deliveries] Every member read to the step that ends '{held.Wish}', so it goes on and ends it"
+                : $"Both players read to the step that begins '{held.Wish}', so it goes on");
             RunHeldStep(held);
             return;
         }
 
-        // The dialogue went on by some other way meanwhile, so the wish is taken without it
+        // The dialogue went on by some other way meanwhile, so the wish is taken without it. A delivery wish that
+        // nothing here ended comes from the members' games through the wish log.
+        if (held.IsEnd) {
+            Logger.Info($"[Deliveries] The step that ends '{held.Wish}' was left before every member read to it");
+            return;
+        }
+
         TakeReadWish(held.Wish);
     }
 
     /// <summary>
-    /// Stops waiting for the partner at a step that begins a wish, without the partner having got there.
+    /// Stops waiting for the members at a step that begins a wish, or ends a delivery wish, without all of them having
+    /// got there.
     /// </summary>
     /// <param name="message">What to tell the local player, or null to tell them nothing.</param>
     /// <param name="goOn">Whether the dialogue goes on from the step. Not when its scene is going, where going on
     /// would run what comes after the wish - like saving the game - on the way out.</param>
-    private void EndHeldBegin(string? message, bool goOn) {
-        if (_heldBegin is not { } held) {
+    private void EndHeldStep(string? message, bool goOn) {
+        if (_heldStep is not { } held) {
             return;
         }
 
-        _heldBegin = null;
+        _heldStep = null;
+        var goesOn = goOn && IsStepLive(held.Step) &&
+                     !(global::GameManager.instance is { } gameManager && gameManager.IsInSceneTransition);
 
-        // The wish waits for the partner's own reading to it all the same, since this save remembers that its player
-        // read to it. A word of theirs that crossed this end still counts.
-        TellHeldBeginIsOver(held);
-        _endedBegins.Add(new ReadWait(held.Key, held.Wish, held.Members.ConvertAll(member => member.Id), held.Yes));
-        if (_endedBegins.Count > MaxEndedBegins) {
-            _endedBegins.RemoveAt(0);
+        // A delivery wish that this game goes on to end without some members is ended in this save alone (see below)
+        var endsAlone = goesOn && held.IsEnd && GetCurrentMarker() != null;
+
+        // A wish to begin waits for the partner's own reading to it all the same, since this save remembers that its
+        // player read to it. A word of theirs that crossed this end still counts.
+        TellHeldStepIsOver(held, endsAlone);
+        if (!held.IsEnd) {
+            _endedBegins.Add(new ReadWait(held.Key, held.Wish, held.Members.ConvertAll(member => member.Id), held.Yes));
+            if (_endedBegins.Count > MaxEndedBegins) {
+                _endedBegins.RemoveAt(0);
+            }
         }
 
         if (message != null) {
             Chat(message);
         }
 
-        if (!goOn || !IsStepLive(held.Step) ||
-            (global::GameManager.instance is { } gameManager && gameManager.IsInSceneTransition)) {
-            Logger.Info($"Stopped waiting for the partner at the step that begins '{held.Wish}'");
+        var does = held.IsEnd ? "ends" : "begins";
+        if (!goesOn) {
+            Logger.Info($"Stopped waiting for the members at the step that {does} '{held.Wish}'");
             return;
         }
 
         // A save that stopped being a two-player save is its player's alone, and so is the wish
         if (GetCurrentMarker() == null) {
-            Logger.Info($"The save isn't shared any more, so the step that begins '{held.Wish}' goes on and takes it");
+            Logger.Info($"The save isn't shared any more, so the step that {does} '{held.Wish}' goes on");
+            RunHeldStep(held);
+            return;
+        }
+
+        // A delivery wish isn't kept from the players who got there: this game ends it by itself, with its own
+        // reward, in its own save alone. The saves differ in it until each member who didn't get there ends it in
+        // their own game with their own reward, which a completion from here would leave them without.
+        if (held.IsEnd) {
+            _differentWishNames.Add(held.Wish);
+            Logger.Info(
+                $"[Deliveries] {JoinNames(held.GetMissingNames())} didn't read to the step that ends '{held.Wish}', " +
+                "so it goes on and ends it in this save alone"
+            );
             RunHeldStep(held);
             return;
         }
@@ -373,18 +427,21 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Ends the wait at a step that begins a wish once it can't go on as it is: the step was left, the save has the
-    /// wish by now, the partner is gone, or the partner didn't read to the same step in time.
+    /// Ends the wait at a step that begins a wish, or ends a delivery wish, once it can't go on as it is: the step was
+    /// left, the save has the wish or its end by now, a member is gone, or a member didn't read to the same step in
+    /// time.
     /// </summary>
-    private void UpdateHeldBegin() {
-        if (_heldBegin is not { } held) {
+    private void UpdateHeldStep() {
+        if (_heldStep is not { } held) {
             return;
         }
 
         // The FSM left the step some other way, like an event of its own a moment later, or went with its scene
         if (!IsStepLive(held.Step)) {
             var notYet = held.GetMissingNames();
-            EndHeldBegin(held.Members.Count == 1
+            EndHeldStep(held.IsEnd
+                ? GetDeliveryEndLeftMessage()
+                : held.Members.Count == 1
                 ? Lang.Pick(
                     $"The dialogue went on without waiting, so the wish isn't taken yet. Once {JoinNames(notYet)} reads " +
                     "it to the same point too, you both take it.",
@@ -400,16 +457,19 @@ internal partial class CoopSave {
 
         // The save isn't shared any more, and the wish is its player's alone, or no save is loaded at all
         if (GetCurrentMarker() == null) {
-            EndHeldBegin(null, IsInGame());
+            EndHeldStep(null, IsInGame());
             return;
         }
 
-        // The save got the wish meanwhile some other way, so the step has nothing left to wait for
+        // The save got the wish meanwhile some other way, so the step has nothing left to wait for. A delivery wish
+        // that the save no longer has open, ended or broken meanwhile, goes the way the game alone would take it.
         if (PlayerData.instance is { } playerData) {
             var completion = playerData.QuestCompletionData.GetData(held.Wish);
-            if (completion.IsAccepted || completion.IsCompleted) {
-                TellHeldBeginIsOver(held);
-                ReleaseHeldBegin(null);
+            if (held.IsEnd
+                    ? completion.IsCompleted || !completion.IsAccepted
+                    : completion.IsAccepted || completion.IsCompleted) {
+                TellHeldStepIsOver(held, false);
+                ReleaseHeldStep(null);
                 return;
             }
         }
@@ -417,7 +477,8 @@ internal partial class CoopSave {
         // A member who left can't get there now
         var gone = held.Members.Where(member => !_checkedMembers.Contains(member.Id)).ToList();
         if (gone.Count > 0) {
-            EndHeldBegin(GetPartnerGoneMessage(JoinNames(gone.Select(member => member.Name)), held.Members.Count), true);
+            var goneNames = JoinNames(gone.Select(member => member.Name));
+            EndHeldStep(GetPartnerGoneMessage(goneNames, held.Members.Count, held.IsEnd), true);
             return;
         }
 
@@ -434,7 +495,9 @@ internal partial class CoopSave {
 
         if (now - Mathf.Max(held.Started, held.PartnerReadAt) > WishConfirmTimeout) {
             var missing = JoinNames(held.GetMissingNames());
-            EndHeldBegin(held.Members.Count == 1
+            EndHeldStep(held.IsEnd
+                ? GetDeliveryEndTimeoutMessage(missing, held.Members.Count)
+                : held.Members.Count == 1
                 ? Lang.Pick(
                     $"{missing} didn't read to this point, so the dialogue goes on and the wish isn't taken yet. " +
                     "Once they read this dialogue to the same point too, you both take it.",
@@ -453,7 +516,12 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="names">The names of the members who are gone.</param>
     /// <param name="memberCount">How many members the step waited for.</param>
-    private static string GetPartnerGoneMessage(string names, int memberCount) {
+    /// <param name="isEnd">Whether the step ends a delivery wish rather than begins a wish.</param>
+    private static string GetPartnerGoneMessage(string names, int memberCount, bool isEnd) {
+        if (isEnd) {
+            return GetDeliveryEndGoneMessage(names, memberCount);
+        }
+
         return memberCount == 1
             ? Lang.Pick(
                 $"{names} is gone for now, so the dialogue goes on and the wish isn't taken yet. Once they read this " +
@@ -623,7 +691,7 @@ internal partial class CoopSave {
     /// Forgets the waits and answers of a session.
     /// </summary>
     private void ResetWishRead() {
-        _lastKeyTalk = null;
+        _lastTalk = null;
         _wishesAgreedAtPrompt.Clear();
         _endedBegins.Clear();
         _readChecks.Clear();
@@ -631,25 +699,59 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the games of the members that the local player no longer stands at a step that begins a wish, so that they
-    /// stop keeping their word.
+    /// Tells the games of the members that the local player no longer stands at a step that begins a wish, or ends a
+    /// delivery wish, so that they stop keeping their word.
     /// </summary>
-    private void TellHeldBeginIsOver(HeldBegin held) {
+    /// <param name="held">The step.</param>
+    /// <param name="endsAlone">Whether this game goes on to end the delivery wish in its own save alone, which the
+    /// members' saves keep open (see KeepDeliveryWishOpen).</param>
+    private void TellHeldStepIsOver(HeldStep held, bool endsAlone) {
         foreach (var (id, _) in held.Members) {
             Send(new CoopSaveUpdate {
                 TargetId = id,
                 Kind = CoopSaveUpdateKind.WishConfirm,
                 PartCount = WishConfirmGone,
+                Part = endsAlone ? GoneWentThrough : (ushort) 0,
                 Key = held.Key
             });
         }
     }
 
     /// <summary>
+    /// What the local player is told when the last of the members a step waited for got there too.
+    /// </summary>
+    /// <param name="names">The names of the members who got there last.</param>
+    /// <param name="memberCount">How many members the step waited for.</param>
+    /// <param name="isEnd">Whether the step ends a delivery wish rather than begins a wish.</param>
+    private static string GetHeldStepGoesOnMessage(string names, int memberCount, bool isEnd) {
+        if (isEnd) {
+            return memberCount == 1
+                ? Lang.Pick(
+                    $"{names} got to it too, so you both complete the wish.",
+                    $"{names} 也到了这一步，你们一起完成这个愿望。"
+                )
+                : Lang.Pick(
+                    $"{names} got to it too, so you all complete the wish.",
+                    $"{names} 也到了这一步，大家一起完成这个愿望。"
+                );
+        }
+
+        return memberCount == 1
+            ? Lang.Pick(
+                $"{names} got to it too, so you both take the wish.",
+                $"{names} 也到了这一步，你们一起接下这个愿望。"
+            )
+            : Lang.Pick(
+                $"{names} got to it too, so you all take the wish.",
+                $"{names} 也到了这一步，你们一起接下这个愿望。"
+            );
+    }
+
+    /// <summary>
     /// Runs a step that waited, with its FSM the one that runs, as it is while the FSM runs its own steps. A step that
     /// throws is finished all the same, or nothing after it would ever run.
     /// </summary>
-    private void RunHeldStep(HeldBegin held) {
+    private void RunHeldStep(HeldStep held) {
         var fsm = held.Step.Fsm;
         FsmExecutionStack.PushFsm(fsm);
         try {
@@ -746,12 +848,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A step of key dialogue that begins a wish and waits for every member to read to the same step.
+    /// A step of key dialogue that begins a wish, or of delivery dialogue that ends a delivery wish, and waits for
+    /// every member to read to the same step.
     /// </summary>
-    private sealed class HeldBegin {
-        public HeldBegin(
+    private sealed class HeldStep {
+        public HeldStep(
             List<(ushort Id, string Name)> members, ulong key, QuestPlaymakerActions.QuestFsmAction step,
-            Action proceed, string wish, string wishKey, NPCControlBase npc
+            Action proceed, string wish, string wishKey, NPCControlBase npc, bool isEnd
         ) {
             Members = members;
             Key = key;
@@ -760,7 +863,13 @@ internal partial class CoopSave {
             Wish = wish;
             WishKey = wishKey;
             Npc = npc;
+            IsEnd = isEnd;
         }
+
+        /// <summary>
+        /// Whether the step ends a delivery wish rather than begins a wish.
+        /// </summary>
+        public bool IsEnd { get; }
 
         /// <summary>
         /// The members who were told, with their names, who are told when the wait ends.
@@ -799,7 +908,7 @@ internal partial class CoopSave {
         public QuestPlaymakerActions.QuestFsmAction Step { get; }
 
         /// <summary>
-        /// Runs the start of the step for real, which begins the wish and goes on the way it always does.
+        /// Runs the start of the step for real, which begins or ends the wish and goes on the way it always does.
         /// </summary>
         public Action Proceed { get; }
 

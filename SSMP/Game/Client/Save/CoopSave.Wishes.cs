@@ -78,8 +78,9 @@ internal partial class CoopSave {
     private int _differentWishes;
 
     /// <summary>
-    /// The wishes that the current check found completed in only one of the saves. Their changes only share whether they
-    /// are accepted, so that the completion of one save doesn't get copied later.
+    /// The wishes that the current check found completed in only one of the saves, and the delivery wishes that a game
+    /// ended without the members who didn't read to their end in time (see KeepDeliveryWishOpen). Their changes only
+    /// share whether they are accepted, so that the completion of one save doesn't get copied later.
     /// </summary>
     private readonly HashSet<string> _differentWishNames = new(StringComparer.Ordinal);
 

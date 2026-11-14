@@ -33,14 +33,14 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Keeps dialogue that accepted wishes and did nothing else, as it went to or came from the partner. Dialogue that
-    /// also completed a wish, or that turned in a delivery before, is left out: a check never gives a completed wish,
-    /// so what the rest of such dialogue gave could not be told apart from what went with the completion. So is
+    /// also completed a wish is left out: a check never gives a completed wish, so what the rest of such dialogue gave
+    /// could not be told apart from what went with the completion. So is
     /// dialogue that accepted a delivery: whether a check gives a save a delivery goes by whether its player carries
     /// the item (<see cref="IsUncarriedDelivery"/>), and giving the item back as well would hand out a second one.
     /// </summary>
     /// <param name="update">The dialogue.</param>
     private void KeepAcceptTalk(CoopSaveUpdate update) {
-        if (update.WishNames.Count == 0 || update.WishNames.Count != update.WishValues.Count || update.PartCount != 0 ||
+        if (update.WishNames.Count == 0 || update.WishNames.Count != update.WishValues.Count ||
             GetCurrentMarker() is not { } marker) {
             return;
         }

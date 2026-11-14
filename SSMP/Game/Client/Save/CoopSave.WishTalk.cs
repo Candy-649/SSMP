@@ -23,8 +23,9 @@ using SSMP.Util;
 /// local player and gave them, so both pay a full copy and both get the reward. Turning in a wish needs a full copy of
 /// what it takes in both inventories, which each game checks in its own inventory at the moment of the turn-in (see
 /// CoopSave.WishCopyCheck), while progress that isn't taken, like kills, counts from either player. A wish that only one
-/// save completed before is turned in by the other player with their own copy alone. A delivery that runs against time
-/// is turned in by whoever gets there first. Other talk stays with the player who talks.
+/// save completed before is turned in by the other player with their own copy alone. A delivery is handed in for every
+/// member by whoever hands its item in first, and the step that ends its wish waits for every member to read to it
+/// (CoopSave.Deliveries). Other talk stays with the player who talks.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -166,8 +167,8 @@ internal partial class CoopSave {
     private WishTalk? _wishTalk;
 
     /// <summary>
-    /// The key dialogue that each other member is in, by member, whose character doesn't talk to the local player
-    /// meanwhile.
+    /// The key or delivery dialogue that each other member is in, by member, which a step that waits for them keeps
+    /// waiting for while it goes on (CoopSave.WishRead), and which keeps a board to one turn-in at a time.
     /// </summary>
     private readonly Dictionary<ushort, PartnerTalk> _partnerTalks = new();
 
@@ -256,7 +257,8 @@ internal partial class CoopSave {
         Key,
 
         /// <summary>
-        /// The character can take in a delivery that runs against time, which whoever gets there first turns in.
+        /// The character can take in a delivery wish, whose item whoever hands it in first hands in for every member,
+        /// and whose end waits for every member (CoopSave.Deliveries).
         /// </summary>
         Delivery
     }
@@ -290,21 +292,23 @@ internal partial class CoopSave {
         public bool IsKey { get; set; }
 
         /// <summary>
-        /// Whether it can turn in a delivery, which needs nobody else, whose character doesn't talk to the partner
-        /// meanwhile, and whose lines the partner reads too without the dialogue waiting for them.
+        /// Whether it can take in a delivery wish, which needs nobody else to start unless the character offers or
+        /// takes in another wish too. Each member talks to the character in their own game and reads their own lines
+        /// (CoopSave.Deliveries).
         /// </summary>
         public bool IsDelivery { get; set; }
 
         /// <summary>
-        /// What the dialogue gives later that went to the partner already, like the reward of a delivery.
+        /// The delivery wish whose item the dialogue just took, whose hand-in goes to the members once the step that
+        /// took it is through, or null.
         /// </summary>
-        public HashSet<string> CreditedGains { get; } = [];
+        public FullQuestBase? HandIn { get; set; }
 
         /// <summary>
-        /// How many changes at the start of <see cref="Changes"/> went to the partner already, like a delivery that went
-        /// the moment it was turned in, which what the dialogue changes afterwards belongs to.
+        /// Whether the members are still to hear that the dialogue ended, which waits while its FSMs are in their
+        /// conversation, like the cook's show after the lines (see UpdateLastTalk).
         /// </summary>
-        public int SentChanges { get; set; }
+        public bool EndUnsent { get; set; }
 
         /// <summary>
         /// The wishes that dialogue of the partner turned in with the local player while this dialogue could take them
@@ -382,7 +386,6 @@ internal partial class CoopSave {
         /// Forgets what the dialogue changed so far, once it went to the partner.
         /// </summary>
         public void ClearChanges() {
-            SentChanges = 0;
             Wishes.Clear();
             Changes.Clear();
             ChangeValues.Clear();
@@ -395,8 +398,13 @@ internal partial class CoopSave {
         /// <summary>
         /// Whether the dialogue changed something that didn't go to the partner yet.
         /// </summary>
-        public bool HasUnsentChanges =>
-            Changes.Count > SentChanges || Items.Count > 0 || Flags.Count > 0 || IntChanges.Count > 0;
+        public bool HasUnsentChanges => Changes.Count > 0 || Items.Count > 0 || Flags.Count > 0 || IntChanges.Count > 0;
+
+        /// <summary>
+        /// Whether the dialogue took something for the character, rather than a payment that may be for something else,
+        /// like one in a shop of the character.
+        /// </summary>
+        public bool TookSomething => Items.Exists(item => item.IsTake && !item.OnlyForTarget);
 
         /// <summary>
         /// Whether an FSM runs the dialogue of the character.
@@ -627,7 +635,7 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// The character, who doesn't talk to the local player until the member is done, or null.
+        /// The character or board, or null.
         /// </summary>
         public NPCControlBase? Npc { get; }
 
@@ -857,25 +865,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether an FSM turns in a delivery, which the partner reads too.
-    ///
-    /// Key dialogue is no longer among these, and that is the point of it. Copying each line into a box on the other
-    /// player's screen never made them part of the conversation - it froze them in front of a copy while their own
-    /// character stood there unspoken to, and it held the one dialogue box the game has, which is the box every
-    /// question about a wish has to be asked in. Both players walk up to the character and talk to it themselves now.
-    /// A delivery still crosses, because there the partner is brought to it rather than talking at all.
-    /// </summary>
-    public bool IsSharedTalk(Fsm fsm) {
-        return _wishTalk is { IsDelivery: true } talk && talk.IsTalkFsm(fsm);
-    }
-
-    /// <summary>
     /// Ends dialogue whose character stopped talking, frees the characters that the members talked to, and sends the
     /// progress of the wishes.
     /// </summary>
     private void UpdateWishTalk() {
         try {
             if (_wishTalk is { } talk) {
+                SendPendingHandIn(talk);
                 var now = Time.unscaledTime;
                 if (IsTalking(talk.Npc)) {
                     talk.EndedTime = -1f;
@@ -908,8 +904,8 @@ internal partial class CoopSave {
         // A step of dialogue that waits for the partner must not wait for good because something above throws on
         // every frame (CoopSave.WishRead)
         try {
-            UpdateHeldBegin();
-            UpdateLastKeyTalk();
+            UpdateHeldStep();
+            UpdateLastTalk();
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -967,18 +963,24 @@ internal partial class CoopSave {
     /// </summary>
     private void OnWishTalkSceneChanged() {
         EndWishTalk();
+        if (_lastTalk is { EndUnsent: true } last) {
+            SendWishTalkEnded(last);
+        }
 
         _partnerTalks.Clear();
-        _lastKeyTalk = null;
+        _lastTalk = null;
         _donationPrompt = null;
         _wishActions.Clear();
         _talkStates.Clear();
 
-        // The dialogue went with its scene before every member read to the step that begins its wish. The save
-        // remembers that its player read to it, and nothing that came after the step ran, so nothing goes on.
-        if (_heldBegin is { } held) {
+        // The dialogue went with its scene before every member read to the step that begins its wish, or ends its
+        // delivery wish. The save remembers that its player read to a wish to begin, and nothing that came after the
+        // step ran, so nothing goes on. A delivery wish stays open until its player talks to the character again.
+        if (_heldStep is { } held) {
             var missing = JoinNames(held.GetMissingNames());
-            EndHeldBegin(held.Members.Count == 1
+            EndHeldStep(held.IsEnd
+                ? GetDeliveryEndSceneLeftMessage(missing)
+                : held.Members.Count == 1
                 ? Lang.Pick(
                     $"You left before {missing} read to that point, so the wish isn't taken yet. Once they read " +
                     "that dialogue to the same point too, you both take it.",
@@ -1039,7 +1041,7 @@ internal partial class CoopSave {
             // is asked by their own game, in their own conversation, and a wish is only taken when both have said yes
             // at their own prompt. Both may look at a board at once too; what one of them turns in or donates there
             // meanwhile waits for the other (StartBoardTalk, CanDonateTogether)
-            if (_heldBegin is { } held && held.Npc == self) {
+            if (_heldStep is { } held && held.Npc == self) {
                 // Its dialogue stands at a step that waits for the members, and talking to it again could move it on
                 // without them (CoopSave.WishRead)
                 var missing = JoinNames(held.GetMissingNames());
@@ -1067,7 +1069,7 @@ internal partial class CoopSave {
     /// <returns>Whether the character may talk.</returns>
     private bool TryStartWishTalk(PlayMakerNPC npc, CoopSaveMarker marker) {
         var fsms = GetTalkFsms(npc);
-        var kind = GetTalkKind(npc, fsms);
+        var kind = GetTalkKind(npc, fsms, out var takesDelivery);
         if (kind == TalkKind.Delivery) {
             StartDeliveryTalk(npc, fsms);
             return true;
@@ -1095,11 +1097,14 @@ internal partial class CoopSave {
         }
 
         EndWishTalk();
-        var talk = new WishTalk(npc, fsms, true);
+        var talk = new WishTalk(npc, fsms, true) { IsDelivery = takesDelivery };
         _wishTalk = talk;
-        _lastKeyTalk = talk;
+        _lastTalk = talk;
         SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
-        Logger.Info($"Key dialogue with '{npc.name}' starts with {GetCheckedNames()} close by");
+        Logger.Info(
+            $"Key dialogue with '{npc.name}' starts with {GetCheckedNames()} close by" +
+            (takesDelivery ? ", and can take in a delivery" : "")
+        );
         return true;
     }
 
@@ -1235,15 +1240,19 @@ internal partial class CoopSave {
 
     /// <summary>
     /// What talking to a character is about right now: whether a state that the talk goes through can offer a wish that
-    /// is available and not accepted, or take in an accepted wish that can be completed.
+    /// is available and not accepted, take in an accepted wish that can be completed, or take in a delivery wish.
     /// </summary>
-    private TalkKind GetTalkKind(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms) {
+    /// <param name="npc">The character.</param>
+    /// <param name="fsms">The FSMs that run its dialogue.</param>
+    /// <param name="takesDelivery">Whether the talk can take in a delivery wish, also when it is key dialogue.</param>
+    private TalkKind GetTalkKind(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms, out bool takesDelivery) {
         var interactEvent = InteractEventField?.GetValue(npc) as string;
         if (string.IsNullOrEmpty(interactEvent)) {
             interactEvent = DefaultInteractEvent;
         }
 
         var kind = TalkKind.Casual;
+        takesDelivery = false;
         foreach (var component in fsms) {
             if (component.Fsm is not { } fsm) {
                 continue;
@@ -1264,21 +1273,28 @@ internal partial class CoopSave {
                         kind = TalkKind.Key;
                     }
                 } else if (quest.IsAccepted && !quest.IsCompleted) {
-                    // A delivery goes first, since whoever gets there first turns it in without waiting. The character
-                    // of a delivery wish takes it in also when the item got damaged on the way, while an item that runs
-                    // against time among what a wish gathers only makes a delivery of a wish that can be completed
-                    if (IsCarriedDelivery(quest) && (IsBreakableDelivery(quest) || quest.CanComplete)) {
-                        return TalkKind.Delivery;
+                    if (!IsDeliveryWish(quest)) {
+                        if (quest.CanComplete) {
+                            kind = TalkKind.Key;
+                        }
+
+                        continue;
                     }
 
-                    if (quest.CanComplete) {
-                        kind = TalkKind.Key;
+                    // A delivery whose item the local player carries goes first, since nobody else needs to be there:
+                    // whoever hands its item in first hands it in for all, and the step that ends it waits for all
+                    // (CoopSave.Deliveries)
+                    takesDelivery = true;
+                    if (IsCarriedDelivery(quest)) {
+                        return TalkKind.Delivery;
                     }
                 }
             }
         }
 
-        return kind;
+        // One whose item went with a member's hand-in is still ended here, while what else the character offers or
+        // takes in needs the members close by, as key dialogue always does
+        return kind == TalkKind.Casual && takesDelivery ? TalkKind.Delivery : kind;
     }
 
     /// <summary>
@@ -1445,8 +1461,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Ends the dialogue of the local player. The members can talk to the character again, and if the dialogue accepted
-    /// or completed wishes, the saves of the members get them with what the dialogue took and gave.
+    /// Ends the dialogue of the local player. The members hear that it ended, and if the dialogue accepted or completed
+    /// wishes, the saves of the members get them with what the dialogue took and gave, as they get what dialogue at the
+    /// character of a delivery took (see SendTalkChanges).
     /// </summary>
     private void EndWishTalk() {
         if (_wishTalk is not { } talk) {
@@ -1454,34 +1471,56 @@ internal partial class CoopSave {
         }
 
         _wishTalk = null;
-        if ((talk.IsKey || talk.IsDelivery) && GetCurrentMarker() is { } marker && FindMembers(marker).Count > 0) {
-            SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkEnded));
+        if (talk.IsKey || talk.IsDelivery) {
+            // A talk whose FSMs are still in its conversation, like the cook's show that plays after its lines, is
+            // still one with its character until they are back to waiting for the next talk (UpdateLastTalk). A member
+            // waiting at the step that ends a delivery wish keeps waiting for this player meanwhile.
+            if (ReferenceEquals(_lastTalk, talk) && IsAnyInConversation(talk)) {
+                talk.EndUnsent = true;
+            } else {
+                SendWishTalkEnded(talk);
+            }
         }
 
+        SendPendingHandIn(talk);
         SendTalkChanges(talk);
+
+        // What went to the members is forgotten: the step that ends a delivery wish can still hand it in with this
+        // dialogue later (CoopSave.Deliveries), which sends what it changed so far
+        talk.ClearChanges();
+    }
+
+    /// <summary>
+    /// Tells the members that key or delivery dialogue of the local player ended.
+    /// </summary>
+    private void SendWishTalkEnded(WishTalk talk) {
+        talk.EndUnsent = false;
+        if (GetCurrentMarker() is { } marker && FindMembers(marker).Count > 0) {
+            SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkEnded));
+        }
     }
 
     /// <summary>
     /// Sends the wishes that dialogue accepted or completed to the members, with what it took and gave, if it changed
-    /// any. Changes that went to them before, like a delivery, go again for what the dialogue changed afterwards, which
-    /// they take if they took those changes.
+    /// any. Dialogue at the character of a delivery that took something, like an ingredient that the cook's servant
+    /// takes, sends what it took and set also when it changed no wish: what one player hands in there counts for every
+    /// member (CoopSave.Deliveries).
     /// </summary>
     private void SendTalkChanges(WishTalk talk) {
-        if (talk.Changes.Count == 0 || !talk.HasUnsentChanges) {
+        if (!talk.HasUnsentChanges || talk.Changes.Count == 0 && !(talk.IsDelivery && talk.TookSomething)) {
             return;
         }
 
-        var members = GetCurrentMarker() is { } marker ? FindMembers(marker) : [];
-        if (members.Count == 0) {
-            // The next check finds the wishes changed in one save only
-            Logger.Warn("Dialogue about wishes ended without a member on the server, so its wishes stay with the local save");
-            return;
-        }
+        SendTalkUpdate(CreateTalkUpdate(talk));
+    }
 
+    /// <summary>
+    /// The update that sends what dialogue changed so far to the members.
+    /// </summary>
+    private static CoopSaveUpdate CreateTalkUpdate(WishTalk talk) {
         // A wish that changed twice, like one that was completed and accepted again, has an entry for each change
         var update = new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.WishTurnIn,
-            PartCount = (ushort) Mathf.Min(talk.SentChanges, ushort.MaxValue),
             Scene = talk.Scene,
             ObjectPath = talk.Path
         };
@@ -1490,9 +1529,11 @@ internal partial class CoopSave {
             update.WishValues.Add(talk.ChangeValues[i]);
         }
 
+        // What dialogue that changed no wish gave stays with the local player: each game gives its own, like the reward
+        // that every member's own dialogue gives at the end of a delivery wish (CoopSave.Deliveries)
         foreach (var item in talk.Items) {
             var index = talk.GetChangeIndex(item);
-            if (talk.Counts(item, index)) {
+            if ((item.IsTake || talk.Changes.Count > 0) && talk.Counts(item, index)) {
                 update.ItemIds.Add(index + "\n" + item.Change);
                 update.Amounts.Add(item.Amount);
             }
@@ -1510,6 +1551,22 @@ internal partial class CoopSave {
             }
         }
 
+        return update;
+    }
+
+    /// <summary>
+    /// Sends what dialogue changed to the members. A member whose check still runs gets it once the check is done.
+    /// </summary>
+    private void SendTalkUpdate(CoopSaveUpdate update) {
+        var members = GetCurrentMarker() is { } marker ? FindMembers(marker) : [];
+        if (members.Count == 0) {
+            // The next check finds the wishes changed in one save only
+            Logger.Warn(
+                "Dialogue about wishes ended without a member on the server, so its wishes stay with the local save"
+            );
+            return;
+        }
+
         // Kept in case this save loses the accept before it is saved, for the next check to give back with it
         KeepAcceptTalk(update);
 
@@ -1521,7 +1578,7 @@ internal partial class CoopSave {
                 checkedNow.Count > 0 ? update.Copy() : update, checkedNow.Select(member => member.Id)
             ));
             Logger.Info(
-                $"Dialogue about {talk.Wishes.Count} wishes waits for the check with " +
+                $"Dialogue with {update.WishNames.Count} changes of wishes waits for the check with " +
                 $"{JoinNames(members.Where(member => !_checkedMembers.Contains(member.Id)).Select(member => member.Username))}"
             );
         }
@@ -1542,8 +1599,7 @@ internal partial class CoopSave {
             SendCopy(update, members[i].Id);
         }
 
-        // Changes that went to the members before are known already, and the wish log may have changed since
-        for (var i = (int) update.PartCount; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+        for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _knownWishes[update.WishNames[i]] = update.WishValues[i];
         }
 
@@ -1677,8 +1733,6 @@ internal partial class CoopSave {
                 AddTalkWish(self);
                 if (_boardCompletionDepth > 0) {
                     RecordBoardReward(self);
-                } else if (_wishTalk is { IsDelivery: true } talk) {
-                    SendDelivery(talk, self);
                 }
             } catch (Exception e) {
                 LogWishTalkError(e);
@@ -1726,9 +1780,8 @@ internal partial class CoopSave {
     /// Records what an FSM of dialogue of the local player gives.
     /// </summary>
     private void RecordTalkGainChange(Fsm? fsm, string change, int amount) {
-        // A reward that went to the partner with a delivery isn't recorded again
         if (_wishTalk is { } talk && !_applyingPartnerTalk && _talkGainDepth == 0 && amount > 0 &&
-            talk.IsTalkFsm(fsm) && !talk.CreditedGains.Remove(change)) {
+            talk.IsTalkFsm(fsm)) {
             talk.AddItem(change, amount, false);
         }
     }
@@ -1747,6 +1800,7 @@ internal partial class CoopSave {
         var forWish = _consumingWish != null ? _consumingWish.name : null;
         if (talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm)) {
             talk.AddItem(change, amount, true, forWish);
+            NoteDeliveryItemTaken(talk, item);
             return;
         }
 
@@ -1847,14 +1901,15 @@ internal partial class CoopSave {
             var applies = new bool[count];
             var newer = new Dictionary<string, bool>(StringComparer.Ordinal);
             var lastBefore = new Dictionary<string, QuestCompletionData.Completion>(StringComparer.Ordinal);
-            var anyApplies = false;
+            // A hand-in of a delivery changes no wish, and what it took and set counts as it is (CoopSave.Deliveries)
+            var anyApplies = count == 0;
             var anyNewApplies = false;
             var anyCompleted = false;
             var completionApplies = false;
             var brokenApplies = false;
             var turnedInHere = false;
-            var deliveredHere = false;
             var completedHere = false;
+            var endedTogether = false;
             var changed = 0;
             var accepted = 0;
             var completed = 0;
@@ -1863,15 +1918,6 @@ internal partial class CoopSave {
                 var name = update.WishNames[i];
                 var value = update.WishValues[i];
                 var isCompletion = (value & WishCompleted) != 0;
-
-                // A change that came before, like a delivery the moment it was turned in, comes again for what the
-                // dialogue changed afterwards, which counts if that change counted
-                if (i < update.PartCount) {
-                    applies[i] = isCompletion && _appliedPartnerCompletions.TryGetValue(name, out var applied) &&
-                                 applied == value;
-                    anyApplies |= applies[i];
-                    continue;
-                }
 
                 // A wish that changed more than once in the dialogue has an entry for each change, in order
                 if (!newer.TryGetValue(name, out var isNewer)) {
@@ -1891,16 +1937,14 @@ internal partial class CoopSave {
                 var isTurnedInHere = isCompletion && !before.IsCompleted && IsTurningInAtBoard(name);
                 turnedInHere |= isTurnedInHere;
 
-                // A delivery that the local player turned in at the same time was paid and rewarded with that turn-in
-                deliveredHere |= isCompletion && before.IsCompleted &&
-                                 _deliveredWishes.TryGetValue(name, out var delivered) && delivered == packedBefore;
-
                 // A wish that the local player completed at the same time, in their own dialogue or at their own
-                // board, was paid and rewarded there, as the partner's was in their game
+                // board, was paid and rewarded there, as the partner's was in their game. A delivery wish ends so in
+                // every game, at the step that waited for all, which said that they complete it together.
                 if (isCompletion && before.IsCompleted && _wishesCompletedHere.TryGetValue(name, out var done) &&
                     done.Packed == packedBefore && Time.unscaledTime - done.Time <= WishTogetherTime) {
                     _wishesCompletedHere.Remove(name);
                     completedHere = true;
+                    endedTogether |= FindQuest(name) is { } ended && IsDeliveryWish(ended);
                     Logger.Info(
                         $"'{name}' was completed here too, {Time.unscaledTime - done.Time:0.0} s before the turn-in of " +
                         $"{player.Username} came: each paid and was rewarded by their own"
@@ -1937,11 +1981,9 @@ internal partial class CoopSave {
                 ApplyPartnerWish(playerData, name, value, ref changed, ref accepted, ref completed);
 
                 // Local dialogue that takes in the same wish, like with the same character, doesn't reward it again
-                if (isCompletion && applies[i]) {
-                    _appliedPartnerCompletions[name] = value;
-                    if (_wishTalk is { } talk && FindQuest(name) is { } quest && CanTalkTurnIn(talk, quest)) {
-                        talk.TurnedInByPartner.Add(name);
-                    }
+                if (isCompletion && applies[i] && _wishTalk is { } talk && FindQuest(name) is { } quest &&
+                    CanTalkTurnIn(talk, quest)) {
+                    talk.TurnedInByPartner.Add(name);
                 }
             }
 
@@ -2013,22 +2055,16 @@ internal partial class CoopSave {
                         $"{player.Username} 和你同时交了同一个愿望。你出自己那份，奖励只在你这块板子上拿一次。"
                     )
                 );
-            } else if (deliveredHere) {
-                Chat(
-                    Lang.Pick(
-                        $"{player.Username} turned in the same delivery at the same time. You paid your copy and got the " +
-                        "reward once, with your own turn-in.",
-                        $"{player.Username} 和你同时交了同一份托运。你出了自己那份，奖励只按你自己那次算一次。"
-                    )
-                );
             } else if (completedHere) {
-                Chat(
-                    Lang.Pick(
-                        $"{player.Username} turned in the same wish at the same time. You each paid your own copy and got " +
-                        "your own reward.",
-                        $"{player.Username} 和你同时交了同一个愿望。你们各自出了自己那份，也各自拿到了奖励。"
-                    )
-                );
+                if (!endedTogether) {
+                    Chat(
+                        Lang.Pick(
+                            $"{player.Username} turned in the same wish at the same time. You each paid your own " +
+                            "copy and got your own reward.",
+                            $"{player.Username} 和你同时交了同一个愿望。你们各自出了自己那份，也各自拿到了奖励。"
+                        )
+                    );
+                }
             } else if (anyCompleted) {
                 Chat(
                     Lang.Pick(
@@ -2058,9 +2094,10 @@ internal partial class CoopSave {
                 );
             }
 
-            Logger.Info(
-                $"Added dialogue with {count} changes of wishes from {player.Username}, {changed} changed and {items} " +
-                "item changes"
+            Logger.Info(count == 0
+                ? $"[Deliveries] Took the hand-in of a delivery from {player.Username}: {items} item changes"
+                : $"Added dialogue with {count} changes of wishes from {player.Username}, {changed} changed and " +
+                  $"{items} item changes"
             );
         } catch (Exception e) {
             LogWishTalkError(e);

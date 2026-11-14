@@ -684,7 +684,7 @@ internal partial class CoopSave {
 
         // A step of dialogue that waits for the partner doesn't go on: its scene is going, and going on would run what
         // comes after the wish, like saving the game, on the way out (CoopSave.WishRead)
-        EndHeldBegin(null, false);
+        EndHeldStep(null, false);
 
         // Before the check is forgotten, so that a question of the partner still on screen is answered back to them
         // and a button that waited on them is told it is over. ResetWishTalk below runs it again, which does nothing.
@@ -835,11 +835,13 @@ internal partial class CoopSave {
         var wasChecked = _checkedMembers.Contains(id);
         var name = check?.Name ?? username ?? (_playerData.TryGetValue(id, out var gone) ? gone.Username : null);
 
-        // A step of dialogue that waits for them goes on without the wish, which waits for them to read to it too
-        if (_heldBegin is { } heldBegin && heldBegin.HasMember(id)) {
-            EndHeldBegin(
+        // A step of dialogue that waits for them to begin a wish goes on without the wish, which waits for them to
+        // read to it too. One that ends a delivery wish goes on and ends it here (CoopSave.Deliveries).
+        if (_heldStep is { } heldStep && heldStep.HasMember(id)) {
+            EndHeldStep(
                 GetPartnerGoneMessage(
-                    heldBegin.Members.Find(member => member.Id == id).Name ?? name ?? "?", heldBegin.Members.Count
+                    heldStep.Members.Find(member => member.Id == id).Name ?? name ?? "?", heldStep.Members.Count,
+                    heldStep.IsEnd
                 ),
                 true
             );
@@ -1521,9 +1523,9 @@ internal partial class CoopSave {
         if (slot == _sessionSlot) {
             _declinedSlot = slot;
 
-            // The save is its player's alone now, and so is a wish that a step of dialogue waits to begin with the
-            // partner: the step goes on and takes it (CoopSave.WishRead)
-            EndHeldBegin(null, true);
+            // The save is its player's alone now, and so is a wish that a step of dialogue waits to begin or end with
+            // the partner: the step goes on and takes or ends it (CoopSave.WishRead)
+            EndHeldStep(null, true);
             ReleaseHold(HeroController.instance);
             ResetSession(true);
         }

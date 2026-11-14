@@ -280,24 +280,16 @@ internal partial class BossRoomCoop {
     /// </summary>
     private readonly Func<bool> _isPartnerMissing;
 
-    /// <summary>
-    /// Whether an FSM runs key dialogue of a two-player save, like about a wish, which the partner reads too wherever
-    /// the scene host is.
-    /// </summary>
-    private readonly Func<Fsm, bool> _isSharedTalk;
-
     public BossRoomCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
-        Func<bool> isPartnerMissing,
-        Func<Fsm, bool> isSharedTalk
+        Func<bool> isPartnerMissing
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
         _isPartnerMissing = isPartnerMissing;
-        _isSharedTalk = isSharedTalk;
 
         // For as long as the game runs, since what other players said holds across connections
         SceneManager.activeSceneChanged += ClearStoryReportsOnMenu;

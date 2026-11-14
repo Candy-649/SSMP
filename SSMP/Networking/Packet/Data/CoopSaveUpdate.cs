@@ -54,9 +54,8 @@ internal class CoopSaveUpdate : IPacketData {
     /// For key dialogue, 1 when it starts, 0 when it ends and 2 when it couldn't start without the other player. For a
     /// call of a lift, 1 if the sender is inside it. For the state of a lift, 1 while it moves. For driving a carriage,
     /// 1 while the sender holds its button. For a delivery that broke, 0 when it broke for the sender, 1 when the sender
-    /// still carries theirs and 2 when the sender doesn't either. For dialogue about wishes, how many of its changes of
-    /// wishes went to the other player before, which come again for what the dialogue changed afterwards. For a hatch,
-    /// 1 while the sender keeps it open and 0 once they don't. For a toll bench, 1 while the sender keeps it up and 0
+    /// still carries theirs and 2 when the sender doesn't either. For a hatch, 1 while the sender keeps it open and 0
+    /// once they don't. For a toll bench, 1 while the sender keeps it up and 0
     /// once they don't.
     /// </summary>
     public ushort PartCount { get; set; }
@@ -452,7 +451,7 @@ internal enum CoopSaveUpdateKind : byte {
     DeliveryBreak,
 
     /// <summary>
-    /// The sender turned in a delivery at a character, so the game of the other player brings them there.
+    /// The sender handed in a delivery at a character, so the game of the other player brings them there.
     /// </summary>
     DeliverySummon,
 

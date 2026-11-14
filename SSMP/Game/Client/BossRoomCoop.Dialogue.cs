@@ -273,19 +273,14 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        // Key dialogue of a two-player save, like about a wish, goes to the partner whoever hosts the scene
-        var isSharedTalk = _netClient.IsConnected && IsOtherPlayerInScene() && _isSharedTalk(fsm);
-        if (!isSharedTalk) {
-            if (!IsCoopActive() || !_entityManager.IsSceneHost || _eachGamePartBegan) {
-                return;
-            }
+        if (!IsCoopActive() || !_entityManager.IsSceneHost || _eachGamePartBegan) {
+            return;
+        }
 
-            // Entities that aren't bosses, like characters to talk to, keep their dialogue to the player who talks to
-            // them
-            var info = GetInfo(fsm);
-            if (!info.IsEntity || (!info.ClosesGates && !info.IsInBossScene)) {
-                return;
-            }
+        // Entities that aren't bosses, like characters to talk to, keep their dialogue to the player who talks to them
+        var info = GetInfo(fsm);
+        if (!info.IsEntity || (!info.ClosesGates && !info.IsInBossScene)) {
+            return;
         }
 
         BossRoomUpdate update;
@@ -296,7 +291,6 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        update.IsSharedTalk = isSharedTalk;
         Logger.Info($"Sharing the dialogue of '{GetPath(fsm)}' with the other players in the scene");
         var dialogue = new SharedDialogue(state.Name, update);
         _sharedDialogues[fsm] = dialogue;
@@ -427,8 +421,7 @@ internal partial class BossRoomCoop {
         // both left exactly the same trace: none at all.
         var what = $"'{update.Path}' ({update.FromState})";
 
-        // Key dialogue of a two-player save comes from the partner, who may not host the scene
-        if (!update.IsSharedTalk && _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
+        if (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
             Logger.Info($"Not showing the shared dialogue of {what}: this game hosts the scene it belongs to");
             return;
         }
@@ -654,15 +647,6 @@ internal partial class BossRoomCoop {
     /// Whether shared dialogue is shown to the local player and took control from them.
     /// </summary>
     public bool HasSharedDialogueControl => _shownDialogue != null && _tookHeroControl;
-
-    /// <summary>
-    /// Takes over the control that shared dialogue took from the local player, for something that keeps them without
-    /// control for a moment, like bringing them to a delivery of a two-player save. Closing the dialogue then doesn't
-    /// give control back, which <see cref="GiveBackTakenControl"/> does instead.
-    /// </summary>
-    public void TakeOverDialogueControl() {
-        _tookHeroControl = false;
-    }
 
     /// <summary>
     /// Gives control back to the local player after something else took it for a moment, like bringing them to a

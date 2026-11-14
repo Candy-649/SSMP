@@ -587,7 +587,7 @@ internal partial class CoopSave {
             heldYes.Yes.Remove(wait.PartnerId);
         }
 
-        if (_heldBegin is { } heldRead && heldRead.WishKey == wishKey) {
+        if (_heldStep is { } heldRead && heldRead.WishKey == wishKey) {
             heldRead.Yes.Remove(wait.PartnerId);
         }
     }
@@ -876,7 +876,7 @@ internal partial class CoopSave {
         var kind = ask.Records[0];
 
         return kind is WishConfirmAccept or WishConfirmTurnIn or WishConfirmRace or WishConfirmFleaGame
-                   or WishConfirmAid or WishConfirmOffer or WishConfirmItem
+                   or WishConfirmAid or WishConfirmOffer or WishConfirmItem or WishConfirmDeliveryEnd
             ? (kind, ask.WishNames[0])
             : null;
     }
@@ -1229,6 +1229,11 @@ internal partial class CoopSave {
                         // A yes they took back no longer counts for a yes of this player that waits on the rest
                         DropWishWait(partnerAt);
 
+                        // A member who went on to end a delivery wish without this player ends it in their save alone
+                        if (partnerAt.Kind == WishConfirmDeliveryEnd && update.Part == GoneWentThrough) {
+                            KeepDeliveryWishOpen(player, partnerAt.Wish);
+                        }
+
                         // A member whose dialogue went on from the step that begins the wish still read to it, and gets
                         // it with this player once they read to the same step, which is what they were told already
                         if (partnerAt.IsRead) {
@@ -1257,9 +1262,9 @@ internal partial class CoopSave {
     /// <param name="agreed">Whether they agreed.</param>
     /// <param name="message">What to tell the local player once this answer decides it.</param>
     private void AnswerHeldConfirm(ClientPlayerData player, ulong key, bool agreed, string message) {
-        // A step of dialogue that begins a wish has no no to answer. It waits until every member reads to the same
-        // step, or its own time runs out (CoopSave.WishRead).
-        if (_heldBegin is { } begin && begin.Key == key) {
+        // A step of dialogue that begins a wish, or ends a delivery wish, has no no to answer. It waits until every
+        // member reads to the same step, or its own time runs out (CoopSave.WishRead).
+        if (_heldStep is { } begin && begin.Key == key) {
             if (!agreed) {
                 Logger.Info(
                     $"The game of {player.Username} turned down the wait at '{begin.Wish}', which waits on all the same"
@@ -1268,17 +1273,12 @@ internal partial class CoopSave {
             }
 
             begin.Yes.Add(player.Id);
-            NoteMemberReadWish(begin.Wish, player.Id);
+            if (!begin.IsEnd) {
+                NoteMemberReadWish(begin.Wish, player.Id);
+            }
+
             if (begin.IsAgreed) {
-                ReleaseHeldBegin(begin.Members.Count == 1
-                    ? Lang.Pick(
-                        $"{player.Username} got to it too, so you both take the wish.",
-                        $"{player.Username} 也到了这一步，你们一起接下这个愿望。"
-                    )
-                    : Lang.Pick(
-                        $"{player.Username} got to it too, so you all take the wish.",
-                        $"{player.Username} 也到了这一步，你们一起接下这个愿望。"
-                    ));
+                ReleaseHeldStep(GetHeldStepGoesOnMessage(player.Username, begin.Members.Count, begin.IsEnd));
             } else {
                 ChatStillWaiting(player.Username, begin.GetMissingNames());
             }
@@ -1652,8 +1652,9 @@ internal partial class CoopSave {
             return;
         }
 
-        // This player stands at the step of dialogue that begins the same wish, waiting for exactly this
-        if (_heldBegin is { } begin && begin.WishKey == wishKey && begin.HasMember(player.Id)) {
+        // This player stands at the step of dialogue that begins the same wish, or ends the same delivery wish, waiting
+        // for exactly this
+        if (_heldStep is { } begin && begin.WishKey == wishKey && begin.HasMember(player.Id)) {
             SendConfirmAnswer(player.Id, update.Key, true);
             KeepWishWait(wait);
             begin.Yes.Add(player.Id);
@@ -1662,15 +1663,7 @@ internal partial class CoopSave {
                 return;
             }
 
-            ReleaseHeldBegin(begin.Members.Count == 1
-                ? Lang.Pick(
-                    $"{player.Username} got to it too, so you both take the wish.",
-                    $"{player.Username} 也到了这一步，你们一起接下这个愿望。"
-                )
-                : Lang.Pick(
-                    $"{player.Username} got to it too, so you all take the wish.",
-                    $"{player.Username} 也到了这一步，你们一起接下这个愿望。"
-                ));
+            ReleaseHeldStep(GetHeldStepGoesOnMessage(player.Username, begin.Members.Count, begin.IsEnd));
             return;
         }
 
@@ -1702,7 +1695,13 @@ internal partial class CoopSave {
         }
 
         KeepWishWait(wait);
-        Chat(isRead
+        Chat(isRead && asked.Kind == WishConfirmDeliveryEnd
+            ? Lang.Pick(
+                $"{player.Username} read to where a delivery wish is completed. Talk to the same character and read " +
+                "to that point too, and you complete it together.",
+                $"{player.Username} 读到了完成托运愿望的那一步。你也和同一个角色把对话读到那里，你们就一起完成。"
+            )
+            : isRead
             ? Lang.Pick(
                 $"{player.Username} read to where a wish is taken. Read the dialogue of the same character to that " +
                 "point too, and you take it together.",
@@ -1757,6 +1756,9 @@ internal partial class CoopSave {
     /// Whether a question of the partner is one this save has answered by living: a wish it has already taken, when
     /// they are taking it, or one it has already turned in or donated to, when they are turning it in or donating.
     ///
+    /// The end of a delivery wish is the same once this save completed it, or doesn't have it open at all, like after
+    /// its item broke here: its player has nothing left to read to (CoopSave.Deliveries).
+    ///
     /// A character asked to help in a fight is the same: this save has asked them already. So is something the story
     /// keeps that a character is handed in dialogue, once this save holds none of it any more, like a save whose
     /// character was handed it already: nothing is left here to hand over (USER 11-08, "…要提交畸芽，都选是也没用").
@@ -1782,6 +1784,7 @@ internal partial class CoopSave {
             WishConfirmAccept => wish.IsAccepted || wish.IsCompleted,
             WishConfirmTurnIn => wish.IsCompleted,
             WishConfirmDonate => wish.IsCompleted,
+            WishConfirmDeliveryEnd => wish.IsCompleted || !wish.IsAccepted,
             WishConfirmAid => playerData.GetBool(update.WishNames[0]),
             _ => false
         };
@@ -2371,7 +2374,7 @@ internal partial class CoopSave {
             // wait ends by its own time or by an answer like this one does, and a no from here would end it as if this
             // player had said no.
             if (_wishConfirm is { } live && live.WishKey == wishKey ||
-                _heldBegin is { } begin && begin.WishKey == wishKey) {
+                _heldStep is { } begin && begin.WishKey == wishKey) {
                 continue;
             }
 

@@ -582,8 +582,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     HideDecorators = update.HideDecorators,
                     OverrideContinue = update.OverrideContinue,
                     TextAlignment = update.TextAlignment,
-                    OffsetY = update.OffsetY,
-                    IsSharedTalk = update.IsSharedTalk
+                    OffsetY = update.OffsetY
                 }
             );
         }

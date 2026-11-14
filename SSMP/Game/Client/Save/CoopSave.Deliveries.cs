@@ -9,17 +9,38 @@ using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
-// SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
-using Fsm = HutongGames.PlayMaker.Fsm;
-
 /// <summary>
-/// Deliveries in a checked two-player save: wishes whose item the player carries to a character, and which breaks on
-/// the way. Both players carry the item of a delivery that they accepted, since the partner gets what the dialogue gave
-/// (see CoopSave.WishTalk). Whoever gets to the character first turns it in without waiting, while the character doesn't
-/// talk to the partner: the partner gets the turn-in at once, pays their copy and gets the reward too, and is brought to
-/// the character with a short fade where that is safe. A delivery that breaks for one player still counts for both when
-/// the partner delivers theirs, and fails once no player carries it anymore. The player whose item broke doesn't get the
-/// delivery back as accepted, because its character takes in an accepted delivery without looking at the item.
+/// Deliveries in a checked co-op save: wishes whose item a player carries to a character (a target that is a
+/// DeliveryQuestItem), and which breaks on the way. Every member carries the item of a delivery that they accepted,
+/// since the members get what the dialogue gave (see CoopSave.WishTalk).
+///
+/// Handing the item in and completing the wish are two things. The user's words: "交肉本来就是祈愿的一部分，最后一个交的
+/// 不一定是肉，也有可能是别的", "所以要把交肉和祈愿完成分开" (USER 11-14).
+///
+/// Whoever hands the item in first hands it in for every member. The moment it leaves their inventory, like the meat
+/// among the ingredients of the cook's servant, each member's save crosses off what was handed in and loses its own
+/// copy of the item, and each member is brought to the character with a short fade where that is safe. A member who
+/// can't be moved right now isn't, and the hand-in counts for them all the same. A plain delivery, whose wish takes the
+/// item only as it ends, is handed in by reaching that step. What else the character takes, like the other
+/// ingredients, counts for every member too, as the dialogue ends; what it gives stays each player's own, from their
+/// own dialogue.
+///
+/// The step of dialogue that ends the wish then waits the way a step that begins one does (CoopSave.WishRead): each
+/// member talks to the character in their own game and sees their own lines and show, whoever reads to the step first
+/// stands there, and once the last member's dialogue reaches it, all go on and every game ends the wish itself and
+/// gives its own reward. With more players it waits for every member. A member who doesn't get there in time
+/// (WishConfirmTimeout, and for as long as they talk to the same character) doesn't keep the wish from the others: the
+/// game that waited ends it in its own save alone, and the wish stays open in the member's, as one that the saves
+/// differ in, for them to end in their own game with their own reward.
+///
+/// The lines of the player who turned a delivery in used to be copied to the members, which took their control and
+/// brought them over only once the show was over (USER 11-14, "她在我交食材的时候就动不了了，但是一直到动画结束才传送
+/// 过来，但是实际上应该我交了肉就传送过来", "对话框共享，这是什么古早设计", "我记得很早之前就说把这个设计移除了"). Nothing
+/// of the dialogue of a delivery is copied any more.
+///
+/// A delivery that breaks for one player still counts for all while a member carries theirs, and fails once no member
+/// carries it anymore. The player whose item broke doesn't get the delivery back as accepted, because its character
+/// takes in an accepted delivery without looking at the item.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -40,6 +61,12 @@ internal partial class CoopSave {
     private const ushort DeliveryFailed = 2;
 
     /// <summary>
+    /// An ask that the sender's dialogue stands at the step that ends a delivery wish, which waits for every member to
+    /// read to the same step (see <see cref="HoldsDeliveryEnd"/>). It carries WishConfirmRead after its kind.
+    /// </summary>
+    private const string WishConfirmDeliveryEnd = "deliveryend";
+
+    /// <summary>
     /// How long, in seconds, the screen fades out and in when the local player is brought to a delivery.
     /// </summary>
     private const float SummonFadeTime = 0.3f;
@@ -56,7 +83,7 @@ internal partial class CoopSave {
     private const float SummonArriveTime = 20f;
 
     /// <summary>
-    /// How far, in units, the local player may stand from the partner who turns in a delivery without being moved.
+    /// How far, in units, the local player may stand from the member who handed in a delivery without being moved.
     /// </summary>
     private const float SummonNearDistance = 3f;
 
@@ -77,22 +104,17 @@ internal partial class CoopSave {
     public Func<bool>? IsHeroInWaitingBossRoom { get; set; }
 
     /// <summary>
-    /// Whether shared dialogue, like the lines of a delivery that the partner turns in, is shown to the local player and
-    /// took control from them.
+    /// Whether shared dialogue, the lines of a boss that the scene host shares, is shown to the local player and took
+    /// control from them.
     /// </summary>
     public Func<bool>? IsReadingSharedDialogue { get; set; }
 
     /// <summary>
-    /// Gives control back to the local player after they were brought to a delivery, or leaves it to shared dialogue
-    /// that they still read, or null to give it back directly.
+    /// Gives control back to the local player after the co-op save took it for a moment, like to bring them to a
+    /// delivery or to pull them up, or leaves it to shared dialogue that they still read, or null to give it back
+    /// directly.
     /// </summary>
     public Action<HeroController>? GiveBackHeroControl { get; set; }
-
-    /// <summary>
-    /// Takes over the control that shared dialogue took from the local player when the screen fades to bring them to a
-    /// delivery, so that closing the dialogue meanwhile doesn't give it back, or null.
-    /// </summary>
-    public Action? TakeControlFromSharedDialogue { get; set; }
 
     /// <summary>
     /// Ends shared dialogue that is shown to the local player, counting it as read and closing its box, so that
@@ -108,10 +130,10 @@ internal partial class CoopSave {
     private readonly Dictionary<string, BrokenDelivery> _brokenDeliveries = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The deliveries that the local player turned in during this session, with the packed state of the wish right
-    /// after, which a break of the partner that crossed the turn-in doesn't undo.
+    /// The deliveries that the local player handed in during this session, with the packed state of the wish then,
+    /// which a break of a member that crossed the hand-in doesn't undo.
     /// </summary>
-    private readonly Dictionary<string, int> _deliveredWishes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _handedInDeliveries = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The wishes that the local player completed during this session, with the packed state of each wish right after
@@ -124,19 +146,12 @@ internal partial class CoopSave {
     private readonly Dictionary<string, (int Packed, float Time)> _wishesCompletedHere = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The completions from dialogue of the partner that the local save took during this session, with the packed state
-    /// of each wish that came with them. What the same dialogue changes afterwards comes with that state again, and
-    /// counts if it matches.
-    /// </summary>
-    private readonly Dictionary<string, int> _appliedPartnerCompletions = new(StringComparer.Ordinal);
-
-    /// <summary>
     /// The full wishes of the game by name, found when first needed.
     /// </summary>
     private readonly Dictionary<string, FullQuestBase> _questsByName = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Bringing the local player to a delivery that the partner turns in, or null.
+    /// Bringing the local player to a delivery that a member handed in, or null.
     /// </summary>
     private PendingSummon? _summon;
 
@@ -212,7 +227,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Bringing the local player to a delivery that the partner turns in.
+    /// Bringing the local player to a delivery that a member handed in.
     /// </summary>
     private sealed class PendingSummon {
         public PendingSummon(ushort playerId, string scene, string npcPath, string gate, Vector2 position) {
@@ -224,7 +239,7 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// The member who turns in the delivery.
+        /// The member who handed in the delivery.
         /// </summary>
         public ushort PlayerId { get; }
 
@@ -244,7 +259,7 @@ internal partial class CoopSave {
         public string Gate { get; }
 
         /// <summary>
-        /// Where the partner stood when they turned in the delivery.
+        /// Where the member stood when they handed in the delivery.
         /// </summary>
         public Vector2 Position { get; }
 
@@ -431,7 +446,7 @@ internal partial class CoopSave {
     /// <summary>
     /// The item of a delivery broke for a member. While the local player still carries theirs, or another member said
     /// they still carry theirs, the delivery stays accepted in the local save and still counts for all, and a delivery
-    /// that the local player turned in meanwhile counts for the member through that turn-in. Otherwise it failed, and
+    /// that the local player handed in meanwhile counts for the member through that hand-in. Otherwise it failed, and
     /// the local wish log takes the state of the member.
     /// </summary>
     private void OnPartnerDeliveryBroke(
@@ -446,12 +461,14 @@ internal partial class CoopSave {
         }
 
         var local = playerData.QuestCompletionData.GetData(name);
-        if (_deliveredWishes.TryGetValue(name, out var delivered) && delivered == PackCompletion(local)) {
-            Logger.Info($"The delivery '{name}' broke for {player.Username} after the local player turned it in");
+        if (_handedInDeliveries.TryGetValue(name, out var handedIn) && handedIn == PackCompletion(local)) {
+            Logger.Info(
+                $"[Deliveries] The delivery '{name}' broke for {player.Username} after the local player handed it in"
+            );
             return;
         }
 
-        // A delivery that the local player turned in already goes to the partner with the dialogue
+        // A delivery that the local player completed already goes to the partner with the dialogue
         if (local.IsCompleted && (value & WishCompleted) == 0) {
             return;
         }
@@ -566,58 +583,99 @@ internal partial class CoopSave {
 
     #endregion
 
-    #region Turning in
+    #region Handing in
 
     /// <summary>
-    /// Starts recording dialogue that can turn in a delivery, which needs nobody else. The character doesn't talk to the
-    /// partner meanwhile, so that they don't turn in the same delivery a second time.
+    /// Starts recording dialogue that can take in a delivery wish, which needs nobody else. The members hear who talks
+    /// to the character, so that a step that ends the wish keeps waiting for them while they do.
     /// </summary>
     private void StartDeliveryTalk(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms) {
         EndWishTalk();
         var talk = new WishTalk(npc, fsms, false) { IsDelivery = true };
         _wishTalk = talk;
+        _lastTalk = talk;
         if (_checkedMembers.Count > 0) {
             SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
         }
 
-        Logger.Info($"Dialogue with '{npc.name}' can turn in a delivery");
+        Logger.Info($"[Deliveries] Dialogue with '{npc.name}' can take in a delivery");
     }
 
     /// <summary>
-    /// Sends dialogue that just completed a delivery to the partner at once, so that the copy of the partner can't break
-    /// while the dialogue goes on, and brings the partner to the character. The reward that the dialogue gives
-    /// afterwards goes along, and isn't recorded again. What else the dialogue changes afterwards goes to the partner
-    /// when it ends, together with the delivery that it belongs to.
+    /// Notes that the item of a delivery wish left the local player's inventory in dialogue that can take it in, like
+    /// the meat that the cook's servant takes among the ingredients before the wish ends. That is the hand-in, which
+    /// goes to the members once the step that took it is through, with what the same step set, like the mark that the
+    /// ingredient was given (see <see cref="SendPendingHandIn"/>). The end of the wish taking the item is no hand-in.
     /// </summary>
-    private void SendDelivery(WishTalk talk, FullQuestBase quest) {
-        var name = quest.name;
-        var index = talk.Changes.LastIndexOf(name);
-        if (index < 0) {
+    private void NoteDeliveryItemTaken(WishTalk talk, SavedItem? item) {
+        if (!talk.IsDelivery || _endingWishDepth > 0 || item is not DeliveryQuestItem delivery ||
+            _checkedMembers.Count == 0 || FindDeliveryWishOf(delivery) is not { } quest) {
             return;
         }
 
-        var value = talk.ChangeValues[index];
-        var reward = quest.RewardItem;
-        var count = quest.RewardCount;
-        if (reward != null && reward is not BasicQuestBase && count > 0 && GivesQuestReward(talk, quest)) {
-            var change = GetItemChangeKey(GetItemChange, reward);
-            talk.AddItem(change, count, false);
-            talk.CreditedGains.Add(change);
+        talk.HandIn = quest;
+    }
+
+    /// <summary>
+    /// The delivery wish open in the local save that takes an item, or null.
+    /// </summary>
+    private static FullQuestBase? FindDeliveryWishOf(DeliveryQuestItem item) {
+        foreach (var basicQuest in QuestManager.GetAllQuests()) {
+            if (basicQuest is FullQuestBase quest && quest != null && quest.IsAccepted && !quest.IsCompleted &&
+                quest.Targets.Any(target => ReferenceEquals(target.Counter, item))) {
+                return quest;
+            }
         }
 
-        _deliveredWishes[name] = value;
-        SendTalkChanges(talk);
+        return null;
+    }
+
+    /// <summary>
+    /// Sends the hand-in that dialogue noted, if any, now that the step that took the item is through.
+    /// </summary>
+    private void SendPendingHandIn(WishTalk talk) {
+        if (talk.HandIn is not { } quest) {
+            return;
+        }
+
+        talk.HandIn = null;
+        SendHandIn(talk, quest);
+    }
+
+    /// <summary>
+    /// Hands a delivery in for every member: their saves take what the dialogue changed so far, like the mark that an
+    /// ingredient was given and the items that it took, and each member's own copy of the item of the delivery goes,
+    /// also one that the end of the wish takes only later. Then the members are brought to the character. What the
+    /// dialogue changed so far goes only this once, and no completion goes with it: each game ends the wish itself.
+    /// </summary>
+    private void SendHandIn(WishTalk talk, FullQuestBase quest) {
+        var name = quest.name;
+        if (GetPackedWish(name) is { } value) {
+            _handedInDeliveries[name] = value;
+        }
+
+        // All of each member's copy goes, however much of it they hold: one that took fewer hits on the way has more
+        var update = CreateTalkUpdate(talk);
+        foreach (var target in quest.Targets) {
+            if (target.Counter is DeliveryQuestItem item && item != null) {
+                update.ItemIds.Add(AllWishesIndex + "\n" + GetItemChangeKey(TakeItemChange, item));
+                update.Amounts.Add(int.MaxValue);
+            }
+        }
+
         talk.ClearChanges();
-        talk.AddWish(quest, value);
-        talk.SentChanges = talk.Changes.Count;
-        Logger.Info($"The delivery '{name}' was turned in, sent to the members at once");
+        SendTalkUpdate(update);
+        Logger.Info(
+            $"[Deliveries] The local player handed in the delivery '{name}' at '{talk.Path}', sent to " +
+            $"{GetCheckedNames()} with {update.ItemIds.Count} item changes and {update.FlagNames.Count} flags"
+        );
 
         SendDeliverySummon(talk);
     }
 
     /// <summary>
-    /// Asks the games of the members to bring each of them to the character that took in a delivery. A member who is
-    /// close by already stays where they are.
+    /// Asks the games of the members to bring each of them to the character that a delivery was handed in at. A member
+    /// who is close by already stays where they are.
     /// </summary>
     private void SendDeliverySummon(WishTalk talk) {
         var hero = HeroController.instance;
@@ -633,40 +691,15 @@ internal partial class CoopSave {
             Records = [GetSummonGate(talk.Scene, position)],
             Values = [position.x, position.y]
         });
-        Logger.Info($"Bringing {GetCheckedNames()} to the delivery at '{talk.Path}'");
+        Logger.Info($"[Deliveries] Bringing {GetCheckedNames()} to the delivery at '{talk.Path}'");
     }
 
     /// <summary>
-    /// Whether an FSM of dialogue gives the reward of a wish from the wish itself, which is what the partner gets too.
+    /// Whether a wish is a delivery wish: one of its targets is the item of a delivery, like the item of a courier's
+    /// delivery or the meat among the ingredients of the cook's servant.
     /// </summary>
-    private static bool GivesQuestReward(WishTalk talk, FullQuestBase quest) {
-        foreach (var component in talk.Fsms) {
-            if (component != null && component.Fsm is { } fsm && HasQuestReward(fsm, quest, 0)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Whether an FSM, or a template FSM that it runs, gets the reward of a wish.
-    /// </summary>
-    private static bool HasQuestReward(Fsm fsm, FullQuestBase quest, int depth) {
-        foreach (var state in fsm.States ?? []) {
-            foreach (var action in state?.Actions ?? []) {
-                if (action is QuestPlaymakerActions.GetQuestReward or QuestPlaymakerActions.GetQuestRewardV2) {
-                    if (((QuestPlaymakerActions.QuestFsmAction) action).Quest?.Value == quest) {
-                        return true;
-                    }
-                } else if (action != null && depth < 2 && GetTemplateFsm(action) is { } template &&
-                           HasQuestReward(template, quest, depth + 1)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    private static bool IsDeliveryWish(FullQuestBase quest) {
+        return quest.Targets.Any(target => target.Counter is DeliveryQuestItem);
     }
 
     /// <summary>
@@ -735,6 +768,175 @@ internal partial class CoopSave {
 
     #endregion
 
+    #region Ending
+
+    /// <summary>
+    /// Decides whether a step of delivery dialogue that ends a delivery wish waits for the members, the way a step that
+    /// begins a wish waits for them (CoopSave.WishRead). Reaching it hands the delivery in when the local player still
+    /// carries its item, which the end itself takes: a plain delivery. Meeting members who wait at the same step tells
+    /// them to go on, and this step goes on too.
+    /// </summary>
+    /// <returns>Whether the step waits, in which case it doesn't run now.</returns>
+    private bool HoldsDeliveryEnd(
+        QuestPlaymakerActions.QuestFsmAction step,
+        Action<QuestPlaymakerActions.QuestFsmAction> orig
+    ) {
+        if (step.Quest?.Value is not FullQuestBase quest || quest == null || !IsDeliveryWish(quest) ||
+            PlayerData.instance is not { } playerData) {
+            return false;
+        }
+
+        // A wish that the save doesn't have open ends the way the game always ends it
+        var wish = quest.name;
+        var completion = playerData.QuestCompletionData.GetData(wish);
+        if (!completion.IsAccepted || completion.IsCompleted) {
+            return false;
+        }
+
+        // Every member got to this same step first and stands there waiting for this game to get here too. All have
+        // now, so they are told to go on and so does this step.
+        var members = GetCheckedMembers();
+        var waits = members.Count > 0 ? GetWishWaits((WishConfirmDeliveryEnd, wish)) : [];
+        if (members.Count > 0 && members.TrueForAll(member => waits.Exists(wait => wait.PartnerId == member.Id))) {
+            foreach (var wait in waits) {
+                _partnerWishWaits.Remove(wait.PartnerId);
+                SendConfirmAnswer(wait.PartnerId, wait.Key, true);
+            }
+
+            Chat(GetHeldStepGoesOnMessage(JoinNames(waits.Select(wait => wait.PartnerName)), members.Count, true));
+            Logger.Info($"[Deliveries] Every member waited at the step that ends '{wish}', so all go on and end it");
+            return false;
+        }
+
+        if (_applyingPartnerTalk || !_everChecked || members.Count == 0 || GetCurrentMarker() == null ||
+            FindTalkFor(step, true) is not { } talk) {
+            return false;
+        }
+
+        // One step waits at a time. One that waited and is entered again is simply waited at anew.
+        if (_heldStep is { } older) {
+            EndHeldStep(null, !ReferenceEquals(older.Step, step));
+        }
+
+        if (IsCarriedDelivery(quest)) {
+            SendHandIn(talk, quest);
+        }
+
+        var ask = CreateConfirm(WishConfirmDeliveryEnd);
+        ask.Records.Add(WishConfirmRead);
+        ask.WishNames.Add(wish);
+        var held = new HeldStep(
+            members.ConvertAll(member => (member.Id, member.Username)), ask.Key, step, () => orig(step), wish,
+            GetWishKey((WishConfirmDeliveryEnd, wish)), talk.Npc, true
+        );
+
+        // A member who read to it already goes on once the rest of them have
+        foreach (var wait in waits) {
+            held.Yes.Add(wait.PartnerId);
+        }
+
+        _heldStep = held;
+        SendToMembers(ask);
+        var missing = held.GetMissingNames();
+        var missingNames = JoinNames(missing);
+        Chat(members.Count == 1
+            ? Lang.Pick(
+                $"The wish here is completed once {missingNames} reads to this point too, by both of you at once. " +
+                "What comes after it waits until then.",
+                $"要等 {missingNames} 也读到这一步，这个愿望才会完成，你们两个一起完成；这一步后面的事也等到那时候。"
+            )
+            : Lang.Pick(
+                $"The wish here is completed once {missingNames} {(missing.Count == 1 ? "reads" : "read")} to this " +
+                "point too, by all of you at once. What comes after it waits until then.",
+                $"要等 {missingNames} 也读到这一步，这个愿望才会完成，大家一起完成；这一步后面的事也等到那时候。"
+            ));
+        Logger.Info(
+            $"[Deliveries] A step of dialogue ends the delivery '{wish}' in '{step.State?.Name}' of " +
+            $"'{step.Fsm?.GameObjectName}', and waits for {missingNames} to read to it too"
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// What the local player is told when the dialogue left the step that ends a delivery wish while it waited.
+    /// </summary>
+    private static string GetDeliveryEndLeftMessage() {
+        return Lang.Pick(
+            "The dialogue went on without waiting, so the wish isn't completed here. It is once the others " +
+            "complete it.",
+            "对话没有停下来等，所以这个愿望在你这边没有完成；等其他人完成后会同步过来。"
+        );
+    }
+
+    /// <summary>
+    /// What the local player is told when members didn't read to the step that ends a delivery wish in time.
+    /// </summary>
+    /// <param name="missing">The names of the members who didn't.</param>
+    /// <param name="memberCount">How many members the step waited for.</param>
+    private static string GetDeliveryEndTimeoutMessage(string missing, int memberCount) {
+        return memberCount == 1
+            ? Lang.Pick(
+                $"{missing} didn't read to this point in time, so the wish is completed here first. Theirs is " +
+                "completed once they read the dialogue of the same character to this point.",
+                $"{missing} 没有及时读到这一步，这个愿望先在你这边完成；对方和同一个角色把对话读到这里，也会在自己那边完成。"
+            )
+            : Lang.Pick(
+                $"{missing} didn't read to this point in time, so the wish is completed here first. Theirs are " +
+                "completed once each of them reads the dialogue of the same character to this point.",
+                $"{missing} 没有及时读到这一步，这个愿望先在你这边完成；他们各自和同一个角色把对话读到这里，也会在自己那边完成。"
+            );
+    }
+
+    /// <summary>
+    /// What the local player is told when members are gone while the step that ends a delivery wish waits for them.
+    /// </summary>
+    /// <param name="names">The names of the members who are gone.</param>
+    /// <param name="memberCount">How many members the step waited for.</param>
+    private static string GetDeliveryEndGoneMessage(string names, int memberCount) {
+        return memberCount == 1
+            ? Lang.Pick(
+                $"{names} is gone for now, so the wish is completed here first. Theirs is completed once they are " +
+                "back and read the dialogue of the same character to this point.",
+                $"{names} 暂时不在，这个愿望先在你这边完成；对方回来后和同一个角色把对话读到这里，也会在自己那边完成。"
+            )
+            : Lang.Pick(
+                $"{names} left for now, so the wish is completed here first. Theirs are completed once each of them " +
+                "is back and reads the dialogue of the same character to this point.",
+                $"{names} 暂时不在，这个愿望先在你这边完成；他们回来后各自和同一个角色把对话读到这里，也会在自己那边完成。"
+            );
+    }
+
+    /// <summary>
+    /// What the local player is told when they left the room while the step that ends a delivery wish waited.
+    /// </summary>
+    /// <param name="missing">The names of the members who didn't read to it.</param>
+    private static string GetDeliveryEndSceneLeftMessage(string missing) {
+        return Lang.Pick(
+            $"You left before {missing} read to that point, so the wish isn't completed yet. Talk to the character " +
+            "again to complete it.",
+            $"{missing} 还没读到那一步你就离开了，这个愿望还没完成。再去和那个角色说话就能完成。"
+        );
+    }
+
+    /// <summary>
+    /// A member ended a delivery wish in their own game without the local player, who didn't read to the step that ends
+    /// it in time. It is theirs alone: the local save keeps it open, as one that the saves differ in, so that their
+    /// completion doesn't come here without the reward, and the local player ends it in their own game with their own.
+    /// </summary>
+    private void KeepDeliveryWishOpen(ClientPlayerData player, string wish) {
+        _differentWishNames.Add(wish);
+        Chat(Lang.Pick(
+            $"{player.Username} completed the wish on their side first. Yours is completed once you read the " +
+            "dialogue of the same character to the end, with its reward.",
+            $"{player.Username} 那边先完成了这个愿望。你和同一个角色把对话读到最后，你这边也会完成，奖励照样有。"
+        ));
+        Logger.Info(
+            $"[Deliveries] {player.Username} ended '{wish}' without the local player, whose save keeps it open"
+        );
+    }
+
+    #endregion
+
     #region Bringing the partner
 
     /// <summary>
@@ -767,7 +969,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A member turned in a delivery, so the local player is brought to its character once that is safe. A newer one
+    /// A member handed in a delivery, so the local player is brought to its character once that is safe. A newer one
     /// of another member takes the place of one that still waits.
     /// </summary>
     private void OnDeliverySummon(ClientPlayerData player, CoopSaveUpdate update) {
@@ -839,7 +1041,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Starts bringing the local player to a delivery once nothing keeps them where they are. A player who is in a fight
-    /// or a boss room that waits, at a bench, in other dialogue or in a race stays, and gets the delivery all the same.
+    /// or a boss room that waits, at a bench, in dialogue or in a race stays, and the hand-in counts for them all the
+    /// same.
     /// </summary>
     private void StartSummonMove(HeroController hero, ClientPlayerData partner, PendingSummon summon, float now) {
         var gameManager = global::GameManager.instance;
@@ -868,14 +1071,15 @@ internal partial class CoopSave {
         if (SceneUtil.GetCurrentSceneName() == summon.Scene || partner.IsInLocalScene) {
             if (Vector2.Distance(hero.transform.position, GetSummonTarget(partner, summon)) <= SummonNearDistance) {
                 _summon = null;
+                Chat(Lang.Pick(
+                    $"{partner.Username} handed in what was to be delivered, which counts for you too.",
+                    $"{partner.Username} 交了要送的东西，你这份也算交了。"
+                ));
                 return;
             }
 
             StartSummonFade(hero, summon, now);
-            Chat(Lang.Pick(
-            $"{partner.Username} turned in a delivery, so you are brought there.",
-            $"{partner.Username} 交了一份托运，所以你被带过去了。"
-        ));
+            ChatSummoned(partner);
             return;
         }
 
@@ -899,25 +1103,31 @@ internal partial class CoopSave {
 
         summon.Stage = SummonStage.Loading;
         summon.StageTime = now;
+        ChatSummoned(partner);
+        Logger.Info(
+            $"[Deliveries] Bringing the local player to the delivery of {partner.Username} in '{summon.Scene}'"
+        );
+    }
+
+    /// <summary>
+    /// Tells the local player that they are brought to a delivery that a member handed in.
+    /// </summary>
+    private void ChatSummoned(ClientPlayerData partner) {
         Chat(Lang.Pick(
-            $"{partner.Username} turned in a delivery, so you are brought there.",
-            $"{partner.Username} 交了一份托运，所以你被带过去了。"
+            $"{partner.Username} handed in what was to be delivered, which counts for you too, so you are brought " +
+            "there.",
+            $"{partner.Username} 交了要送的东西，你这份也算交了，你被带过去了。"
         ));
-        Logger.Info($"Bringing the local player to the delivery of {partner.Username} in '{summon.Scene}'");
     }
 
     /// <summary>
     /// Whether nothing that passes keeps the hero from being moved right now, like a scene change, an open menu,
-    /// swimming, a lift ride or something that took control from them. Shared dialogue that the local player reads, like
-    /// the lines of the delivery, takes control too, but doesn't keep them.
+    /// swimming, a lift ride or something that took control from them, like dialogue.
     /// </summary>
     private bool CanMoveHeroNow(global::GameManager gameManager, HeroController hero) {
-        if (gameManager.GameState != GameState.PLAYING || gameManager.IsInSceneTransition ||
-            gameManager.IsGamePaused() || hero.cState.transitioning || hero.cState.swimming || IsRidingLift(hero)) {
-            return false;
-        }
-
-        return IsReadingSharedDialogue?.Invoke() == true || (!hero.controlReqlinquished && hero.CanInput());
+        return gameManager.GameState == GameState.PLAYING && !gameManager.IsInSceneTransition &&
+               !gameManager.IsGamePaused() && !hero.cState.transitioning && !hero.cState.swimming &&
+               !IsRidingLift(hero) && !hero.controlReqlinquished && hero.CanInput();
     }
 
     /// <summary>
@@ -953,11 +1163,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Fades the screen out before the hero is moved, while the hero takes no input and no damage. Control that shared
-    /// dialogue took from the hero stays taken until the move is done, also when the dialogue closes meanwhile.
+    /// Fades the screen out before the hero is moved, while the hero takes no input and no damage.
     /// </summary>
     private void StartSummonFade(HeroController hero, PendingSummon summon, float now) {
-        TakeControlFromSharedDialogue?.Invoke();
         hero.RelinquishControl();
         hero.AddInvulnerabilitySource(SummonInvulnerability);
         summon.TookHero = true;
@@ -987,7 +1195,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Where the local player is brought to for a delivery: where the partner stands.
+    /// Where the local player is brought to for a delivery: where the member who handed it in stands.
     /// </summary>
     private static Vector2 GetSummonTarget(ClientPlayerData partner, PendingSummon summon) {
         return partner.IsInLocalScene && partner.PlayerObject != null
@@ -996,7 +1204,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Moves the hero to the partner, facing the character that takes in the delivery.
+    /// Moves the hero to the member who handed in the delivery, facing the character that took it.
     /// </summary>
     private static void PlaceSummonedHero(HeroController hero, ClientPlayerData partner, PendingSummon summon) {
         var target = GetSummonTarget(partner, summon);
@@ -1025,22 +1233,22 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Leaves the local player where they are for a delivery of the partner, which counts for them all the same.
+    /// Leaves the local player where they are for a delivery that a member handed in, which counts for them all the
+    /// same.
     /// </summary>
     private void SkipSummon(ClientPlayerData partner) {
         _summon = null;
-        Chat(
-            Lang.Pick(
-                $"{partner.Username} turned in a delivery. You can't be brought there right now, but it counts for you too.",
-                $"{partner.Username} 交了一份托运。现在没法把你带过去，不过这份也算你的。"
-            )
-        );
+        Chat(Lang.Pick(
+            $"{partner.Username} handed in what was to be delivered, which counts for you too. You can't be brought " +
+            "there right now.",
+            $"{partner.Username} 交了要送的东西，你这份也算交了。现在没法把你带过去。"
+        ));
     }
 
     /// <summary>
     /// Ends bringing the local player to a delivery, giving the hero back and fading the screen in if it was dark.
-    /// Shared dialogue that the local player still reads keeps control until it is read, and after a death, a hazard or
-    /// a scene change the game gives control back itself.
+    /// Shared lines of a boss that the local player still reads keep control until they are read, and after a death, a
+    /// hazard or a scene change the game gives control back itself.
     /// </summary>
     private void FinishSummon(HeroController? hero) {
         if (_summon is not { } summon) {
@@ -1108,15 +1316,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets deliveries and gives the hero back, for a new session. What broke, was turned in or came from the partner
-    /// outlasts a new check, since the packed state that each of them keeps tells whether it still holds.
+    /// Forgets deliveries and gives the hero back, for a new session.
     /// </summary>
     private void ResetDeliveries() {
         FinishSummon(HeroController.instance);
         _brokenDeliveries.Clear();
-        _deliveredWishes.Clear();
+        _handedInDeliveries.Clear();
         _wishesCompletedHere.Clear();
-        _appliedPartnerCompletions.Clear();
         _questsByName.Clear();
     }
 

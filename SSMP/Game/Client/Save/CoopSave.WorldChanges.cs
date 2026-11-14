@@ -161,9 +161,7 @@ internal partial class CoopSave {
             return;
         }
 
-        // Changes that dialogue about wishes sent before keep the stamps that they got then
-        var first = update.Kind == CoopSaveUpdateKind.WishTurnIn ? update.PartCount : 0;
-        for (var i = (int) first; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+        for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _wishSequences[GetWishChangeKey(update.WishNames[i], update.WishValues[i])] = stamp;
         }
     }

@@ -414,12 +414,11 @@ internal partial class CoopSave {
             return;
         }
 
-        // Not out of shared dialogue either, which the move of a delivery takes over and this one doesn't, nor out
-        // of a cage of their own, which takes them there itself
+        // Not out of dialogue either, shared dialogue among it, nor out of a cage of their own, which takes them there
+        // itself
         var gameManager = global::GameManager.instance;
         if (gameManager == null || PlayerData.instance.atBench || hero.cState.dead || hero.cState.hazardDeath ||
-            hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero) ||
-            IsReadingSharedDialogue?.Invoke() == true || _ownCatch != null) {
+            hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero) || _ownCatch != null) {
             return;
         }
 
@@ -523,7 +522,7 @@ internal partial class CoopSave {
         return gameManager != null && _ownCatch == null && !IsInPrisonClothes() && !PlayerData.instance.atBench &&
                hero.cState.onGround && !hero.cState.dead && !hero.cState.hazardDeath &&
                !hero.cState.hazardRespawning && !PlayerTargetRegistry.IsPlayerDown(hero.gameObject) &&
-               CanMoveHeroNow(gameManager, hero) && IsReadingSharedDialogue?.Invoke() != true;
+               CanMoveHeroNow(gameManager, hero);
     }
 
     /// <summary>
