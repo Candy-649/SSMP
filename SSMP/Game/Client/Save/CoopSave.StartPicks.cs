@@ -15,7 +15,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// <summary>
 /// Objects of a room that pick at random how they start as the room loads: the beast of a bellway station starts
 /// awake, or one time in five asleep. Each game picked for itself, so on about one visit in three the players saw it
-/// asleep in one game and awake in the other (USER 11-04 "我们坐电梯切换房间的时候有时候看到钟道兽的形态不一致").
+/// asleep in one game and awake in the other (USER 11-04 "我们坐电梯切换房间的时候有时候看到钟道兽的形态不一致"). The
+/// couriers who hand out deliveries pick the same way, and asleep they cannot be spoken to until a player sings to them
+/// or strikes them: one player could talk to them and the other had no prompt (USER 11-14 "我朋友对话了我就对话不了了",
+/// "直接没有对话的键").
 ///
 /// How the room has them is the scene host's now, the way the room's machines go by the host's (see
 /// CoopSave.PacedMachines). Each game notes how its own started. The scene host tells the others in the room as its
@@ -45,6 +48,13 @@ internal partial class CoopSave {
         new(
             "Bone Beast NPC", "Interaction", "Start State", ["Wake Up", "Start Asleep"],
             new Dictionary<string, string> { ["Wait Finished Entering"] = "Wake Up" }
+        ),
+
+        // The couriers who hand out deliveries: awake, or one time in five asleep, when nobody can speak to them until
+        // a player sings to them or strikes them
+        new(
+            "Couriers Quest Giver", "Dialogue", "Start State?", ["Idle", "Start Asleep"],
+            new Dictionary<string, string>()
         )
     ];
 
