@@ -1234,6 +1234,21 @@ internal partial class Entity {
         _components[EntityComponentType.Collider] = new ColliderComponent(_netClient, Id, Object);
         _components[EntityComponentType.Layer] = new LayerComponent(_netClient, Id, Object);
 
+        // How blows knock it back, which the copy goes by for the local player's own blows (see RecoilComponent)
+        var hostRecoil = Object.Host.GetComponent<Recoil>();
+        var clientRecoil = Object.Client.GetComponent<Recoil>();
+        if (hostRecoil != null && clientRecoil != null) {
+            _components[EntityComponentType.Recoil] = new RecoilComponent(
+                _netClient,
+                Id,
+                Object,
+                new HostClientPair<Recoil> {
+                    Host = hostRecoil,
+                    Client = clientRecoil
+                }
+            );
+        }
+
         var hostBody = Object.Host.GetComponent<Rigidbody2D>();
         if (hostBody != null) {
             _components[EntityComponentType.BodyType] = new BodyTypeComponent(

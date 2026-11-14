@@ -177,5 +177,11 @@ internal enum EntityComponentType : ushort {
     /// The health of a boss that its FSMs keep instead of a HealthManager, for its bar (see
     /// <see cref="FsmHealthComponent"/>).
     /// </summary>
-    FsmHealth
+    FsmHealth,
+
+    /// <summary>
+    /// How blows knock the creature back, which its copy goes by for the local player's own blows (see
+    /// <see cref="RecoilComponent"/>).
+    /// </summary>
+    Recoil
 }
