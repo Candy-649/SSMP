@@ -38,17 +38,21 @@ internal partial class CoopHits {
     private const int MaxStatesLookedThrough = 8;
 
     /// <summary>
-    /// What the scripts of the game's bullets burst on: a player's hit box going into them, which they tell by its tag
-    /// alone, rather than the hurt that the hit box takes from them (see <see cref="BurstWhereItHurt"/>).
+    /// What the scripts of the game's projectiles burst on: a player's hit box going into them, which they tell by its
+    /// tag or its layer alone, rather than the hurt that the hit box takes from them (see
+    /// <see cref="BurstWhereItHurt"/>). The bullets go by the tag, a rock that explodes by the layer. The game's other
+    /// projectile scripts look only at the ground they land on, and the state machines of thrown things hear touches
+    /// and hurts as they are replayed.
     /// </summary>
-    private static readonly MethodInfo[] BulletBursts = [
+    private static readonly MethodInfo[] ProjectileBursts = [
         typeof(EnemyBullet).GetMethod("OnTriggerEnter2D", InstanceFlags)!,
-        typeof(PaintBullet).GetMethod("OnTriggerEnter2D", InstanceFlags)!
+        typeof(PaintBullet).GetMethod("OnTriggerEnter2D", InstanceFlags)!,
+        typeof(FireballProjectile).GetMethod("OnTriggerEnter2D", InstanceFlags)!
     ];
 
     /// <summary>
-    /// A hit box with the tag of a player's, switched off for good, which a bullet is told went into it (see
-    /// <see cref="BurstWhereItHurt"/>). Made the first time.
+    /// A hit box with the tag and the layer of a player's, switched off for good, which a projectile is told went into
+    /// it (see <see cref="BurstWhereItHurt"/>). Made the first time.
     /// </summary>
     private static Collider2D? _playerBoxStandIn;
 
@@ -294,8 +298,8 @@ internal partial class CoopHits {
     /// <summary>
     /// Tells the twin here of a thing that a creature threw that it hurt the partner's player, as their game told it:
     /// the same event to its state machine, the same that a script of it hears, put where it was in their game as it
-    /// hurt them. A bullet bursts there, as it burst on them (see <see cref="BurstWhereItHurt"/>). What it does on it
-    /// to the player it hurt does not happen here (see <see cref="OnThrownTransition"/>).
+    /// hurt them. A projectile bursts there, as it burst on them (see <see cref="BurstWhereItHurt"/>). What it does
+    /// on it to the player it hurt does not happen here (see <see cref="OnThrownTransition"/>).
     /// </summary>
     private void ReplayHurt(CoopHitUpdate update) {
         var target = FindPlace(update);
@@ -334,17 +338,18 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Has a bullet that hurt the partner's player burst where it hurt them, as it burst on them in their game. The
-    /// game's bullets burst as a player's hit box goes into them, and the figure of the partner here has none: the twin
-    /// was only put where it hurt them, and flew on, or, put there as it had stopped in their game, hung there and fell
-    /// straight down (USER 11-14 "它这个弹有时候碰到什么东西会垂直下去", then "还不如直接队友被击中的时候放到那个位置炸开
-    /// 呢"). Its script is told that a hit box went into it, which is all that it looks at.
+    /// Has a projectile that hurt the partner's player burst where it hurt them, as it burst on them in their game. The
+    /// game's projectiles burst as a player's hit box goes into them (see <see cref="ProjectileBursts"/>), and the
+    /// figure of the partner here has none: the twin was only put where it hurt them, and flew on, or, put there as it
+    /// had stopped in their game, hung there and fell straight down (USER 11-14 "它这个弹有时候碰到什么东西会垂直下去",
+    /// then "还不如直接队友被击中的时候放到那个位置炸开呢", and "那其他用类似的投射物的呢"). Its script is told that a hit box
+    /// went into it, which is all that it looks at.
     /// </summary>
-    /// <param name="damager">The part of the bullet that hurt the partner.</param>
+    /// <param name="damager">The part of the projectile that hurt the partner.</param>
     /// <param name="playerId">The ID of the partner.</param>
     private static void BurstWhereItHurt(DamageHero damager, ushort playerId) {
-        foreach (var burst in BulletBursts) {
-            if (damager.GetComponentInParent(burst.DeclaringType!) is not { } bullet) {
+        foreach (var burst in ProjectileBursts) {
+            if (damager.GetComponentInParent(burst.DeclaringType!) is not { } projectile) {
                 continue;
             }
 
@@ -352,12 +357,16 @@ internal partial class CoopHits {
                 var standIn = new GameObject("Coop Player Box Stand-in");
                 standIn.SetActive(false);
                 standIn.tag = "HeroBox";
+                standIn.layer = (int) PhysLayers.HERO_BOX;
                 UnityEngine.Object.DontDestroyOnLoad(standIn);
                 _playerBoxStandIn = standIn.AddComponent<BoxCollider2D>();
             }
 
-            Logger.Info($"[Thrown] '{bullet.name}' bursts where it hurt player {playerId}, as it burst on them there");
-            burst.Invoke(bullet, [_playerBoxStandIn]);
+            Logger.Info(
+                $"[Thrown] '{projectile.name}' is told of the hit box of player {playerId}, which it hurt, as in " +
+                "their game"
+            );
+            burst.Invoke(projectile, [_playerBoxStandIn]);
         }
     }
 
