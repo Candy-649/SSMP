@@ -496,6 +496,8 @@ internal partial class CoopHits {
         Entity.Entity.CopyHeardOwnSign += OnCopyHeardOwnSign;
         Entity.Entity.TalkLedTo += OnTalkLedTo;
         Entity.Entity.CatchWentOn += OnCatchWentOn;
+        Entity.Entity.CopyPartStruck += OnCopyPartStruck;
+        Entity.Entity.LedCatchStruckFree += OnLedCatchStruckFree;
 
         AddILHook(
             typeof(DamageEnemies).GetMethod("ProcessDamageBuffer", InstanceFlags),
@@ -649,6 +651,8 @@ internal partial class CoopHits {
         GamePatcher.HitInDirectionDetour = null;
         Entity.Entity.TalkLedTo -= OnTalkLedTo;
         Entity.Entity.CatchWentOn -= OnCatchWentOn;
+        Entity.Entity.CopyPartStruck -= OnCopyPartStruck;
+        Entity.Entity.LedCatchStruckFree -= OnLedCatchStruckFree;
 
         foreach (var hook in _hooks) {
             hook.Dispose();
@@ -764,6 +768,11 @@ internal partial class CoopHits {
 
         if (update.Kind == CoopHitKind.ThrownChase) {
             ApplyThrownChase(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.EntityStruckFree) {
+            ApplyStruckFree(update);
             return;
         }
 
@@ -1774,7 +1783,7 @@ internal partial class CoopHits {
     /// knows the last by the attack itself, which says that the player is its source, and that is also what makes a hit
     /// of it the player's (see <see cref="HitInstance.IsHeroDamage"/>).
     /// </summary>
-    private static bool IsLocalAttack(Collider2D attack) {
+    internal static bool IsLocalAttack(Collider2D attack) {
         var hero = HeroController.SilentInstance;
         if (hero != null && attack.transform.IsChildOf(hero.transform) ||
             LocalToolComponent.IsLocalTool(attack.gameObject) || HeroHarpoon.IsLocalNeedlePart(attack.transform)) {
@@ -3265,6 +3274,11 @@ internal partial class CoopHits {
             Take();
         }
 
+        // Their copy may have played a strike from before this creature caught a player: it frees the one it holds
+        if (!sameWay && entity.StrikeFrees(update.Index, update.Responder, $"Player {update.PlayerId}")) {
+            return;
+        }
+
         Logger.Info(
             sameWay
                 ? $"The partner played '{update.Responder}' on the copy of entity {update.EntityId}, so it is played " +
@@ -3315,6 +3329,57 @@ internal partial class CoopHits {
             Responder = stateName,
             Hit = [catchNumber, step]
         });
+    }
+
+    /// <summary>
+    /// Plays what the local player's strike on a part of the copy of an entity told the copy's FSM, as a strike of
+    /// theirs is played (see <see cref="PlayOrSend"/>), or sends it to the scene host, whose game frees with it the
+    /// player whom the creature holds (see <see cref="ApplyEntityTouch"/>).
+    /// </summary>
+    /// <param name="struck">The entity.</param>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="eventName">The event that the part told the FSM.</param>
+    private void OnCopyPartStruck(Entity.Entity struck, byte fsmIndex, string eventName) {
+        PlayOrSend(struck, fsmIndex, eventName, "struck a part of", setOff: true);
+    }
+
+    /// <summary>
+    /// Tells the game of the player whose catch an entity here follows that a strike freed them of it (see
+    /// <see cref="Entity.Entity.LedCatchStruckFree"/>).
+    /// </summary>
+    /// <param name="struck">The entity.</param>
+    /// <param name="leaderId">The ID of the player whose game leads the catch.</param>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="freeing">The event that lets them go.</param>
+    private void OnLedCatchStruckFree(Entity.Entity struck, ushort leaderId, byte fsmIndex, string freeing) {
+        if (!CanSendEntityTouch()) {
+            return;
+        }
+
+        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
+            TargetId = leaderId,
+            Kind = CoopHitKind.EntityStruckFree,
+            EntityId = struck.Id,
+            Index = fsmIndex,
+            Responder = freeing,
+            Hit = []
+        });
+    }
+
+    /// <summary>
+    /// Lets the local player go from a catch of an entity that this game leads, which a strike of another player freed
+    /// them of in the scene host's game (see <see cref="Entity.Entity.FreeFromTheCatch"/>).
+    /// </summary>
+    /// <param name="update">The update, with the index of the FSM and the event that lets them go.</param>
+    private void ApplyStruckFree(CoopHitUpdate update) {
+        if (FindEntity(update.EntityId) is { } entity) {
+            entity.FreeFromTheCatch(update.Index, update.Responder);
+        } else {
+            Logger.Info(
+                $"[Catches] Player {update.PlayerId} struck entity {update.EntityId} free of the local player, which " +
+                "is gone here"
+            );
+        }
     }
 
     /// <summary>
@@ -3387,7 +3452,8 @@ internal partial class CoopHits {
     /// <summary>
     /// Sends an entity the event that the partner's copy of it was touched or struck with, or set off by, if this game
     /// is the scene host and so runs it (see <see cref="Entity.Entity.PlayForPartner"/>). An FSM that has already
-    /// moved on from where the event leads anywhere takes no notice of it. A catch never comes this way: the caught
+    /// moved on from where the event leads anywhere takes no notice of it, unless it holds a player there whom a
+    /// strike with it frees (see <see cref="Entity.Entity.StrikeFrees"/>). A catch never comes this way: the caught
     /// player's game plays it, and sends it with what it played (see <see cref="PlayOrSend"/>).
     /// </summary>
     /// <param name="update">The update of the partner's touch.</param>
@@ -3401,6 +3467,10 @@ internal partial class CoopHits {
 
         if (fsm.Fsm.ActiveState is not { } state ||
             Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) == null) {
+            if (entity.StrikeFrees(update.Index, update.Responder, $"Player {update.PlayerId}")) {
+                return;
+            }
+
             Logger.Info(
                 $"The partner touched or struck the copy of entity {update.EntityId} with '{update.Responder}', " +
                 $"which leads nowhere from its '{fsm.ActiveStateName}' here, so it takes no notice of it"

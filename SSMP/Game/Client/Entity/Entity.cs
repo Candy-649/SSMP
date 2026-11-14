@@ -2140,6 +2140,7 @@ internal partial class Entity {
             PlayAllOfItFaster();
             CheckWokenByLocalPlayer();
             CheckCaughtByCopy();
+            SetThePartAgain();
 
             if (Object.Client != null &&
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
@@ -3792,7 +3793,8 @@ internal partial class Entity {
 
     /// <summary>
     /// Hook for an FSM sending an event to the FSMs of an object, which hears one of the parts of a copy catching the
-    /// local player or a thing of theirs (see <see cref="HearCopyTold"/>).
+    /// local player or a thing of theirs or struck by them (see <see cref="HearCopyTold"/>), and a part of the room's
+    /// own creature struck by them while it holds another player (see <see cref="HearRoomPartStruck"/>).
     /// </summary>
     private static void OnBroadcastToObject(
         Action<HutongGames.PlayMaker.Fsm, GameObject, FsmEvent, FsmEventData, bool, bool> orig,
@@ -3811,13 +3813,15 @@ internal partial class Entity {
 
         if (go != null && fsmEvent != null) {
             HearCopyTold(self, go, null, fsmEvent.Name);
+            HearRoomPartStruck(self, go, null, fsmEvent.Name);
         }
     }
 
     /// <summary>
     /// Hook for an FSM sending an event to the FSM of an object that has a given name, which hears one of the parts of a
-    /// copy catching the local player or a thing of theirs (see <see cref="HearCopyTold"/>). A tendril tells the
-    /// creature it grows from by the name of its FSM.
+    /// copy catching the local player or a thing of theirs or struck by them (see <see cref="HearCopyTold"/>), and a
+    /// part of the room's own creature struck by them while it holds another player (see
+    /// <see cref="HearRoomPartStruck"/>). A tendril tells the creature it grows from by the name of its FSM.
     /// </summary>
     private static void OnSendToFsmOnObject(
         Action<HutongGames.PlayMaker.Fsm, GameObject, string, FsmEvent> orig,
@@ -3834,6 +3838,7 @@ internal partial class Entity {
 
         if (go != null && fsmEvent != null) {
             HearCopyTold(self, go, fsmName, fsmEvent.Name);
+            HearRoomPartStruck(self, go, fsmName, fsmEvent.Name);
         }
     }
 
@@ -3871,12 +3876,12 @@ internal partial class Entity {
     /// it caught something: the local player, which the game's catching parts say with <see cref="CatchEvents"/>, or
     /// which a part that grabs the player tells from where it is touching them (see <see cref="GrabsThePlayer"/>) - a
     /// tendril that reels them in, a charge that seizes them to drain their silk, the grab box of a creature that
-    /// pounces on them whole and carries them off - or a thing of theirs that the game
-    /// marks for catching (see <see cref="IsCatchableThingOfTheLocalPlayer"/>). The part runs by itself in this game,
-    /// and did to what it caught all that it does to it, but the copy's own FSMs are switched off and did not hear it:
-    /// the player's flier that a tendril took simply was gone, and the creature never ate it in either game; a player
-    /// that a charge seized was held, hidden, for good. An FSM that is switched off only sends what the scene host's
-    /// game did, replayed on it.
+    /// pounces on them whole and carries them off - or a thing of theirs that the game marks for catching (see
+    /// <see cref="IsCatchableThingOfTheLocalPlayer"/>); or that the local player struck the part (see
+    /// <see cref="OnCopyPartStruck"/>). The part runs by itself in this game, and did to what it caught or felt all
+    /// that it does to it, but the copy's own FSMs are switched off and did not hear it: the player's flier that a
+    /// tendril took simply was gone, and the creature never ate it in either game; a player that a charge seized was
+    /// held, hidden, for good. An FSM that is switched off only sends what the scene host's game did, replayed on it.
     /// </summary>
     /// <param name="sender">The FSM that sends the event.</param>
     /// <param name="target">The object that it sends the event to.</param>
@@ -3932,15 +3937,25 @@ internal partial class Entity {
         }
 
         // A thing counts only while it is entering the part, the collider that the part keeps as the one that set it
-        // off being that thing's; the one that set it off last stays there after. What the parts say while the copy
-        // plays the combo of a catch of the local player is part of that combo.
+        // off being that thing's; the one that set it off last stays there after. So does a strike of theirs that the
+        // part felt, unless the part grabs them. What the parts say while the copy plays the combo of a catch of the
+        // local player is part of that combo.
         if (sender == _triggeredFsm && IsCatchableThingOfTheLocalPlayer(sender.TriggerCollider2D)) {
             entity.OnCopyCaught(sender, fsmName, eventName, false);
-        } else if (!entity.PlaysACombo && GrabsThePlayer(sender) && TouchesTheLocalPlayer(part) &&
-                   !entity.OnCopyCaught(sender, fsmName, eventName, true) && !AnyLeadsACatch()) {
-            // A part may grab the player itself before it tells the creature, and nothing goes on with a catch that
-            // no FSM of the copy can take from where it is: the player is let go at once
-            EntityFsmActions.LetGoOfTheHeldLocalPlayer($"no FSM of the copy of entity {entity.Id} takes '{eventName}'");
+        } else if (!entity.PlaysACombo && GrabsThePlayer(sender) && TouchesTheLocalPlayer(part)) {
+            // Nothing goes on with a catch that no FSM of the copy can take from where it is: the part waits for the
+            // creature to set it again (see SetThePartAgain), and a part that grabs the player itself before it tells
+            // the creature lets them go at once
+            if (!entity.OnCopyCaught(sender, fsmName, eventName, true)) {
+                entity.SetThePartAgainLater(sender, fsmName, eventName);
+                if (!AnyLeadsACatch()) {
+                    EntityFsmActions.LetGoOfTheHeldLocalPlayer(
+                        $"no FSM of the copy of entity {entity.Id} takes '{eventName}'"
+                    );
+                }
+            }
+        } else if (sender == _triggeredFsm && IsStrikeOfTheLocalPlayer(sender.TriggerCollider2D)) {
+            entity.OnCopyPartStruck(fsmName, eventName);
         }
     }
 
@@ -3968,10 +3983,7 @@ internal partial class Entity {
 
         for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count; fsmIndex++) {
             var fsm = _fsms.Client[fsmIndex];
-
-            // One that runs by itself on the copy heard the event
-            if (fsm == null || fsm.enabled || !string.IsNullOrEmpty(fsmName) && fsm.FsmName != fsmName ||
-                StateOfCopy(fsm) is not { } state || EntityFsmActions.FindTransition(fsm.Fsm, state, eventName) == null) {
+            if (!CopyFsmTakes(fsm, fsmName, eventName)) {
                 continue;
             }
 
@@ -3982,6 +3994,78 @@ internal partial class Entity {
         }
 
         return taken;
+    }
+
+    /// <summary>
+    /// Whether an FSM of the copy takes an event that a part told the FSM of the given name, or all of them, from the
+    /// state it is in (see <see cref="StateOfCopy"/>). One that runs by itself on the copy heard the event already.
+    /// </summary>
+    private bool CopyFsmTakes(PlayMakerFSM? fsm, string? fsmName, string eventName) {
+        return fsm != null && !fsm.enabled && (string.IsNullOrEmpty(fsmName) || fsm.FsmName == fsmName) &&
+               StateOfCopy(fsm) is { } state && EntityFsmActions.FindTransition(fsm.Fsm, state, eventName) != null;
+    }
+
+    /// <summary>
+    /// A part of the copy whose grab of the local player no FSM of the copy took, with the state it waits in for the
+    /// creature to set it again, the FSM it told and the grab; or null (see <see cref="SetThePartAgain"/>).
+    /// </summary>
+    private (HutongGames.PlayMaker.Fsm Part, FsmState Waits, string? FsmName, string Event)? _partToSetAgain;
+
+    /// <summary>
+    /// Notes a part of the copy whose grab of the local player no FSM of the copy took, to be set again once one takes
+    /// it (see <see cref="SetThePartAgain"/>).
+    /// </summary>
+    /// <param name="part">The FSM of the part.</param>
+    /// <param name="fsmName">The name of the FSM that the part told, or null for all of them.</param>
+    /// <param name="eventName">The grab.</param>
+    private void SetThePartAgainLater(HutongGames.PlayMaker.Fsm part, string? fsmName, string eventName) {
+        _partToSetAgain = (part, part.ActiveState, fsmName, eventName);
+        SSMP.Logging.Logger.Info(
+            $"[Catches] No FSM of the copy of entity {Id} takes '{eventName}' of '{part.GameObjectName}', which " +
+            $"waits in '{part.ActiveStateName}' until the copy can take it"
+        );
+    }
+
+    /// <summary>
+    /// Sets a part of the copy again whose grab of the local player no FSM of the copy took, as soon as one takes such
+    /// a grab (see <see cref="_partToSetAgain"/>): the part goes on from where it waits by the one way out of there,
+    /// as the creature sends it in the game itself once it is through with a catch, and its own trigger looks for the
+    /// player afresh, as the game itself has it. In the game itself a creature that a part tells of a grab is always
+    /// where it takes it, and a part waits for the creature to set it again; a copy that the scene host showed
+    /// elsewhere, or that played a move by itself, could not take it, and the part waited for good. The tendril of a
+    /// vine that the copy's own move put back grabbed the player standing under it at once, while the copy still
+    /// waited at the end of the move, and the vine never caught that player again until the scene host's vine caught
+    /// the other one (USER 11-14 "我朋友被抓过，然后我就没法被抓", "我做场景主机就可以"). A part that the creature or
+    /// its own FSM set again meanwhile is left be, as is one that goes on by itself or waits for more than one thing.
+    /// </summary>
+    private void SetThePartAgain() {
+        if (_partToSetAgain is not { } waiting) {
+            return;
+        }
+
+        if (waiting.Part.ActiveState != waiting.Waits) {
+            _partToSetAgain = null;
+            return;
+        }
+
+        if (!_fsms.Client.Exists(fsm => CopyFsmTakes(fsm, waiting.FsmName, waiting.Event))) {
+            return;
+        }
+
+        _partToSetAgain = null;
+        if (waiting.Waits.Transitions is not [{ FsmEvent: { } again }] || again == FsmEvent.Finished) {
+            SSMP.Logging.Logger.Info(
+                $"[Catches] The copy of entity {Id} takes '{waiting.Event}' again, but " +
+                $"'{waiting.Part.GameObjectName}' waits in '{waiting.Waits.Name}' for what the copy can't tell it"
+            );
+            return;
+        }
+
+        SSMP.Logging.Logger.Info(
+            $"[Catches] The copy of entity {Id} takes '{waiting.Event}' again, so '{waiting.Part.GameObjectName}' is " +
+            $"set again from '{waiting.Waits.Name}' with '{again.Name}'"
+        );
+        waiting.Part.Event(again);
     }
 
     /// <summary>
@@ -4045,6 +4129,17 @@ internal partial class Entity {
     private static bool IsCatchableThingOfTheLocalPlayer(Collider2D? collider) {
         return collider != null && collider.GetComponent<CustomTag>() != null &&
                LocalToolComponent.IsLocalTool(collider.gameObject);
+    }
+
+    /// <summary>
+    /// Whether what set a part off is a strike of the local player: an attack of theirs on the layer of the players'
+    /// attacks - their blade, the harpoon, a tool they threw - and no copy of the partner's, whose game says what
+    /// theirs struck (see CoopHits.IsLocalAttack).
+    /// </summary>
+    /// <param name="collider">The collider that set the part's FSM off.</param>
+    private static bool IsStrikeOfTheLocalPlayer(Collider2D? collider) {
+        return collider != null && collider.gameObject.layer == (int) GlobalEnums.PhysLayers.HERO_ATTACK &&
+               !RemoteAttackComponent.IsRemoteAttack(collider.gameObject) && CoopHits.IsLocalAttack(collider);
     }
 
     /// <summary>

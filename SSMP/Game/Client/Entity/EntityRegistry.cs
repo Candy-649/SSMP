@@ -59,6 +59,12 @@ internal static class EntityRegistry {
     private static readonly Dictionary<EntityType, Dictionary<string, Dictionary<string, HashSet<string>>>> RunsHere =
         new();
 
+    /// <summary>
+    /// For each type of entity whose entry names any, the events that a part of it struck by a player tells it, each
+    /// with the event that frees the player it holds then (see <see cref="EntityRegistryEntry.StruckFree"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, Dictionary<string, string>> StruckFree = new();
+
     static EntityRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<EntityRegistryEntry>>(EntityRegistryFilePath)
                             ?? throw new InvalidDataException("Could not deserialize entries from embedded JSON.");
@@ -134,6 +140,16 @@ internal static class EntityRegistry {
     }
 
     /// <summary>
+    /// The event that frees the player whom an entity of the given type holds, as another player strikes a part of it
+    /// that tells it the given event, or null (see <see cref="EntityRegistryEntry.StruckFree"/>).
+    /// </summary>
+    public static string? StruckFreeBy(EntityType type, string eventName) {
+        return StruckFree.TryGetValue(type, out var events) && events.TryGetValue(eventName, out var freeing)
+            ? freeing
+            : null;
+    }
+
+    /// <summary>
     /// Filters out entries whose <see cref="EntityRegistryEntry.TypeName"/> has no mapping in
     /// <see cref="EntityType"/>, and recursively validates children.
     /// </summary>
@@ -176,6 +192,10 @@ internal static class EntityRegistry {
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
                 EachGameFrom[entry.Type] = new Dictionary<string, string>(eachGameFrom, StringComparer.Ordinal);
+            }
+
+            if (entry.StruckFree is { Count: > 0 } struckFree) {
+                StruckFree[entry.Type] = new Dictionary<string, string>(struckFree, StringComparer.Ordinal);
             }
 
             if (entry.RunsHere is { Count: > 0 } runsHere) {
@@ -480,6 +500,16 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("catch_events")]
     public List<string>? CatchEvents { get; set; }
+
+    /// <summary>
+    /// Events that a part of the entity tells it as a player strikes the part, each with the event that frees the
+    /// player the entity holds then, which its FSM takes wherever it holds a player and lets them go on a hurt of
+    /// theirs: the tendril of a vine pulling one player up lets go of them as the other strikes it (USER 11-14 "加",
+    /// asked whether a strike should free the one it holds). The player held does not free themselves; in the game
+    /// itself nobody else is there to strike it (Entity.StrikeFrees).
+    /// </summary>
+    [JsonProperty("struck_free")]
+    public Dictionary<string, string>? StruckFree { get; set; }
 
     /// <summary>
     /// Whether what the player of a scene client does to the copy of the entity - a strike that tells its FSM

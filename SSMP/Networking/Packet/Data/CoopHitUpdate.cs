@@ -253,5 +253,13 @@ internal enum CoopHitKind : byte {
     /// <see cref="CoopHitUpdate.Responder"/>, or "" for whom it goes after alone. The other games take their own of it
     /// there (CoopHits.Chasers).
     /// </summary>
-    ThrownChase
+    ThrownChase,
+
+    /// <summary>
+    /// An entity, found by the ID of its entity, whose copy in the receiver's game plays a catch of the receiver's
+    /// player that their game leads, which a strike of another player freed them of in the sender's game, the scene
+    /// host's (Entity.StrikeFrees): the copy's FSM at <see cref="CoopHitUpdate.Index"/> takes the event named by
+    /// <see cref="CoopHitUpdate.Responder"/>, which lets them go.
+    /// </summary>
+    EntityStruckFree
 }

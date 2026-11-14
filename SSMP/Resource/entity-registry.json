@@ -2004,7 +2004,10 @@
     },
     "catch_events": [
       "GRAB HERO"
-    ]
+    ],
+    "struck_free": {
+      "TENDRIL ATTACKED": "HERO DAMAGED"
+    }
   },
   {
     "base_object_name": "Swamp Mosquito",
