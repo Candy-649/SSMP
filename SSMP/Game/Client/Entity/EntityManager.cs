@@ -464,6 +464,7 @@ internal class EntityManager {
         Logger.Info("Scene changed, clearing registered entities");
         EntityFsmActions.ForgetActionsInState();
         ClearEntities();
+        OwnCreatures.Clear();
         _picksLeftToTheOtherGame.Clear();
         _loops.Clear();
         _dead.Clear();

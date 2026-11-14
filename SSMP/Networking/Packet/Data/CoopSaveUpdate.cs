@@ -899,5 +899,16 @@ internal enum CoopSaveUpdateKind : byte {
     /// delivery - by the names of the items in <see cref="CoopSaveUpdate.Names"/>, none if it shows none (see
     /// CoopSave.DeliveryLooks). The character of the sender shows the same.
     /// </summary>
-    DeliveryLooks
+    DeliveryLooks,
+
+    /// <summary>
+    /// A creature that every game runs by itself as the room's own, as the scene host's game has it (see
+    /// CoopSave.OwnCreatures): <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name it,
+    /// and <see cref="CoopSaveUpdate.PartCount"/> is 1 if it is dead there. Otherwise
+    /// <see cref="CoopSaveUpdate.FsmName"/> names its state machine, <see cref="CoopSaveUpdate.StateName"/> the state
+    /// that it went to, <see cref="CoopSaveUpdate.Amounts"/> how many times its actions had rolled before
+    /// (SharedDice.RollCounts), and <see cref="CoopSaveUpdate.Values"/> where it was, as x and y, the x of its scale
+    /// and how far it was turned.
+    /// </summary>
+    OwnCreature
 }

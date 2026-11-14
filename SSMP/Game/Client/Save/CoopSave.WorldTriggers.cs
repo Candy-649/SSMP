@@ -486,8 +486,9 @@ internal partial class CoopSave {
     /// is only sent at the moment it does, which a partner who came in later never hears: the character that the room
     /// had them rescue stayed cowering in their game, and the conversation that follows was lost to them. Also that the
     /// local hero is maggoted (see CoopSave.Maggots), the looks of the deliveries it carries (see
-    /// CoopSave.DeliveryLooks), and how the things here that break and count as creatures stand (see
-    /// CoopSave.BreakingCreatures).
+    /// CoopSave.DeliveryLooks), how the things here that break and count as creatures stand (see
+    /// CoopSave.BreakingCreatures), and where the creatures that every game runs by itself are and what they do (see
+    /// CoopSave.OwnCreatures).
     /// </summary>
     /// <param name="player">The player who walked in.</param>
     /// <param name="cameIn">Whether they just came in, which their game loaded the room for, rather than were here
@@ -497,6 +498,9 @@ internal partial class CoopSave {
         // of the deliveries it carries
         SendMaggotsTo(player);
         SendDeliveryLooksTo(player);
+
+        // Their game has the creatures that every game runs by itself where the room starts them
+        SendOwnCreaturesTo(player);
 
         // The heat lamps are whole in their game, which just loaded the room (see CoopSave.HeatLamps)
         if (cameIn) {

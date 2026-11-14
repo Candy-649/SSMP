@@ -416,6 +416,39 @@ internal static partial class SharedDice {
     }
 
     /// <summary>
+    /// How many times each action of an object rolled under the name it rolls under, as pairs of the number of the
+    /// action and the times, in the order of the numbers: the same in another game whose object rolled alike. Empty
+    /// for an object that rolls with the game's own dice.
+    /// </summary>
+    public static List<int> RollCounts(GameObject gameObject) {
+        var counts = new List<int>();
+        if (!NamedRollers.TryGetValue(gameObject, out var named)) {
+            return counts;
+        }
+
+        var rollers = new List<int>(named.Times.Keys);
+        rollers.Sort();
+        foreach (var roller in rollers) {
+            counts.Add(roller);
+            counts.Add(named.Times[roller]);
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// Has an object that rolls under a name go on from how many times each of its actions rolled in another game (see
+    /// <see cref="RollCounts"/>), so that it rolls from there what the object of that game rolls.
+    /// </summary>
+    public static void SetRollCounts(GameObject gameObject, List<int> counts) {
+        var named = NamedRollers[gameObject];
+        named.Times.Clear();
+        for (var i = 0; i + 1 < counts.Count; i += 2) {
+            named.Times[counts[i]] = counts[i + 1];
+        }
+    }
+
+    /// <summary>
     /// The name an object of the room rolls under now if nothing rolled or was told under it yet, or null: a name
     /// that the object was just given for what it is about to do, like a trap that another one tells to go off.
     /// </summary>
@@ -573,6 +606,13 @@ internal static partial class SharedDice {
             ThrownThings.TryGetMark(thrownFsm.gameObject, out var mark)) {
             ThrownThings.Rolling(mark.NextRoll(Identify(self, thrownFsm)), EnterCall(orig, self));
             return;
+        }
+
+        // A creature that every game runs by itself rolls under its place in the room, the same in every game, from its
+        // first roll (see OwnCreatures)
+        if (Entity.OwnCreatures.Count > 0 && self.Fsm?.FsmComponent is { } ownFsm && ownFsm != null &&
+            Entity.OwnCreatures.Has(ownFsm.gameObject)) {
+            RollByName(ownFsm.gameObject, Entity.OwnCreatures.RollName(ownFsm.gameObject));
         }
 
         // So does an object of the room that was given a name to roll under

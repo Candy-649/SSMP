@@ -3129,6 +3129,7 @@
   {
     "base_object_name": "Small Crab",
     "type": "Cragglite",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

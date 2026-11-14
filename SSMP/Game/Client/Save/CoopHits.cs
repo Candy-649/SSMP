@@ -4285,7 +4285,8 @@ internal partial class CoopHits {
     /// <summary>
     /// Whether an object is a part of the room itself, which both games have in the same place: in a scene rather than
     /// kept across scenes, placed there rather than spawned, and neither a creature nor a part of one, since enemy
-    /// sync takes care of creatures. The kinds that were replayed before the others count when spawned too (see
+    /// sync takes care of creatures. A creature that every game runs by itself is one, with its parts, and takes hits
+    /// as the room's objects do (see OwnCreatures). The kinds that were replayed before the others count when spawned too (see
     /// <see cref="ReplayedWhenSpawnedTypes"/>), and so does a thing that a creature threw, which both games know by
     /// its name (see <see cref="ThrownThings"/>).
     /// </summary>
@@ -4294,7 +4295,8 @@ internal partial class CoopHits {
         var isThrown = ThrownThings.Count > 0 && ThrownThings.IsThrown(component.gameObject);
         var scene = component.gameObject.scene;
         if (!isThrown && (!scene.IsValid() || scene.name == "DontDestroyOnLoad") ||
-            component.GetComponentInParent<HealthManager>(true) != null) {
+            component.GetComponentInParent<HealthManager>(true) is { } creature &&
+            !OwnCreatures.Has(creature.gameObject)) {
             return false;
         }
 

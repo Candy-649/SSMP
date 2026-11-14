@@ -454,6 +454,14 @@ internal class EntityRegistryEntry {
     public bool WithoutHealth { get; set; }
 
     /// <summary>
+    /// Whether every game runs the room's own creature of this kind by itself, with no copy made of it, and shares only
+    /// what decides it: what it rolls, the hits it takes and the state that the scene host's game has it in (see
+    /// OwnCreatures). A trial (USER 11-14, "用游戏本身那只，更像是一种白名单", "先微微试一下").
+    /// </summary>
+    [JsonProperty("own_in_each_game")]
+    public bool OwnInEachGame { get; set; }
+
+    /// <summary>
     /// Names of objects without health, named after the creature with more words, that are still taken for it, each
     /// found to need it: a spawner whose pools grow with the creature's, a crowd whose members follow the scene host's,
     /// a sleeper whose waking is shared, a trap that waits for a row of its own (see EntityRegistry.TryGetEntry). Null

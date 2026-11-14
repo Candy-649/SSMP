@@ -283,6 +283,7 @@ internal partial class CoopSave {
         RegisterLavaDeathHooks();
         RegisterMaggotHooks();
         RegisterDeliveryLookHooks();
+        RegisterOwnCreatureHooks();
         RegisterArrivalHooks();
         RegisterTrapdoorHooks();
         RegisterPrisonCaptureHooks();
@@ -737,6 +738,7 @@ internal partial class CoopSave {
         ResetMachines();
         ResetStartPicks();
         _layoutPickingStates.Clear();
+        _ownSteps.Clear();
 
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
@@ -1185,6 +1187,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.DeliveryLooks:
                 OnDeliveryLooks(player, update);
+                break;
+            case CoopSaveUpdateKind.OwnCreature:
+                OnOwnCreature(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);

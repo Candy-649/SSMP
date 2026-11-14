@@ -265,6 +265,12 @@ internal class EntityProcessor {
             return;
         }
 
+        // A creature of a kind that every game runs by itself is left to the game, with no copy (see OwnCreatures)
+        if (foundEntry.OwnInEachGame && entries == null && !SpawnedId.HasValue) {
+            OwnCreatures.Take(gameObject, foundEntry.Type);
+            return;
+        }
+
         ushort id;
 
         // If a spawned ID is defined we check whether an entity with the given ID already exists
