@@ -587,6 +587,10 @@ internal partial class GamePatcher {
         CheckHeroPerformanceRegion self,
         HeroPerformanceRegion.AffectedState state
     ) {
+        if (FollowsSceneHostsSong(self.Fsm)) {
+            return;
+        }
+
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
             RememberPendingSongTarget(self, self.Target, self.IgnoreNeedolinRange.Value, 0f);
         } else if (state != HeroPerformanceRegion.AffectedState.None) {
@@ -604,6 +608,10 @@ internal partial class GamePatcher {
         CheckHeroPerformanceRegionV2 self,
         HeroPerformanceRegion.AffectedState state
     ) {
+        if (FollowsSceneHostsSong(self.Fsm)) {
+            return;
+        }
+
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
             RememberPendingSongTarget(self, self.Target, self.IgnoreNeedolinRange.Value, self.Radius.Value);
         } else if (state != HeroPerformanceRegion.AffectedState.None) {
@@ -611,6 +619,20 @@ internal partial class GamePatcher {
         }
 
         orig(self, state);
+    }
+
+    /// <summary>
+    /// Whether a state machine is of a creature that every game runs by itself (see OwnCreatures), in the game of a
+    /// scene client. Its song is the scene host's to begin and end, as what a creature does next is (USER 11-12
+    /// "客机就不应该挑招"): that game hears the song of every player and rolls how long the creature sings and rests
+    /// after, and this one takes its steps (see CoopSave.OwnCreatures). Begun and ended by each game for the songs it
+    /// had heard so far and for as long as its own dice said, a song began in one game and not in the other, or was
+    /// cut off there as soon as it began (USER 11-14 "有几次进唱歌状态刚进唱歌状态就出来了").
+    /// </summary>
+    private static bool FollowsSceneHostsSong(HutongGames.PlayMaker.Fsm? fsm) {
+        return Entity.OwnCreatures.Count > 0 && fsm?.FsmComponent is { } machine && machine != null &&
+               Entity.OwnCreatures.Has(machine.gameObject) &&
+               _entityManagerInstance is { IsSceneRoleDetermined: true, IsSceneHost: false };
     }
 
     /// <summary>
@@ -715,10 +737,15 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Locks a singing enemy onto the performer it reacted to, and sets the sing duration from that performer's
-    /// Musician Charm when they are a remote player.
+    /// Musician Charm when they are a remote player. A creature whose song the scene host's game ends sings on here
+    /// until that one stops (see <see cref="FollowsSceneHostsSong"/>).
     /// </summary>
     private static void OnEnemySingControlEnter(Action<EnemySingControl> orig, EnemySingControl self) {
         orig(self);
+        if (FollowsSceneHostsSong(self.Fsm)) {
+            Entity.Action.EntityFsmActions.EnemySingControlSentEndEventField?.SetValue(self, true);
+            return;
+        }
 
         var enemy = self.Fsm?.GetOwnerDefaultTarget(self.enemyGameObject);
         var owner = enemy == null ? null : GetEnemyTargetOwner(enemy);

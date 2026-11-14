@@ -21,9 +21,14 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// somewhere else.
 ///
 /// As a creature of the scene host's goes from one state to another, the members in the room are told which state it
-/// went to, how many times its actions had rolled before, and where it was. A creature of theirs that took the same
-/// step, a moment before or after, but stood somewhere else as it did, is moved by as much as it was off. One that did
-/// not take it is put where the scene host's was and takes it, from the same rolls. A member who comes into the room
+/// went to, how many times its actions had rolled before, where it was and whether it crawled. A creature of theirs
+/// that took the same step, a moment before or after, but stood somewhere else as it did, is moved by as much as it
+/// was off, and where it stood at the steps it kept goes with it, so that a step it took before it was moved is not
+/// made up for once more (USER 11-14 "我刚刚看你站在怪身上": each step of a walk that it had taken before the word of
+/// the first came moved it again, further off each time, 66 units at last). One that did not take it is put where the
+/// scene host's was, crawling or not as that one was, and takes it, from the same rolls (USER 11-14 "边唱边移动": put
+/// into its song straight from a walk, where the scene host's had begun it standing, it crawled on as it sang). A song
+/// is the scene host's to begin and end (see GamePatcher.FollowsSceneHostsSong). A member who comes into the room
 /// is told where each one is and what it does, or that it is dead, which theirs then is too. One that dies in any
 /// game dies in the others as well, whatever killed it there: a blow that killed it in one game took less in another
 /// that took the blows of both players in another order (see EnemyHealthCoop).
@@ -167,7 +172,10 @@ internal partial class CoopSave {
             FsmName = machine.FsmName,
             StateName = step.State,
             Amounts = step.Counts,
-            Values = [step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z]
+            Values = [
+                step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z,
+                machine.GetComponent<Crawler>() is { IsCrawling: true } ? 1f : 0f
+            ]
         };
     }
 
@@ -278,6 +286,7 @@ internal partial class CoopSave {
                     $"{off.magnitude:F1} away from where it did there, and is moved by that"
                 );
                 transform.position += off;
+                MoveOwnSteps(creature, off);
             }
 
             return;
@@ -287,11 +296,24 @@ internal partial class CoopSave {
             $"[Own creatures] '{place}' goes from '{fsm.ActiveStateName}' to '{update.StateName}' as in " +
             $"{player.Username}'s game, where it was there, {Vector2.Distance(transform.position, there):F1} away"
         );
+        MoveOwnSteps(creature, there - transform.position);
         transform.position = there;
         var scale = transform.localScale;
         scale.x = update.Values[2];
         transform.localScale = scale;
         transform.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
+
+        // Crawling or not as the scene host's was, which the state it goes to need not set: a song is begun from a
+        // walk by a state that stops the crawl first, but straight from standing
+        var crawling = update.Values[4] > 0f;
+        if (creature.GetComponent<Crawler>() is { } crawler && crawler.IsCrawling != crawling) {
+            if (crawling) {
+                crawler.StartCrawling();
+            } else {
+                crawler.StopCrawling();
+            }
+        }
+
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
         fsm.SetState(update.StateName);
@@ -313,6 +335,22 @@ internal partial class CoopSave {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Moves where the kept steps of a creature that every game runs by itself say it stood by as much as it was just
+    /// moved, so that a step of the scene host's that it took before is not made up for once more.
+    /// </summary>
+    private void MoveOwnSteps(GameObject creature, Vector3 by) {
+        foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
+            if (!_ownSteps.TryGetValue(machine.Fsm, out var steps)) {
+                continue;
+            }
+
+            for (var i = 0; i < steps.Count; i++) {
+                steps[i] = steps[i] with { Place = steps[i].Place + by };
+            }
+        }
     }
 
     /// <summary>
