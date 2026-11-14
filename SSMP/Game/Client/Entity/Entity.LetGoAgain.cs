@@ -74,7 +74,10 @@ internal partial class Entity {
         LetGoParts.PartsOf(Object.Host, letGo);
         var places = new List<(Transform Part, string Place)>();
         foreach (var part in letGo) {
-            if (LetGoParts.PlaceOf(Object.Host, part) is { } place) {
+            // Not what it grew from a pool and let go of, like a spine that a floater shot, which ends by itself and
+            // goes back to its pool, as it is left out of what goes out again (SendLetGoPartsAgain): taken back, it
+            // stayed under the creature where nothing lets it go again at a takeover
+            if (!part.name.Contains("(Clone)") && LetGoParts.PlaceOf(Object.Host, part) is { } place) {
                 places.Add((part.transform, place));
             }
         }
