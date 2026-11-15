@@ -13,7 +13,7 @@ namespace SSMP.Game.Client.Entity.Component;
 /// <inheritdoc />
 /// This component carries which parts of a creature are switched on from the game that runs it to the other one. A
 /// part is a child that the creature's own FSMs switch on or off for good rather than for the length of a state, and
-/// that is only there to be seen: sprites, and nothing that collides, sounds, sparkles or runs (see
+/// that is only there to be seen: sprites, and nothing that collides, sounds once, sparkles or runs (see
 /// <see cref="FindParts"/>). While both players are in the room the copy switches its parts as the scene host's
 /// creature does (EntityFsmActions), but not the ones that were switched before the copy was set up, and the room's own
 /// creature, asleep while the other game runs it, keeps whatever its own first steps switched before it was put to
@@ -124,8 +124,9 @@ internal class PartsComponent : EntityComponent {
     /// <summary>
     /// Finds the parts of a creature, by their paths under it: the children that its FSMs switch on or off for good,
     /// whose whole tree is only something to see, or through which a player talks to it. A child that collides, makes a
-    /// sound, sends particles, runs an FSM or does anything else is left to the switches that the copy plays as they
-    /// happen, where a word that came a moment late could hurt, sound or burst again on its own.
+    /// sound once as it is switched on, sends particles, runs an FSM or does anything else is left to the switches that
+    /// the copy plays as they happen, where a word that came a moment late could hurt, sound or burst again on its
+    /// own.
     /// </summary>
     /// <param name="root">The room's own creature.</param>
     /// <param name="fsms">Its FSMs that the scene host runs for both games.</param>
@@ -257,7 +258,11 @@ internal class PartsComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Whether everything in the tree of a child is only there to be seen: sprites and what draws them, at least one.
+    /// Whether everything in the tree of a child is only there to be seen: sprites and what draws them, at least one,
+    /// with a sound of its own that switching it on late plays no more than the game's own switch does: one that waits
+    /// to be played, or one that plays on and on. The flea that a flying creature carries in its mouth calls on and
+    /// on, and as a sound it was left to switches that a player who came in later never saw, so they saw the creature
+    /// carry nothing (USER 11-15: "有个虫子叼着跳蚤，我看不到被叼着的跳蚤").
     /// </summary>
     private static bool IsOnlyShown(GameObject part) {
         var shows = false;
@@ -267,6 +272,8 @@ internal class PartsComponent : EntityComponent {
                 case MeshFilter:
                 case tk2dBaseSprite:
                 case tk2dSpriteAnimator:
+                case AudioSource { playOnAwake: false } or AudioSource { loop: true }:
+                case AudioSourceGamePause:
                     break;
                 case ParticleSystemRenderer:
                     return false;
