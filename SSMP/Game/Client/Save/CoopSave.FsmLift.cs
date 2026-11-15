@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HutongGames.PlayMaker;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client.Save;
@@ -121,6 +122,12 @@ internal partial class CoopSave {
         /// </summary>
         public int DeclinedStop { get; set; } = -1;
 
+        /// <summary>
+        /// The stop of a member's lift, where it stood or where its ride went, that came while this lift had not set
+        /// itself up yet, or -1: the lift is put there once it has (see UpdateFsmLiftRide).
+        /// </summary>
+        public int PlaceWhenSetUp { get; set; } = -1;
+
         /// <inheritdoc />
         public override MonoBehaviour Owner => Fsm.Owner;
 
@@ -134,6 +141,13 @@ internal partial class CoopSave {
         /// Whether the lift stands still in a state from which a ride starts.
         /// </summary>
         public bool IsStanding => Fsm.ActiveStateName is { } state && LiftStandingStates.ContainsKey(state);
+
+        /// <summary>
+        /// Whether the lift set itself up, standing or riding in a state of its own. One sets itself up a moment after
+        /// the room starts, at the end where this game's player is, or once it is unlocked; until then its end and its
+        /// height are only where the room has it.
+        /// </summary>
+        public bool IsSetUp => IsStanding || IsMoving;
 
         /// <inheritdoc />
         public override int Stop {
@@ -194,19 +208,14 @@ internal partial class CoopSave {
 
         /// <inheritdoc />
         public override void PlaceAt(int stop, float value) {
-            // A lift that is locked or didn't set itself up yet keeps its own state
             var state = stop == 1 ? "Start Up" : "Start Down";
-            if ((IsStanding || IsMoving) && Fsm.GetState(state) != null) {
+            if (Fsm.GetState(state) != null) {
                 Fsm.SetState(state);
             }
         }
 
         /// <inheritdoc />
         public override void JoinRide(int stop, float value) {
-            if (!IsStanding && !IsMoving) {
-                return;
-            }
-
             SetHeight(value);
             IsDown.Value = stop == 1;
             Fsm.SetState(LiftDirectionState);
@@ -384,6 +393,27 @@ internal partial class CoopSave {
     /// and remembers a stop that the lift left while the local hero stood there without riding it.
     /// </summary>
     private void UpdateFsmLiftRide(FsmLift lift, List<ClientPlayerData> members) {
+        // Where a member's lift is, which came before this one set itself up (see OnLiftState); a ride that took it
+        // first is newer word
+        if (lift.PlaceWhenSetUp >= 0 && lift.IsSetUp) {
+            var stop = lift.PlaceWhenSetUp;
+            lift.PlaceWhenSetUp = -1;
+            if (lift.IsStanding && lift.Stop != stop) {
+                Logger.Info(
+                    $"The lift '{lift.Path}' set itself up at the other end from the members', and goes to theirs"
+                );
+                _liftReplaying = true;
+                try {
+                    lift.PlaceAt(stop, lift.StateValue);
+                } finally {
+                    _liftReplaying = false;
+                }
+
+                // A ride that putting it there sets off is this game's, and the members are told of it
+                lift.ToldStop = -1;
+            }
+        }
+
         var hero = HeroController.instance;
         if (lift.IsStanding) {
             lift.StoodAt = lift.Stop;

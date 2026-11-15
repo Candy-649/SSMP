@@ -93,6 +93,17 @@ internal partial class CoopSave {
             }
 
             lift.Calls.RemoveAll(call => call.Stop == stop);
+
+            // One that has not set itself up yet goes where the ride ends once it has, as for the state of the room
+            if (lift is FsmLift { IsSetUp: false } waiting) {
+                Logger.Info(
+                    $"The lift '{lift.Path}' has not set itself up yet, and goes where the ride of " +
+                    $"{player.Username} ends once it has"
+                );
+                waiting.PlaceWhenSetUp = stop;
+                return;
+            }
+
             if (lift.Stop == stop) {
                 return;
             }
@@ -340,6 +351,19 @@ internal partial class CoopSave {
                     });
                 }
 
+                return;
+            }
+
+            // A platform lift that has not set itself up yet is put where the member's is once it has. It stands only
+            // where the room has it until then, and sets itself up at the end where this game's player is, seconds
+            // after the state came, and there it stayed (USER 11-15: "还有她那边boss战的时候电梯在下面，我这边在上面，这是
+            // 为啥")
+            if (lift is FsmLift { IsSetUp: false } waiting) {
+                Logger.Info(
+                    $"The lift '{lift.Path}' has not set itself up yet, and goes where {player.Username}'s is " +
+                    "once it has"
+                );
+                waiting.PlaceWhenSetUp = stop;
                 return;
             }
 
