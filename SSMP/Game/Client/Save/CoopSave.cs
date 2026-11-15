@@ -530,6 +530,7 @@ internal partial class CoopSave {
             UpdateStoryFlags();
             UpdateLifts();
             UpdateTrapdoors();
+            UpdateOwnCreatureHolds();
         }
 
         if (IsGroupComplete(marker, members)) {
@@ -739,6 +740,8 @@ internal partial class CoopSave {
         ResetStartPicks();
         _layoutPickingStates.Clear();
         _ownSteps.Clear();
+        _heldOwnSteps.Clear();
+        _playerWayValues.Clear();
 
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);

@@ -3598,14 +3598,16 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether an FSM is one of a creature's own that this game runs for every game: an FSM of the room's own object of
-    /// an entity whose scene host this game is, that is not run by each game (see <see cref="IsRunByEachGame"/>). What
+    /// an entity whose scene host this game is, that is not run by each game (see <see cref="IsRunByEachGame"/>), or
+    /// one of a creature that every game runs by itself, in the scene host's game (see OwnCreatures.RunsHere). What
     /// such an FSM decides, the other games see the creature do.
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     internal static bool RunsHere(PlayMakerFSM? fsm) {
         return fsm != null &&
-               FindByPart(fsm.gameObject) is { _isSceneHostDetermined: true, _isControlled: false } entity &&
-               entity._fsms.Host.Contains(fsm) && !entity.IsRunByEachGame(fsm);
+               (FindByPart(fsm.gameObject) is { _isSceneHostDetermined: true, _isControlled: false } entity &&
+                entity._fsms.Host.Contains(fsm) && !entity.IsRunByEachGame(fsm) ||
+                OwnCreatures.RunsHere(fsm.gameObject));
     }
 
     /// <summary>
@@ -3614,7 +3616,8 @@ internal partial class Entity {
     /// </summary>
     /// <param name="part">The creature or one of its parts.</param>
     internal static bool RunsCreatureHere(GameObject? part) {
-        return part != null && FindByPart(part) is { _isSceneHostDetermined: true, _isControlled: false };
+        return part != null && (FindByPart(part) is { _isSceneHostDetermined: true, _isControlled: false } ||
+                                OwnCreatures.RunsHere(part));
     }
 
     /// <summary>

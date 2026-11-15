@@ -1080,7 +1080,7 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// Whether an action is given an event that it may send its own FSM on to another state with.
     /// </summary>
-    private static bool DecidesWhereItGoes(FsmStateAction action) {
+    internal static bool DecidesWhereItGoes(FsmStateAction action) {
         foreach (var field in FieldsOf(action.GetType(), EventFields, IsEventField)) {
             switch (field.GetValue(action)) {
                 case FsmEvent { Name.Length: > 0 }:

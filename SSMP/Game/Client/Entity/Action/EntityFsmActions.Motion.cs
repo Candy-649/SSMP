@@ -893,6 +893,19 @@ internal static partial class EntityFsmActions {
     private static readonly Dictionary<Type, FieldInfo[]> ValueFields = new();
 
     /// <summary>
+    /// The fields of each kind of action by which it is given a row of numbers, points or switches, by type (see
+    /// <see cref="ValueVariablesOf"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ValueRowFields = new();
+
+    /// <summary>
+    /// The kinds of FSM values that hold a number, a point or a switch (see <see cref="ValueFieldsOf"/>).
+    /// </summary>
+    private static readonly HashSet<Type> ValueKinds = [
+        typeof(FsmFloat), typeof(FsmInt), typeof(FsmBool), typeof(FsmVector2), typeof(FsmVector3)
+    ];
+
+    /// <summary>
     /// Writes where an action that moves a part of its creature over a while - every frame from then on, or sliding it
     /// somewhere over a given time - starts it, and all that the action is given as it starts in this game, whether
     /// set in the FSM or held by its variables, for the copy to move its own part the same way (see
@@ -1319,14 +1332,40 @@ internal static partial class EntityFsmActions {
         if (!ValueFields.TryGetValue(type, out var fields)) {
             fields = Array.FindAll(
                 type.GetFields(BindingFlags.Instance | BindingFlags.Public),
-                field => field.FieldType == typeof(FsmFloat) || field.FieldType == typeof(FsmInt) ||
-                         field.FieldType == typeof(FsmBool) || field.FieldType == typeof(FsmVector2) ||
-                         field.FieldType == typeof(FsmVector3)
+                field => ValueKinds.Contains(field.FieldType)
             );
             ValueFields[type] = fields;
         }
 
         return fields;
+    }
+
+    /// <summary>
+    /// The names of the variables of its FSM that an action is given for a number, a point or a switch, alone or in a
+    /// row, which it reads or stores.
+    /// </summary>
+    internal static IEnumerable<string> ValueVariablesOf(FsmStateAction action) {
+        foreach (var field in ValueFieldsOf(action.GetType())) {
+            if (field.GetValue(action) is NamedVariable { UseVariable: true, Name.Length: > 0 } variable) {
+                yield return variable.Name;
+            }
+        }
+
+        foreach (var field in FieldsOf(action.GetType(), ValueRowFields, IsValueRow)) {
+            if (field.GetValue(action) is not NamedVariable[] variables) {
+                continue;
+            }
+
+            foreach (var variable in variables) {
+                if (variable is { UseVariable: true, Name.Length: > 0 }) {
+                    yield return variable.Name;
+                }
+            }
+        }
+
+        static bool IsValueRow(FieldInfo field) {
+            return field.FieldType.IsArray && ValueKinds.Contains(field.FieldType.GetElementType()!);
+        }
     }
 
     #region iTweenMoveBy

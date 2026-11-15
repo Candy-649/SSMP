@@ -419,6 +419,7 @@ internal class ClientManager : IClientManager {
 
         _entityManager = new EntityManager(netClient);
         ToolCopies.IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost;
+        OwnCreatures.SceneRole = () => _entityManager.IsSceneRoleDetermined ? _entityManager.IsSceneHost : null;
         _entityManager.IsAnyoneElseIn = IsAnyoneElseIn;
 
         _pauseManager = new PauseManager(netClient);

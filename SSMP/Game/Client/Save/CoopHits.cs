@@ -855,8 +855,9 @@ internal partial class CoopHits {
         try {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
             SetReplayedRanges(target, source.Ranges);
+            var striker = _playerData.TryGetValue(update.PlayerId, out var partner) ? partner.PlayerObject : null;
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
-                () => SharedDice.Throw(source.Dice, () => response = responder.Hit(hit))
+                () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(responder, hit, component, striker))
             ), source.HitName);
         } catch (Exception e) {
             Logger.Warn($"Could not replay a hit of the partner on {update.Path}:\n{e}");
@@ -1377,8 +1378,11 @@ internal partial class CoopHits {
                 (responder as HitRigidbody2D)?.passHitToBreakable;
             var wasBroken = breakable != null && breakable.isBroken;
             var hitsLeft = breakable != null ? breakable.hitsLeft : 0;
+            var hero = own ? HeroController.SilentInstance : null;
+            var striker = hero != null ? hero.gameObject : null;
             var answered = AnswersAttack(
-                () => dice = SharedDice.Record(() => response = responder.Hit(hit)), hitName, seeds
+                () => dice = SharedDice.Record(() => response = HitRoomObject(responder, hit, component, striker)),
+                hitName, seeds
             ) || response.response != IHitResponder.Response.None &&
                 (breakable == null || wasBroken || breakable.isBroken || breakable.hitsLeft != hitsLeft);
             if (update != null && answered && _netClient.IsConnected) {
@@ -1507,6 +1511,30 @@ internal partial class CoopHits {
 
         var response = default(IHitResponder.HitResponse);
         GamePatcher.AnswerWound(creature, hero.gameObject, () => response = responder.Hit(hit));
+        return response;
+    }
+
+    /// <summary>
+    /// A blow of a player on an object of the room. A creature that every game runs by itself answers it at whoever
+    /// struck in the scene host's game, as a creature that this game runs answers a wound (GamePatcher.AnswerWound),
+    /// and the others go after whom it goes after there.
+    /// </summary>
+    /// <param name="responder">What the blow struck.</param>
+    /// <param name="hit">The blow.</param>
+    /// <param name="struck">The object of the room.</param>
+    /// <param name="striker">Who struck: this game's player, the figure of another, or null.</param>
+    private static IHitResponder.HitResponse HitRoomObject(
+        IHitResponder responder,
+        HitInstance hit,
+        Component struck,
+        GameObject? striker
+    ) {
+        if (striker == null || !OwnCreatures.RunsHere(struck.gameObject)) {
+            return responder.Hit(hit);
+        }
+
+        var response = default(IHitResponder.HitResponse);
+        GamePatcher.AnswerWound(struck.gameObject, striker, () => response = responder.Hit(hit));
         return response;
     }
 

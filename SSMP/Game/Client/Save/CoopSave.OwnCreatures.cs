@@ -35,6 +35,14 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// room is told where each one is and what it does, or that it is dead, which theirs then is too. One that dies in any
 /// game dies in the others as well, whatever killed it there: a blow that killed it in one game took less in another
 /// that took the blows of both players in another order (see EnemyHealthCoop).
+///
+/// A step that goes by where the players are - whether one stands in a range, where the one it goes after is, how far,
+/// whether it charged past them - is the scene host's to take, and so is a step that another state machine told it,
+/// which decided by them too. In the other games the creature waits for it there: each of them has the players a
+/// moment late and a little elsewhere, and a boss chose other moves in each game. Whom it goes after comes with each
+/// step, and a member who comes in takes its health too. All else of a move each game plays itself, with the same
+/// dice: what it rolls goes by the rolls that came with the step, so nothing waits for a number (USER 11-15
+/// "总之以房主那边传过来的招式为单位。尽量需要的随机数就一起过来，应该不会出现中途等房主一个随机数的情况吧").
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -63,6 +71,30 @@ internal partial class CoopSave {
     /// Whether a creature that every game runs by itself dies as another game told, which is not told back.
     /// </summary>
     private bool _dyingAsTold;
+
+    /// <summary>
+    /// The state machines of creatures that every game runs by itself that wait here for a step of the scene host's,
+    /// with the state each waits in (see OnOwnCreatureStep).
+    /// </summary>
+    private readonly Dictionary<Fsm, string> _heldOwnSteps = new();
+
+    /// <summary>
+    /// The actions by which a state goes by where the players are: those that look at where the player whom the
+    /// creature goes after is, how far, whether it passed them, whether a player stands in one of its ranges, or
+    /// whether this game's player has come into place. Facing one leaves where it goes as it is, and a song a creature
+    /// hears in every game (see SharedDice.RollForSong).
+    /// </summary>
+    private static readonly HashSet<string> PlayerWayActionTypes = new(
+        Entity.Action.ActionRegistry.TargetedFsmActionTypes
+            .Where(type => !type.StartsWith("Face") && type is not ("Tk2DAnimationByDirection" or "TakeSilk"))
+            .Concat(["CheckAlertRangeByName", "WaitForHeroInPosition"])
+    );
+
+    /// <summary>
+    /// The variables that the actions by which a state goes by where the players are store, for each state machine of
+    /// a creature that every game runs by itself whose steps this game has looked at (see GoesByPlayers).
+    /// </summary>
+    private readonly Dictionary<Fsm, HashSet<string>> _playerWayValues = new();
 
     /// <summary>
     /// Watches the creatures that every game runs by itself go from one state to another and die.
@@ -103,6 +135,24 @@ internal partial class CoopSave {
         }
 
         var creature = machine.gameObject;
+
+        // A step that goes by where the players are, or that another state machine told it, is the scene host's: it
+        // waits for that, which has mostly come already, as this game is a moment behind
+        if (!OwnCreatures.PlayingSceneHostsStep && OwnCreatures.FollowsSceneHost(creature) &&
+            (self.ActiveState is { } from && GoesByPlayers(from) || Fsm.EventData?.SentByFsm is { } sender &&
+                sender != self)) {
+            if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
+                _heldOwnSteps[self] = self.ActiveStateName;
+                Logger.Info(
+                    $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' would go from '{self.ActiveStateName}' to " +
+                    $"'{toState.Name}' of '{self.Name}' here, and waits for the scene host's step"
+                );
+            }
+
+            return;
+        }
+
+        _heldOwnSteps.Remove(self);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         var step = new OwnStep(toState.Name, SharedDice.RollCounts(creature), creature.transform.position);
         if (!_ownSteps.TryGetValue(self, out var steps)) {
@@ -147,7 +197,11 @@ internal partial class CoopSave {
             self, attackDirection, attackType, nailElements, source, ignoreEvasion, corpseFlingMultiplier,
             overrideSpecialDeath, disallowDropFlying
         );
-        if (!tells || !self.isDead) {
+
+        // One whose state machines play its death, like a boss, is never marked dead, and dies again at each blow
+        // that finds it with no health: it is told once
+        if (!tells || !self.isDead && !(self.hasSpecialDeath && self.hp <= 0) ||
+            !OwnCreatures.MarkDead(self.gameObject)) {
             return;
         }
 
@@ -175,6 +229,7 @@ internal partial class CoopSave {
             FsmName = machine.FsmName,
             StateName = step.State,
             Amounts = step.Counts,
+            Part = ThrownThings.CodeOf?.Invoke(GamePatcher.TargetOf(machine.gameObject)) ?? ThrownThings.NoPlayer,
             Values = [
                 step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z,
                 SharedDice.SongOf(machine.gameObject)
@@ -221,9 +276,15 @@ internal partial class CoopSave {
                     machine, new OwnStep(fsm.ActiveStateName, counts, creature.transform.position)
                 );
                 update.TargetId = player.Id;
+
+                // Their own has all its health, which the blows before they came took here
+                if (health != null) {
+                    update.Values.Add(health.hp);
+                }
+
                 Logger.Info(
                     $"[Own creatures] {player.Username} is told that '{pair.Value.Place}' is in " +
-                    $"'{fsm.ActiveStateName}' here"
+                    $"'{fsm.ActiveStateName}' here" + (health != null ? $", with {health.hp} health" : "")
                 );
                 Send(update);
             }
@@ -262,6 +323,11 @@ internal partial class CoopSave {
         // Died there just now: it dies here too, as the game has a creature die, though the blow that killed it there
         // did not here, or has not come yet
         if (update.PartCount == 2) {
+            if (!OwnCreatures.MarkDead(creature)) {
+                Logger.Info($"[Own creatures] '{place}' died in {player.Username}'s game, and here already");
+                return;
+            }
+
             Logger.Info($"[Own creatures] '{place}' died in {player.Username}'s game and dies here too");
             OwnCreatures.AwardJournalKill(health);
             _dyingAsTold = true;
@@ -277,10 +343,26 @@ internal partial class CoopSave {
             return;
         }
 
+        // Whom it goes after there, which nothing here chooses for it
+        if (update.Part != ThrownThings.NoPlayer && ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is
+                { } target && target != null) {
+            GamePatcher.TakeSceneHostsTarget(creature, target);
+        }
+
+        // The health that it has there, for a member who has just come in
+        if (update.Values.Count > 5 && hasHealth && health.hp != (int) update.Values[5]) {
+            Logger.Info(
+                $"[Own creatures] '{place}' has {(int) update.Values[5]} health as in {player.Username}'s game, " +
+                $"rather than {health.hp}"
+            );
+            health.hp = (int) update.Values[5];
+        }
+
         var machine = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName);
         var fsm = machine.Fsm;
         var transform = creature.transform;
         var there = new Vector3(update.Values[0], update.Values[1], transform.position.z);
+        _heldOwnSteps.Remove(fsm);
         if (FindOwnStep(fsm, update) is { } took) {
             var off = there - took.Place;
             off.z = 0f;
@@ -291,6 +373,15 @@ internal partial class CoopSave {
                 );
                 transform.position += off;
                 MoveOwnSteps(creature, off);
+            }
+
+            // Facing the way it faces there, when that is the step it is at: it faced the player it went after
+            // where this game has them
+            if (_ownSteps[fsm][^1] == took && !Mathf.Approximately(transform.localScale.x, update.Values[2])) {
+                Logger.Info($"[Own creatures] '{place}' faces the way it does in {player.Username}'s game");
+                var turned = transform.localScale;
+                turned.x = update.Values[2];
+                transform.localScale = turned;
             }
 
             return;
@@ -311,11 +402,73 @@ internal partial class CoopSave {
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
         SharedDice.SetSong(creature, (int) update.Values[4]);
-        if (way != null) {
-            fsm.Event(way);
-        } else {
-            fsm.SetState(update.StateName);
+        OwnCreatures.PlayingSceneHostsStep = true;
+        try {
+            if (way != null) {
+                fsm.Event(way);
+            } else {
+                fsm.SetState(update.StateName);
+            }
+        } finally {
+            OwnCreatures.PlayingSceneHostsStep = false;
         }
+    }
+
+    /// <summary>
+    /// Whether a state goes by where the players are: one of its actions looks at them (see
+    /// <see cref="PlayerWayActionTypes"/>), or goes on by what such an action of its state machine stored, like the
+    /// look of a boss before it charges at whether the player it goes after hid, which it saw a state before.
+    /// </summary>
+    private bool GoesByPlayers(FsmState state) {
+        var fsm = state.Fsm;
+        if (!_playerWayValues.TryGetValue(fsm, out var stored)) {
+            stored = [];
+            foreach (var each in fsm.States) {
+                foreach (var action in each.Actions) {
+                    if (PlayerWayActionTypes.Contains(action.GetType().Name)) {
+                        stored.UnionWith(Entity.Action.EntityFsmActions.ValueVariablesOf(action));
+                    }
+                }
+            }
+
+            _playerWayValues[fsm] = stored;
+        }
+
+        foreach (var action in state.Actions) {
+            if (action.Enabled && (PlayerWayActionTypes.Contains(action.GetType().Name) ||
+                                   Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
+                                   Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(stored.Contains))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Lets the creatures that wait here for a step of the scene host's go on once this game runs the room, as the
+    /// scene host left it: each takes its state again, which decides once more where it goes. What it waited at had
+    /// told it once, like a roll of its next move, and would not again.
+    /// </summary>
+    private void UpdateOwnCreatureHolds() {
+        if (_heldOwnSteps.Count == 0 || OwnCreatures.SceneRole?.Invoke() != true) {
+            return;
+        }
+
+        foreach (var pair in _heldOwnSteps.ToList()) {
+            var fsm = pair.Key;
+            if (fsm.FsmComponent == null || fsm.ActiveStateName != pair.Value) {
+                continue;
+            }
+
+            Logger.Info(
+                $"[Own creatures] '{fsm.FsmComponent.gameObject.name}' takes '{pair.Value}' of '{fsm.Name}' again by " +
+                "itself, as this game runs the room now"
+            );
+            fsm.SetState(pair.Value);
+        }
+
+        _heldOwnSteps.Clear();
     }
 
     /// <summary>

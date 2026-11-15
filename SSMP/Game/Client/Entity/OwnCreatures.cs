@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -21,6 +22,11 @@ namespace SSMP.Game.Client.Entity;
 /// in every player's sight, to be struck and stood on (USER 11-15 "这个石头停在半空中是正常的吗",
 /// "我这边石头也停在半空"). Which ones fall is the fight's own roll, the same in every game, and each one's steps
 /// are the scene host's as a creature's are.
+///
+/// So is a boss, the town's, for the one fight of it that there is to try it in (USER 11-15 "如果这次没问题了，那么就
+/// 再也不会打到这个怪了，所以这就是最好的测试时间"). The scene host's game decides every way that goes by where the
+/// players are, and whom it goes after; every other game plays each move that comes from there itself, with the
+/// same dice, rather than deciding it (USER 11-15 "总之以房主那边传过来的招式为单位。尽量需要的随机数就一起过来").
 /// </summary>
 internal static class OwnCreatures {
     /// <summary>
@@ -38,6 +44,23 @@ internal static class OwnCreatures {
     /// that died since.
     /// </summary>
     public static IEnumerable<KeyValuePair<GameObject, (string Scene, string Place)>> All => Creatures;
+
+    /// <summary>
+    /// The creatures whose death this game has told or taken, the boss whose death the game leaves to its state
+    /// machines among them, which takes no blow as its last and dies more than once.
+    /// </summary>
+    private static readonly HashSet<GameObject> Dead = [];
+
+    /// <summary>
+    /// Whether this game is the scene host's, null while that is not settled yet; set by the ClientManager.
+    /// </summary>
+    public static Func<bool?>? SceneRole { get; set; }
+
+    /// <summary>
+    /// Whether the step that is played now is one of the scene host's creature (see CoopSave.OnOwnCreature), which
+    /// nothing here holds back.
+    /// </summary>
+    public static bool PlayingSceneHostsStep { get; set; }
 
     /// <summary>
     /// Takes a creature of the room as one that every game runs by itself.
@@ -59,6 +82,48 @@ internal static class OwnCreatures {
     /// </summary>
     public static bool Has(GameObject gameObject) {
         return Creatures.Count > 0 && Creatures.ContainsKey(gameObject);
+    }
+
+    /// <summary>
+    /// The creature that every game runs by itself that an object is, or is a part of, or null.
+    /// </summary>
+    public static GameObject? Owning(GameObject part) {
+        if (Creatures.Count == 0) {
+            return null;
+        }
+
+        for (var current = part.transform; current != null; current = current.parent) {
+            if (Creatures.ContainsKey(current.gameObject)) {
+                return current.gameObject;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether an object is, or is a part of, a creature that every game runs by itself, in the game of the scene host,
+    /// which decides for every game whom it goes after and where it goes by where the players are.
+    /// </summary>
+    public static bool RunsHere(GameObject part) {
+        return Creatures.Count > 0 && SceneRole?.Invoke() == true && Owning(part) != null;
+    }
+
+    /// <summary>
+    /// Whether an object is, or is a part of, a creature that every game runs by itself, in a game that follows the
+    /// scene host's: it goes after whom the scene host's goes after, and takes the steps that go by where the players
+    /// are from there.
+    /// </summary>
+    public static bool FollowsSceneHost(GameObject part) {
+        return Creatures.Count > 0 && SceneRole?.Invoke() == false && Owning(part) != null;
+    }
+
+    /// <summary>
+    /// Notes the death of a creature that every game runs by itself, which this game tells or takes once, returning
+    /// whether it is the first.
+    /// </summary>
+    public static bool MarkDead(GameObject creature) {
+        return Dead.Add(creature);
     }
 
     /// <summary>
@@ -105,5 +170,6 @@ internal static class OwnCreatures {
     /// </summary>
     public static void Clear() {
         Creatures.Clear();
+        Dead.Clear();
     }
 }

@@ -237,7 +237,9 @@ internal partial class BossRoomCoop {
     /// <returns>Whether the event is held back.</returns>
     private bool TryHoldEventStart(Fsm fsm, FsmState state, string eventName) {
         // The scene host already waited for the events of its bosses that other players receive
-        if (_networkSender != null) {
+        // Started already where it came from: an event of the network, or a step of the scene host's creature that
+        // every game runs by itself
+        if (_networkSender != null || Entity.OwnCreatures.PlayingSceneHostsStep) {
             return false;
         }
 
@@ -246,8 +248,10 @@ internal partial class BossRoomCoop {
             return false;
         }
 
-        // Bosses only move for the scene host, and triggers wait in their own way
-        if ((GetInfo(fsm).IsEntity && !_entityManager.IsSceneHost) || !IsEventStart(room, fsm, state, eventName) ||
+        // Bosses only move for the scene host, but for one that every game runs by itself, which waits in each game,
+        // and triggers wait in their own way
+        if (GetInfo(fsm).IsEntity && !_entityManager.IsSceneHost &&
+            !Entity.OwnCreatures.FollowsSceneHost(fsm.GameObject) || !IsEventStart(room, fsm, state, eventName) ||
             GetStartTrigger(fsm, state, eventName) != null) {
             return false;
         }

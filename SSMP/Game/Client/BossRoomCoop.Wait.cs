@@ -209,8 +209,10 @@ internal partial class BossRoomCoop {
             FreeHero(wait);
         }
 
-        // The other players hit the boss through the scene host
-        if (fsm?.GameObject == null || !GetInfo(fsm).IsEntity || !_entityManager.IsSceneHost) {
+        // The other players hit the boss through the scene host, but one that every game runs by itself, which takes
+        // their blows in every game
+        if (fsm?.GameObject == null || !GetInfo(fsm).IsEntity ||
+            !_entityManager.IsSceneHost && !Entity.OwnCreatures.FollowsSceneHost(fsm.GameObject)) {
             return;
         }
 

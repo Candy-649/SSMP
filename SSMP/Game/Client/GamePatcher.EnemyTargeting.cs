@@ -209,6 +209,13 @@ internal partial class GamePatcher {
             return;
         }
 
+        // A creature that every game runs by itself goes after whom the scene host's goes after, which comes with each
+        // of its steps (see TakeSceneHostsTarget): chosen here by where this game has the players, it went after
+        // another player than there
+        if (!_takingSceneHostsTarget && Entity.OwnCreatures.FollowsSceneHost(owner)) {
+            return;
+        }
+
         var id = owner.GetInstanceID();
         var changed = !EnemyApprovedTargets.TryGetValue(id, out var last) || last != target;
 
@@ -232,6 +239,30 @@ internal partial class GamePatcher {
     /// <param name="player">The player.</param>
     public static void SetTargetOf(GameObject thing, GameObject player) {
         ApproveEnemyTarget(thing, player);
+    }
+
+    /// <summary>
+    /// Whether the target that is approved now is the one of the scene host's creature (see TakeSceneHostsTarget).
+    /// </summary>
+    private static bool _takingSceneHostsTarget;
+
+    /// <summary>
+    /// Has a creature that every game runs by itself go after the player whom the scene host's goes after, as a step
+    /// of it says (see CoopSave.OnOwnCreature). Nothing else chooses for it here.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="player">The player: this game's, or the figure of another.</param>
+    public static void TakeSceneHostsTarget(GameObject creature, GameObject player) {
+        if (GetApprovedEnemyTarget(creature) == player) {
+            return;
+        }
+
+        _takingSceneHostsTarget = true;
+        try {
+            ApproveEnemyTarget(creature, player);
+        } finally {
+            _takingSceneHostsTarget = false;
+        }
     }
 
     /// <summary>
