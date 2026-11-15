@@ -1229,11 +1229,6 @@ internal partial class CoopSave {
                         // A yes they took back no longer counts for a yes of this player that waits on the rest
                         DropWishWait(partnerAt);
 
-                        // A member who went on to end a delivery wish without this player ends it in their save alone
-                        if (partnerAt.Kind == WishConfirmDeliveryEnd && update.Part == GoneWentThrough) {
-                            KeepDeliveryWishOpen(player, partnerAt.Wish);
-                        }
-
                         // A member whose dialogue went on from the step that begins the wish still read to it, and gets
                         // it with this player once they read to the same step, which is what they were told already
                         if (partnerAt.IsRead) {
@@ -1263,7 +1258,7 @@ internal partial class CoopSave {
     /// <param name="message">What to tell the local player once this answer decides it.</param>
     private void AnswerHeldConfirm(ClientPlayerData player, ulong key, bool agreed, string message) {
         // A step of dialogue that begins a wish, or ends a delivery wish, has no no to answer. It waits until every
-        // member reads to the same step, or its own time runs out (CoopSave.WishRead).
+        // member reads to the same step, or for a wish to begin, until its own time runs out (CoopSave.WishRead).
         if (_heldStep is { } begin && begin.Key == key) {
             if (!agreed) {
                 Logger.Info(
@@ -1699,7 +1694,7 @@ internal partial class CoopSave {
             ? Lang.Pick(
                 $"{player.Username} read to where a delivery wish is completed. Talk to the same character and read " +
                 "to that point too, and you complete it together.",
-                $"{player.Username} 读到了完成托运愿望的那一步。你也和同一个角色把对话读到那里，你们就一起完成。"
+                $"{player.Username} 读到了完成这个送东西愿望的那一步。你也和同一个角色把对话读到那里，你们就一起完成。"
             )
             : isRead
             ? Lang.Pick(

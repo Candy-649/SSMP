@@ -34,9 +34,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// then took the way of a later one for them and skipped what only the first hearing does: the second listener after
 /// the two dancers wasn't let out of the room (USER 10-08).
 ///
-/// The step of dialogue that ends a delivery wish waits the same way (CoopSave.Deliveries), with one difference: a
-/// member who doesn't get there in time doesn't keep the wish from the others. The game that waited ends it in its own
-/// save alone, with its own reward, and the wish stays open in the members' saves for them to end in their own games.
+/// The step of dialogue that ends a delivery wish waits the same way (CoopSave.Deliveries), but for as long as it
+/// takes: it can't go on without ending the wish, so it waits until every member still there has read to it too. A
+/// member who leaves isn't waited for.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -372,15 +372,10 @@ internal partial class CoopSave {
         }
 
         _heldStep = null;
-        var goesOn = goOn && IsStepLive(held.Step) &&
-                     !(global::GameManager.instance is { } gameManager && gameManager.IsInSceneTransition);
-
-        // A delivery wish that this game goes on to end without some members is ended in this save alone (see below)
-        var endsAlone = goesOn && held.IsEnd && GetCurrentMarker() != null;
 
         // A wish to begin waits for the partner's own reading to it all the same, since this save remembers that its
         // player read to it. A word of theirs that crossed this end still counts.
-        TellHeldStepIsOver(held, endsAlone);
+        TellHeldStepIsOver(held);
         if (!held.IsEnd) {
             _endedBegins.Add(new ReadWait(held.Key, held.Wish, held.Members.ConvertAll(member => member.Id), held.Yes));
             if (_endedBegins.Count > MaxEndedBegins) {
@@ -393,27 +388,16 @@ internal partial class CoopSave {
         }
 
         var does = held.IsEnd ? "ends" : "begins";
-        if (!goesOn) {
+        if (!goOn || !IsStepLive(held.Step) ||
+            (global::GameManager.instance is { } gameManager && gameManager.IsInSceneTransition)) {
             Logger.Info($"Stopped waiting for the members at the step that {does} '{held.Wish}'");
             return;
         }
 
-        // A save that stopped being a two-player save is its player's alone, and so is the wish
-        if (GetCurrentMarker() == null) {
-            Logger.Info($"The save isn't shared any more, so the step that {does} '{held.Wish}' goes on");
-            RunHeldStep(held);
-            return;
-        }
-
-        // A delivery wish isn't kept from the players who got there: this game ends it by itself, with its own
-        // reward, in its own save alone. The saves differ in it until each member who didn't get there ends it in
-        // their own game with their own reward, which a completion from here would leave them without.
-        if (held.IsEnd) {
-            _differentWishNames.Add(held.Wish);
-            Logger.Info(
-                $"[Deliveries] {JoinNames(held.GetMissingNames())} didn't read to the step that ends '{held.Wish}', " +
-                "so it goes on and ends it in this save alone"
-            );
+        // A save that stopped being a two-player save is its player's alone, and so is the wish. A delivery wish
+        // can't go on without its end either.
+        if (GetCurrentMarker() == null || held.IsEnd) {
+            Logger.Info($"The step that {does} '{held.Wish}' goes on, no longer waiting for the members");
             RunHeldStep(held);
             return;
         }
@@ -428,8 +412,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Ends the wait at a step that begins a wish, or ends a delivery wish, once it can't go on as it is: the step was
-    /// left, the save has the wish or its end by now, a member is gone, or a member didn't read to the same step in
-    /// time.
+    /// left, the save has the wish or its end by now, a member is gone, or a member didn't read to the step that
+    /// begins a wish in time. The end of a delivery wish has no time limit and waits only for the members still there.
     /// </summary>
     private void UpdateHeldStep() {
         if (_heldStep is not { } held) {
@@ -468,17 +452,35 @@ internal partial class CoopSave {
             if (held.IsEnd
                     ? completion.IsCompleted || !completion.IsAccepted
                     : completion.IsAccepted || completion.IsCompleted) {
-                TellHeldStepIsOver(held, false);
+                TellHeldStepIsOver(held);
                 ReleaseHeldStep(null);
                 return;
             }
         }
 
-        // A member who left can't get there now
+        // A member who left can't get there now. The end of a delivery wish waits on for the members still there,
+        // and one who left ends it in their own game once back (CoopSave.Deliveries).
         var gone = held.Members.Where(member => !_checkedMembers.Contains(member.Id)).ToList();
         if (gone.Count > 0) {
             var goneNames = JoinNames(gone.Select(member => member.Name));
-            EndHeldStep(GetPartnerGoneMessage(goneNames, held.Members.Count, held.IsEnd), true);
+            if (!held.IsEnd) {
+                EndHeldStep(GetPartnerGoneMessage(goneNames, held.Members.Count), true);
+                return;
+            }
+
+            held.Members.RemoveAll(member => !_checkedMembers.Contains(member.Id));
+            Chat(GetDeliveryEndGoneMessage(goneNames));
+            Logger.Info($"[Deliveries] {goneNames} left, so the step that ends '{held.Wish}' doesn't wait for them");
+            if (held.IsAgreed) {
+                ReleaseHeldStep(null);
+            }
+
+            return;
+        }
+
+        // The end of a delivery wish waits for as long as it takes. The user's words: "按照祈愿完成来写不就是两个都在和
+        // 同一个角色对话的时候算完成吗" (USER 11-15).
+        if (held.IsEnd) {
             return;
         }
 
@@ -495,9 +497,7 @@ internal partial class CoopSave {
 
         if (now - Mathf.Max(held.Started, held.PartnerReadAt) > WishConfirmTimeout) {
             var missing = JoinNames(held.GetMissingNames());
-            EndHeldStep(held.IsEnd
-                ? GetDeliveryEndTimeoutMessage(missing, held.Members.Count)
-                : held.Members.Count == 1
+            EndHeldStep(held.Members.Count == 1
                 ? Lang.Pick(
                     $"{missing} didn't read to this point, so the dialogue goes on and the wish isn't taken yet. " +
                     "Once they read this dialogue to the same point too, you both take it.",
@@ -516,12 +516,7 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="names">The names of the members who are gone.</param>
     /// <param name="memberCount">How many members the step waited for.</param>
-    /// <param name="isEnd">Whether the step ends a delivery wish rather than begins a wish.</param>
-    private static string GetPartnerGoneMessage(string names, int memberCount, bool isEnd) {
-        if (isEnd) {
-            return GetDeliveryEndGoneMessage(names, memberCount);
-        }
-
+    private static string GetPartnerGoneMessage(string names, int memberCount) {
         return memberCount == 1
             ? Lang.Pick(
                 $"{names} is gone for now, so the dialogue goes on and the wish isn't taken yet. Once they read this " +
@@ -702,16 +697,12 @@ internal partial class CoopSave {
     /// Tells the games of the members that the local player no longer stands at a step that begins a wish, or ends a
     /// delivery wish, so that they stop keeping their word.
     /// </summary>
-    /// <param name="held">The step.</param>
-    /// <param name="endsAlone">Whether this game goes on to end the delivery wish in its own save alone, which the
-    /// members' saves keep open (see KeepDeliveryWishOpen).</param>
-    private void TellHeldStepIsOver(HeldStep held, bool endsAlone) {
+    private void TellHeldStepIsOver(HeldStep held) {
         foreach (var (id, _) in held.Members) {
             Send(new CoopSaveUpdate {
                 TargetId = id,
                 Kind = CoopSaveUpdateKind.WishConfirm,
                 PartCount = WishConfirmGone,
-                Part = endsAlone ? GoneWentThrough : (ushort) 0,
                 Key = held.Key
             });
         }
@@ -872,7 +863,8 @@ internal partial class CoopSave {
         public bool IsEnd { get; }
 
         /// <summary>
-        /// The members who were told, with their names, who are told when the wait ends.
+        /// The members who were told, with their names, who are told when the wait ends. A member who leaves stops
+        /// being one at the end of a delivery wish, which goes on without them.
         /// </summary>
         public List<(ushort Id, string Name)> Members { get; }
 

@@ -28,10 +28,10 @@ namespace SSMP.Game.Client.Save;
 /// The step of dialogue that ends the wish then waits the way a step that begins one does (CoopSave.WishRead): each
 /// member talks to the character in their own game and sees their own lines and show, whoever reads to the step first
 /// stands there, and once the last member's dialogue reaches it, all go on and every game ends the wish itself and
-/// gives its own reward. With more players it waits for every member. A member who doesn't get there in time
-/// (WishConfirmTimeout, and for as long as they talk to the same character) doesn't keep the wish from the others: the
-/// game that waited ends it in its own save alone, and the wish stays open in the member's, as one that the saves
-/// differ in, for them to end in their own game with their own reward.
+/// gives its own reward. With more players it waits for every member. There is no time limit: the wish is completed
+/// when they all talk to the same character (USER 11-15, "按照祈愿完成来写不就是两个都在和同一个角色对话的时候算完成吗").
+/// A member who leaves the game isn't waited for. Their save keeps the wish open, as one that the saves differ in
+/// when they are checked again, for them to end in their own game with their own reward.
 ///
 /// The lines of the player who turned a delivery in used to be copied to the members, which took their control and
 /// brought them over only once the show was over (USER 11-14, "她在我交食材的时候就动不了了，但是一直到动画结束才传送
@@ -869,41 +869,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// What the local player is told when members didn't read to the step that ends a delivery wish in time.
+    /// What the local player is told when members left the game while the step that ends a delivery wish waits for
+    /// them, which then waits only for the members still there.
     /// </summary>
-    /// <param name="missing">The names of the members who didn't.</param>
-    /// <param name="memberCount">How many members the step waited for.</param>
-    private static string GetDeliveryEndTimeoutMessage(string missing, int memberCount) {
-        return memberCount == 1
-            ? Lang.Pick(
-                $"{missing} didn't read to this point in time, so the wish is completed here first. Theirs is " +
-                "completed once they read the dialogue of the same character to this point.",
-                $"{missing} 没有及时读到这一步，这个愿望先在你这边完成；对方和同一个角色把对话读到这里，也会在自己那边完成。"
-            )
-            : Lang.Pick(
-                $"{missing} didn't read to this point in time, so the wish is completed here first. Theirs are " +
-                "completed once each of them reads the dialogue of the same character to this point.",
-                $"{missing} 没有及时读到这一步，这个愿望先在你这边完成；他们各自和同一个角色把对话读到这里，也会在自己那边完成。"
-            );
-    }
-
-    /// <summary>
-    /// What the local player is told when members are gone while the step that ends a delivery wish waits for them.
-    /// </summary>
-    /// <param name="names">The names of the members who are gone.</param>
-    /// <param name="memberCount">How many members the step waited for.</param>
-    private static string GetDeliveryEndGoneMessage(string names, int memberCount) {
-        return memberCount == 1
-            ? Lang.Pick(
-                $"{names} is gone for now, so the wish is completed here first. Theirs is completed once they are " +
-                "back and read the dialogue of the same character to this point.",
-                $"{names} 暂时不在，这个愿望先在你这边完成；对方回来后和同一个角色把对话读到这里，也会在自己那边完成。"
-            )
-            : Lang.Pick(
-                $"{names} left for now, so the wish is completed here first. Theirs are completed once each of them " +
-                "is back and reads the dialogue of the same character to this point.",
-                $"{names} 暂时不在，这个愿望先在你这边完成；他们回来后各自和同一个角色把对话读到这里，也会在自己那边完成。"
-            );
+    /// <param name="names">The names of the members who left.</param>
+    private static string GetDeliveryEndGoneMessage(string names) {
+        return Lang.Pick(
+            $"{names} left for now, so this point doesn't wait for them. Once back, they complete the wish in their " +
+            "own game by reading the dialogue of the same character to this point.",
+            $"{names} 暂时不在，这一步不再等 {names}；回来后和同一个角色把对话读到这里，也会在自己那边完成。"
+        );
     }
 
     /// <summary>
@@ -915,23 +890,6 @@ internal partial class CoopSave {
             $"You left before {missing} read to that point, so the wish isn't completed yet. Talk to the character " +
             "again to complete it.",
             $"{missing} 还没读到那一步你就离开了，这个愿望还没完成。再去和那个角色说话就能完成。"
-        );
-    }
-
-    /// <summary>
-    /// A member ended a delivery wish in their own game without the local player, who didn't read to the step that ends
-    /// it in time. It is theirs alone: the local save keeps it open, as one that the saves differ in, so that their
-    /// completion doesn't come here without the reward, and the local player ends it in their own game with their own.
-    /// </summary>
-    private void KeepDeliveryWishOpen(ClientPlayerData player, string wish) {
-        _differentWishNames.Add(wish);
-        Chat(Lang.Pick(
-            $"{player.Username} completed the wish on their side first. Yours is completed once you read the " +
-            "dialogue of the same character to the end, with its reward.",
-            $"{player.Username} 那边先完成了这个愿望。你和同一个角色把对话读到最后，你这边也会完成，奖励照样有。"
-        ));
-        Logger.Info(
-            $"[Deliveries] {player.Username} ended '{wish}' without the local player, whose save keeps it open"
         );
     }
 

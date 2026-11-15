@@ -836,12 +836,11 @@ internal partial class CoopSave {
         var name = check?.Name ?? username ?? (_playerData.TryGetValue(id, out var gone) ? gone.Username : null);
 
         // A step of dialogue that waits for them to begin a wish goes on without the wish, which waits for them to
-        // read to it too. One that ends a delivery wish goes on and ends it here (CoopSave.Deliveries).
-        if (_heldStep is { } heldStep && heldStep.HasMember(id)) {
+        // read to it too. One that ends a delivery wish waits on for the members still there (CoopSave.WishRead).
+        if (_heldStep is { IsEnd: false } heldStep && heldStep.HasMember(id)) {
             EndHeldStep(
                 GetPartnerGoneMessage(
-                    heldStep.Members.Find(member => member.Id == id).Name ?? name ?? "?", heldStep.Members.Count,
-                    heldStep.IsEnd
+                    heldStep.Members.Find(member => member.Id == id).Name ?? name ?? "?", heldStep.Members.Count
                 ),
                 true
             );
