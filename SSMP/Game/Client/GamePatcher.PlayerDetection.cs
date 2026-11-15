@@ -67,6 +67,18 @@ internal partial class GamePatcher {
     private Hook? _lineOfSightDetectorUpdateHook;
 
     /// <summary>
+    /// Hook that notes which creature's state machine asks a range through CheckAlertRange (see
+    /// <see cref="_askingCreature"/>).
+    /// </summary>
+    private Hook? _checkAlertRangeApplyHook;
+
+    /// <summary>
+    /// The creature whose state machine asks a range through CheckAlertRange right now, or null. A range of the world
+    /// that a creature asks about is asked about the player it goes after (see AnswerWhetherAPlayerIsInAlertRange).
+    /// </summary>
+    private static GameObject? _askingCreature;
+
+    /// <summary>
     /// Alert range name fragments that identify ranges which may validate an existing approved target,
     /// but must not acquire or switch to a new target.
     /// </summary>
@@ -154,6 +166,11 @@ internal partial class GamePatcher {
             typeof(LineOfSightDetector).GetMethod("Update", InstancePublicFlags | InstanceNonPublicFlags)!,
             OnLineOfSightDetectorUpdate
         );
+
+        _checkAlertRangeApplyHook = new Hook(
+            typeof(CheckAlertRange).GetMethod("Apply", InstancePublicFlags | InstanceNonPublicFlags)!,
+            OnCheckAlertRangeApply
+        );
     }
 
     /// <summary>
@@ -168,6 +185,9 @@ internal partial class GamePatcher {
 
         _lineOfSightDetectorUpdateHook?.Dispose();
         _lineOfSightDetectorUpdateHook = null;
+
+        _checkAlertRangeApplyHook?.Dispose();
+        _checkAlertRangeApplyHook = null;
     }
 
     /// <summary>
@@ -273,6 +293,23 @@ internal partial class GamePatcher {
     private static float _nextBlindRangeLogTime;
 
     /// <summary>
+    /// Notes the creature whose state machine asks a range through CheckAlertRange while it asks.
+    /// </summary>
+    /// <param name="orig">The game's own check.</param>
+    /// <param name="self">The action that asks.</param>
+    /// <param name="first">Whether it is the first time in its state.</param>
+    private static void OnCheckAlertRangeApply(Action<CheckAlertRange, bool> orig, CheckAlertRange self, bool first) {
+        var owner = self.Fsm?.GameObject is { } asker ? GetEnemyTargetOwner(asker) : null;
+        var before = _askingCreature;
+        _askingCreature = owner != null && owner.GetComponent<HealthManager>() != null ? owner : null;
+        try {
+            orig(self, first);
+        } finally {
+            _askingCreature = before;
+        }
+    }
+
+    /// <summary>
     /// Works out whether the player an alert range is about is inside it.
     /// </summary>
     /// <param name="self">The alert range being queried.</param>
@@ -292,7 +329,17 @@ internal partial class GamePatcher {
         // is near enough to be worth opening for, hears no, and slides back to where it started leaving no mark.
         // A range at an end of a passage of dropping boxes goes by the side that its order is set for (see
         // TryAnswerBoxPassageEnd)
+        // A range of the world that a creature asks about is asked about the player it goes after, as its own ranges
+        // are (see KeptTarget). A boss asks such a range whether the player it goes after hides from it above or
+        // beside its arena, and while the partner stood anywhere up there it went to look for a hiding player and
+        // charged through the arena from wall to wall, past the player who fought it on the floor (USER 11-15:
+        // "我朋友不小心出去一下房间里只有我一个就突然好了。我朋友回来又发疯了朝一个地方冲")
         if (!BelongsToAnEnemy(self)) {
+            if (_askingCreature is { } creature &&
+                (KeptTarget(creature) ?? GetApprovedEnemyTarget(creature)) is { } target) {
+                return IsValidTargetForAlertRange(self, target);
+            }
+
             return TryAnswerBoxPassageEnd(self, out var bySide) ? bySide : IsAnyPlayerInsideAlertRange(self);
         }
 
@@ -648,6 +695,7 @@ internal partial class GamePatcher {
             playerInfo.Position = player.transform.position;
 
             var colliders = PlayerTargetRegistry.GetPlayerColliders(player);
+            playerInfo.Colliders = colliders;
             if (playerInfo.ColliderBounds.Length != colliders.Length) {
                 playerInfo.ColliderBounds = new Bounds[colliders.Length];
             }
@@ -687,15 +735,21 @@ internal partial class GamePatcher {
         Bounds alertBounds,
         CachedPlayerInfo playerInfo
     ) {
-        // Check collider intersections using cached bounds in 2D
-        foreach (var playerBounds in playerInfo.ColliderBounds) {
+        // The boxes around the two first, and then the shapes themselves, as the game's own trigger meets them. A range
+        // can be a slanted polygon whose box takes in far more than the range does: the hiding place that a boss of a
+        // town keeps watch on runs round its arena, above and beside the floor, and its box is the whole arena. Taken
+        // by the box, both players were always hiding from it, so it never stopped by them and charged from wall to
+        // wall (USER 11-15: "他卡住了，卡在最左边", "他一直在往最右边跑")
+        for (var i = 0; i < playerInfo.ColliderBounds.Length; i++) {
+            var playerBounds = playerInfo.ColliderBounds[i];
             if (playerBounds.extents is { x: 0f, y: 0f }) {
                 continue;
             }
 
             // 2D box intersection check (ignores Z)
             if (alertBounds.min.x <= playerBounds.max.x && alertBounds.max.x >= playerBounds.min.x &&
-                alertBounds.min.y <= playerBounds.max.y && alertBounds.max.y >= playerBounds.min.y) {
+                alertBounds.min.y <= playerBounds.max.y && alertBounds.max.y >= playerBounds.min.y &&
+                alertCollider.Distance(playerInfo.Colliders[i]).isOverlapped) {
                 return true;
             }
         }
@@ -848,7 +902,12 @@ internal class CachedPlayerInfo {
     public int FrameCount = -1;
 
     /// <summary>
-    /// The cached bounds of the player's colliders.
+    /// The player's colliders, as PlayerTargetRegistry.GetPlayerColliders gives them.
+    /// </summary>
+    public Collider2D[] Colliders = [];
+
+    /// <summary>
+    /// The cached bounds of the player's colliders, by their place in <see cref="Colliders"/>.
     /// </summary>
     public Bounds[] ColliderBounds = [];
 
