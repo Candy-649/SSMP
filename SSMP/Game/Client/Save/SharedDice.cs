@@ -449,6 +449,77 @@ internal static partial class SharedDice {
     }
 
     /// <summary>
+    /// The numbers of a song of a creature that every game runs by itself (see OwnCreatures), each of which comes
+    /// from the dice of that song (see <see cref="RollForSong"/>).
+    /// </summary>
+    public enum SongDice {
+        /// <summary>
+        /// How long it waits as what it hears changes: before it stops to sing, as the song stops, as the one who
+        /// plays comes nearer.
+        /// </summary>
+        Wait,
+
+        /// <summary>
+        /// How long it sings.
+        /// </summary>
+        Length,
+
+        /// <summary>
+        /// How long it rests after the song before it can sing again.
+        /// </summary>
+        Rest
+    }
+
+    /// <summary>
+    /// Rolls a number of a song of a creature that every game runs by itself from the dice of that song: from the
+    /// creature's name, which song it is and which number of the song, the same in every game that heard the same
+    /// songs. A song begins as the creature hears a player play in its range while it has none going (USER 11-15,
+    /// "这个小螃蟹只要可以接收到有大黄蜂在范围内弹琴就可以立刻开始第几次唱歌的投骰子"), and when it stops to sing,
+    /// how long it sings and how long it rests after all come from the dice of that song ("你必须要保证什么时候停下
+    /// 来唱歌，唱多久，甚至两次唱歌之间的cd都要用这次唱歌的随机数设好"). Which song it is goes with each step of the
+    /// scene host's creature, and a creature that is put to that step goes on from there ("就靠房主那边同一个动作的回声
+    /// 校准就行了"; see CoopSave.OwnCreatures).
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="number">Which number of the song is rolled.</param>
+    /// <param name="roll">What rolls it, with the game's dice.</param>
+    public static void RollForSong(GameObject creature, SongDice number, Action roll) {
+        RollByName(creature, Entity.OwnCreatures.RollName(creature));
+        var named = NamedRollers[creature];
+        if (number == SongDice.Wait && !named.SongGoesOn) {
+            named.Song++;
+            named.SongWaits = 0;
+            Logger.Info($"[Own creatures] '{Entity.OwnCreatures.PlaceOf(creature)}' begins song {named.Song}");
+        }
+
+        named.SongGoesOn = number != SongDice.Rest;
+        var part = number == SongDice.Wait ? named.SongWaits++ : 0;
+        ThrownThings.Rolling(
+            ThrownThings.Seed(named.Name, Identify("", "", "song " + number, part), named.Song), roll
+        );
+    }
+
+    /// <summary>
+    /// Which song a creature that every game runs by itself is at (see <see cref="RollForSong"/>), 0 before its
+    /// first.
+    /// </summary>
+    public static int SongOf(GameObject creature) {
+        return NamedRollers.TryGetValue(creature, out var named) ? named.Song : 0;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself go on from the song that the creature of another game is at
+    /// (see <see cref="RollForSong"/>).
+    /// </summary>
+    public static void SetSong(GameObject creature, int song) {
+        var named = NamedRollers[creature];
+        if (named.Song != song) {
+            named.Song = song;
+            named.SongWaits = 0;
+        }
+    }
+
+    /// <summary>
     /// The name an object of the room rolls under now if nothing rolled or was told under it yet, or null: a name
     /// that the object was just given for what it is about to do, like a trap that another one tells to go off.
     /// </summary>
@@ -971,5 +1042,20 @@ internal static partial class SharedDice {
         /// How many things it told under the name (see <see cref="NextTellName"/>).
         /// </summary>
         public int Tells { get; set; }
+
+        /// <summary>
+        /// How many songs it began (see <see cref="RollForSong"/>).
+        /// </summary>
+        public int Song { get; set; }
+
+        /// <summary>
+        /// Whether a song of its goes on: begun and not rested after yet.
+        /// </summary>
+        public bool SongGoesOn { get; set; }
+
+        /// <summary>
+        /// How many waits the song that goes on rolled.
+        /// </summary>
+        public int SongWaits { get; set; }
     }
 }

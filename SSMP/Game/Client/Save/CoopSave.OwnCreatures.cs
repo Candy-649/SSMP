@@ -29,9 +29,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// takes it from the same rolls, the way the game goes there from the state it is in, so that what the game does on
 /// the way is done too. Set straight into its song from a walk, it skipped the step that stops the walk first, which
 /// the scene host's had no need of, as it had begun the song standing, and crawled on as it sang (USER 11-14
-/// "边唱边移动"; USER 11-15 "唱歌这步就应该带着停下脚步，而不是去问房主走没走"). A song is the scene host's to begin
-/// and end (see GamePatcher.FollowsSceneHostsSong). A member who comes into the room
-/// is told where each one is and what it does, or that it is dead, which theirs then is too. One that dies in any
+/// "边唱边移动"; USER 11-15 "唱歌这步就应该带着停下脚步，而不是去问房主走没走"). It hears every player's song in
+/// every game, and each number of a song comes from the dice of that song (see SharedDice.RollForSong): which song
+/// it is goes with each step, and one that is put to the step goes on from that song. A member who comes into the
+/// room is told where each one is and what it does, or that it is dead, which theirs then is too. One that dies in any
 /// game dies in the others as well, whatever killed it there: a blow that killed it in one game took less in another
 /// that took the blows of both players in another order (see EnemyHealthCoop).
 /// </summary>
@@ -174,7 +175,10 @@ internal partial class CoopSave {
             FsmName = machine.FsmName,
             StateName = step.State,
             Amounts = step.Counts,
-            Values = [step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z]
+            Values = [
+                step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z,
+                SharedDice.SongOf(machine.gameObject)
+            ]
         };
     }
 
@@ -305,6 +309,7 @@ internal partial class CoopSave {
         transform.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
+        SharedDice.SetSong(creature, (int) update.Values[4]);
         if (way != null) {
             fsm.Event(way);
         } else {

@@ -12,7 +12,7 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// Reflected private field of <see cref="EnemySingControl"/> that stops it from counting down its sing duration.
     /// </summary>
-    internal static readonly FieldInfo? EnemySingControlSentEndEventField =
+    private static readonly FieldInfo? EnemySingControlSentEndEventField =
         typeof(EnemySingControl).GetField(
             "sentEndEvent",
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public

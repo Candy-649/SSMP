@@ -177,6 +177,23 @@ internal partial class GamePatcher {
     private Hook? _enemySingControlExitHook;
 
     /// <summary>
+    /// Hook for having a creature that every game runs by itself wait as long as the dice of its song say, as what
+    /// a <see cref="CheckHeroPerformanceRegion"/> of its hears changes.
+    /// </summary>
+    private Hook? _checkPerformanceRegionDelayHook;
+
+    /// <summary>
+    /// The same for a <see cref="CheckHeroPerformanceRegionV2"/>.
+    /// </summary>
+    private Hook? _checkPerformanceRegionV2DelayHook;
+
+    /// <summary>
+    /// Hook for having a creature that every game runs by itself rest after a song as long as the dice of that song
+    /// say.
+    /// </summary>
+    private Hook? _singCooldownHook;
+
+    /// <summary>
     /// Hook for showing needolin texts while only remote players perform.
     /// </summary>
     private Hook? _needolinTextOwnerUpdateHook;
@@ -230,6 +247,13 @@ internal partial class GamePatcher {
 
         _enemySingControlEnterHook = TryCreateHook(typeof(EnemySingControl), "OnEnter", OnEnemySingControlEnter);
         _enemySingControlExitHook = TryCreateHook(typeof(EnemySingControl), "OnExit", OnEnemySingControlExit);
+        _checkPerformanceRegionDelayHook = TryCreateHook(
+            typeof(CheckHeroPerformanceRegion), "get_NewDelay", OnCheckHeroPerformanceRegionNewDelay
+        );
+        _checkPerformanceRegionV2DelayHook = TryCreateHook(
+            typeof(CheckHeroPerformanceRegionV2), "get_NewDelay", OnCheckHeroPerformanceRegionV2NewDelay
+        );
+        _singCooldownHook = TryCreateHook(typeof(EnemySingDuration), "StartSingCooldown", OnStartSingCooldown);
 
         _needolinTextOwnerUpdateHook = TryCreateHook(typeof(NeedolinTextOwner), "Update", OnNeedolinTextOwnerUpdate);
         _clockworkHatchlingUpdateHook = TryCreateHook(
@@ -274,6 +298,15 @@ internal partial class GamePatcher {
 
         _enemySingControlExitHook?.Dispose();
         _enemySingControlExitHook = null;
+
+        _checkPerformanceRegionDelayHook?.Dispose();
+        _checkPerformanceRegionDelayHook = null;
+
+        _checkPerformanceRegionV2DelayHook?.Dispose();
+        _checkPerformanceRegionV2DelayHook = null;
+
+        _singCooldownHook?.Dispose();
+        _singCooldownHook = null;
 
         _needolinTextOwnerUpdateHook?.Dispose();
         _needolinTextOwnerUpdateHook = null;
@@ -587,10 +620,6 @@ internal partial class GamePatcher {
         CheckHeroPerformanceRegion self,
         HeroPerformanceRegion.AffectedState state
     ) {
-        if (FollowsSceneHostsSong(self.Fsm)) {
-            return;
-        }
-
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
             RememberPendingSongTarget(self, self.Target, self.IgnoreNeedolinRange.Value, 0f);
         } else if (state != HeroPerformanceRegion.AffectedState.None) {
@@ -608,10 +637,6 @@ internal partial class GamePatcher {
         CheckHeroPerformanceRegionV2 self,
         HeroPerformanceRegion.AffectedState state
     ) {
-        if (FollowsSceneHostsSong(self.Fsm)) {
-            return;
-        }
-
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
             RememberPendingSongTarget(self, self.Target, self.IgnoreNeedolinRange.Value, self.Radius.Value);
         } else if (state != HeroPerformanceRegion.AffectedState.None) {
@@ -622,17 +647,68 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether a state machine is of a creature that every game runs by itself (see OwnCreatures), in the game of a
-    /// scene client. Its song is the scene host's to begin and end, as what a creature does next is (USER 11-12
-    /// "客机就不应该挑招"): that game hears the song of every player and rolls how long the creature sings and rests
-    /// after, and this one takes its steps (see CoopSave.OwnCreatures). Begun and ended by each game for the songs it
-    /// had heard so far and for as long as its own dice said, a song began in one game and not in the other, or was
-    /// cut off there as soon as it began (USER 11-14 "有几次进唱歌状态刚进唱歌状态就出来了").
+    /// The creature that every game runs by itself (see OwnCreatures) that a state machine is of, or null. It hears
+    /// the song of every player in every game, and each number of a song of its comes from the dice of that song
+    /// (see SharedDice.RollForSong): a song that began in one game and not in the other, or was cut off there as soon
+    /// as it began, was its own dice in each game (USER 11-14 "有几次进唱歌状态刚进唱歌状态就出来了").
     /// </summary>
-    private static bool FollowsSceneHostsSong(HutongGames.PlayMaker.Fsm? fsm) {
+    private static GameObject? OwnCreatureOf(HutongGames.PlayMaker.Fsm? fsm) {
         return Entity.OwnCreatures.Count > 0 && fsm?.FsmComponent is { } machine && machine != null &&
-               Entity.OwnCreatures.Has(machine.gameObject) &&
-               _entityManagerInstance is { IsSceneRoleDetermined: true, IsSceneHost: false };
+               Entity.OwnCreatures.Has(machine.gameObject)
+            ? machine.gameObject
+            : null;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself wait as long as the dice of its song say, as what it hears
+    /// changes, which begins a song if it has none going (see SharedDice.RollForSong).
+    /// </summary>
+    private static float OnCheckHeroPerformanceRegionNewDelay(
+        Func<CheckHeroPerformanceRegion, float> orig,
+        CheckHeroPerformanceRegion self
+    ) {
+        return OwnCreatureOf(self.Fsm) is { } creature ? RollSongWait(creature, () => orig(self)) : orig(self);
+    }
+
+    /// <summary>
+    /// The same for a <see cref="CheckHeroPerformanceRegionV2"/>.
+    /// </summary>
+    private static float OnCheckHeroPerformanceRegionV2NewDelay(
+        Func<CheckHeroPerformanceRegionV2, float> orig,
+        CheckHeroPerformanceRegionV2 self
+    ) {
+        return OwnCreatureOf(self.Fsm) is { } creature ? RollSongWait(creature, () => orig(self)) : orig(self);
+    }
+
+    /// <summary>
+    /// Rolls how long a creature that every game runs by itself waits, from the dice of its song.
+    /// </summary>
+    private static float RollSongWait(GameObject creature, Func<float> roll) {
+        var wait = 0f;
+        Save.SharedDice.RollForSong(creature, Save.SharedDice.SongDice.Wait, () => wait = roll());
+        Logger.Info(
+            $"[Own creatures] '{Entity.OwnCreatures.PlaceOf(creature)}' waits {wait:F2} s at song " +
+            $"{Save.SharedDice.SongOf(creature)}, for what it hears"
+        );
+        return wait;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself rest after a song as long as the dice of that song say (see
+    /// SharedDice.RollForSong).
+    /// </summary>
+    private static void OnStartSingCooldown(Action<EnemySingDuration> orig, EnemySingDuration self) {
+        var creature = self.gameObject;
+        if (Entity.OwnCreatures.Count == 0 || !Entity.OwnCreatures.Has(creature)) {
+            orig(self);
+            return;
+        }
+
+        Save.SharedDice.RollForSong(creature, Save.SharedDice.SongDice.Rest, () => orig(self));
+        Logger.Info(
+            $"[Own creatures] '{Entity.OwnCreatures.PlaceOf(creature)}' rests after song " +
+            $"{Save.SharedDice.SongOf(creature)}"
+        );
     }
 
     /// <summary>
@@ -737,41 +813,43 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Locks a singing enemy onto the performer it reacted to, and sets the sing duration from that performer's
-    /// Musician Charm when they are a remote player. A creature whose song the scene host's game ends sings on here
-    /// until that one stops (see <see cref="FollowsSceneHostsSong"/>).
+    /// Musician Charm when they are a remote player. A creature that every game runs by itself sings as long as the
+    /// dice of its song say, with the Musician Charm of whom it sings to (see SharedDice.RollForSong).
     /// </summary>
     private static void OnEnemySingControlEnter(Action<EnemySingControl> orig, EnemySingControl self) {
         orig(self);
-        if (FollowsSceneHostsSong(self.Fsm)) {
-            Entity.Action.EntityFsmActions.EnemySingControlSentEndEventField?.SetValue(self, true);
-            return;
-        }
-
-        var enemy = self.Fsm?.GetOwnerDefaultTarget(self.enemyGameObject);
-        var owner = enemy == null ? null : GetEnemyTargetOwner(enemy);
-        if (owner == null) {
-            return;
-        }
-
-        var ownerId = owner.GetInstanceID();
-        if (!PendingSongTargets.TryGetValue(ownerId, out var pending)) {
-            return;
-        }
-
-        PendingSongTargets.Remove(ownerId);
-        if (!IsPendingSongTargetValid(pending)) {
-            return;
-        }
-
-        SongTargets[ownerId] = pending;
 
         // EnemySingControl picks its duration from the local player's Musician Charm, see its OnEnter
-        if (!pending.IsLocal && pending.HasMusicianCharm != NeedolinCoop.IsLocalMusicianCharmEquipped()) {
-            var duration = pending.HasMusicianCharm
-                ? UnityEngine.Random.Range(6.5f, 8f)
-                : UnityEngine.Random.Range(4f, 6.75f);
-            EnemySingControlSingDurationField?.SetValue(self, duration);
+        var localCharm = NeedolinCoop.IsLocalMusicianCharmEquipped();
+        var charm = localCharm;
+        var enemy = self.Fsm?.GetOwnerDefaultTarget(self.enemyGameObject);
+        var owner = enemy == null ? null : GetEnemyTargetOwner(enemy);
+        if (owner != null && PendingSongTargets.TryGetValue(owner.GetInstanceID(), out var pending)) {
+            PendingSongTargets.Remove(owner.GetInstanceID());
+            if (IsPendingSongTargetValid(pending)) {
+                SongTargets[owner.GetInstanceID()] = pending;
+                charm = pending.HasMusicianCharm;
+            }
         }
+
+        if (OwnCreatureOf(self.Fsm) is { } creature) {
+            Save.SharedDice.RollForSong(creature, Save.SharedDice.SongDice.Length, () => SetSingDuration(self, charm));
+            Logger.Info(
+                $"[Own creatures] '{Entity.OwnCreatures.PlaceOf(creature)}' sings song " +
+                $"{Save.SharedDice.SongOf(creature)} for {EnemySingControlSingDurationField?.GetValue(self):0.00} s"
+            );
+        } else if (charm != localCharm) {
+            SetSingDuration(self, charm);
+        }
+    }
+
+    /// <summary>
+    /// Rolls how long a singing enemy sings, the way <see cref="EnemySingControl"/> does, for whether whom it sings
+    /// to wears the Musician Charm.
+    /// </summary>
+    private static void SetSingDuration(EnemySingControl control, bool musicianCharm) {
+        var duration = musicianCharm ? UnityEngine.Random.Range(6.5f, 8f) : UnityEngine.Random.Range(4f, 6.75f);
+        EnemySingControlSingDurationField?.SetValue(control, duration);
     }
 
     /// <summary>
