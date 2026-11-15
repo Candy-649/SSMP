@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
@@ -164,7 +165,7 @@ internal partial class CoopSave {
             if (toState.Name == hostsStep) {
                 OwnCreatures.SceneHostsStep = null;
                 if (_wayInStep != null) {
-                    PutAtSceneHostsStep(creature, _wayInStep);
+                    PutAtSceneHostsStep(self, _wayInStep);
                 }
             } else if (_wayInLoop != null) {
                 _wayInStates.Add(toState.Name);
@@ -259,10 +260,30 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The word of a step that a creature that every game runs by itself took here.
+    /// The word of a step that a creature that every game runs by itself took here, with how fast it went and what
+    /// the state that it leaves worked with, which a game that waits for the step takes it with: a boss reckons the
+    /// speed of its jump from where the player it goes after stands, which each game has a little elsewhere, and
+    /// jumped as far as its own game had it, to be moved where the scene host's landed as it landed (USER 11-15, of
+    /// that fight, "只有一步闪了一下，其他时候都很丝滑").
     /// </summary>
     private static CoopSaveUpdate OwnCreatureUpdate(PlayMakerFSM machine, OwnStep step) {
         var transform = machine.transform;
+        var speed = machine.TryGetComponent<Rigidbody2D>(out var body) ? body.linearVelocity : Vector2.zero;
+        var fsm = machine.Fsm;
+
+        // The first step of a state machine leaves no state
+        var worked = fsm.ActiveState is { } state
+            ? ToldValues.Of(
+                fsm,
+                state.Actions.Where(action => action.Enabled)
+                    .SelectMany(Entity.Action.EntityFsmActions.ValueVariablesOf).Distinct()
+            )
+            : ToldValues.None;
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream)) {
+            worked.Write(writer);
+        }
+
         return new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.OwnCreature,
             Scene = machine.gameObject.scene.name,
@@ -273,8 +294,9 @@ internal partial class CoopSave {
             Part = ThrownThings.CodeOf?.Invoke(GamePatcher.TargetOf(machine.gameObject)) ?? ThrownThings.NoPlayer,
             Values = [
                 step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z,
-                SharedDice.SongOf(machine.gameObject)
-            ]
+                SharedDice.SongOf(machine.gameObject), speed.x, speed.y
+            ],
+            Bytes = stream.ToArray()
         };
     }
 
@@ -393,12 +415,12 @@ internal partial class CoopSave {
         }
 
         // The health that it has there, for a member who has just come in
-        if (update.Values.Count > 5 && hasHealth && health.hp != (int) update.Values[5]) {
+        if (update.Values.Count > 7 && hasHealth && health.hp != (int) update.Values[7]) {
             Logger.Info(
-                $"[Own creatures] '{place}' has {(int) update.Values[5]} health as in {player.Username}'s game, " +
+                $"[Own creatures] '{place}' has {(int) update.Values[7]} health as in {player.Username}'s game, " +
                 $"rather than {health.hp}"
             );
-            health.hp = (int) update.Values[5];
+            health.hp = (int) update.Values[7];
         }
 
         var machine = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName);
@@ -433,7 +455,7 @@ internal partial class CoopSave {
         var from = fsm.ActiveStateName;
         var away = Vector2.Distance(transform.position, there);
         MoveOwnSteps(creature, there - transform.position);
-        PutAtSceneHostsStep(creature, update);
+        PutAtSceneHostsStep(fsm, update);
         OwnCreatures.SceneHostsStep = (fsm, update.StateName);
         try {
             if (way != null) {
@@ -456,18 +478,26 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Puts a creature that every game runs by itself where the scene host's was as it took a step, turned the way it
-    /// was turned there, with the rolls and the song that it took the step with.
+    /// was turned there, going as fast, with the rolls and the song that it took the step with, and with what the state
+    /// that its state machine left worked with there.
     /// </summary>
-    private static void PutAtSceneHostsStep(GameObject creature, CoopSaveUpdate update) {
+    private static void PutAtSceneHostsStep(Fsm fsm, CoopSaveUpdate update) {
+        var creature = fsm.GameObject;
         var transform = creature.transform;
         transform.position = new Vector3(update.Values[0], update.Values[1], transform.position.z);
         var scale = transform.localScale;
         scale.x = update.Values[2];
         transform.localScale = scale;
         transform.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
+        if (creature.TryGetComponent<Rigidbody2D>(out var body)) {
+            body.linearVelocity = new Vector2(update.Values[5], update.Values[6]);
+        }
+
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
         SharedDice.SetSong(creature, (int) update.Values[4]);
+        using var reader = new BinaryReader(new MemoryStream(update.Bytes));
+        ToldValues.Read(reader).ApplyTo(fsm);
     }
 
     /// <summary>

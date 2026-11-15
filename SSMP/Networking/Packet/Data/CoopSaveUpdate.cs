@@ -907,8 +907,10 @@ internal enum CoopSaveUpdateKind : byte {
     /// it died there just now, with the direction of the blow that killed it in <see cref="CoopSaveUpdate.Values"/>
     /// if it had one. Otherwise <see cref="CoopSaveUpdate.FsmName"/> names its state machine,
     /// <see cref="CoopSaveUpdate.StateName"/> the state that it went to, <see cref="CoopSaveUpdate.Amounts"/> how many
-    /// times its actions had rolled before (SharedDice.RollCounts), and <see cref="CoopSaveUpdate.Values"/> where it
-    /// was, as x and y, the x of its scale, how far it was turned and which song it was at (SharedDice.SongOf).
+    /// times its actions had rolled before (SharedDice.RollCounts), <see cref="CoopSaveUpdate.Values"/> where it was,
+    /// as x and y, the x of its scale, how far it was turned, which song it was at (SharedDice.SongOf) and how fast it
+    /// went, as x and y, then for a member who comes in its health, and <see cref="CoopSaveUpdate.Bytes"/> what the
+    /// state that its state machine left worked with (ToldValues).
     /// </summary>
     OwnCreature,
 

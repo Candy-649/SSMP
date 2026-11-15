@@ -12,7 +12,9 @@ namespace SSMP.Game.Client.Entity;
 /// the thing it caught was: a tendril puts that spot on the creature before it tells the creature to reel the thing in.
 /// When a part of a scene client's copy catches something of that player, the copy's FSM plays the catch at once with
 /// what the part set on it, and the scene host's FSM needs the same set before it plays the catch too (see
-/// <see cref="Entity.TakeInput"/>). Being there at all, even with nothing in it, says that an input is a catch.
+/// <see cref="Entity.TakeInput"/>). Being there at all, even with nothing in it, says that an input is a catch. The
+/// same carries what the state that a creature that every game runs by itself leaves worked out, with the step of the
+/// scene host's creature (see CoopSave.OwnCreatures).
 /// </summary>
 internal sealed class ToldValues {
     /// <summary>
@@ -79,6 +81,26 @@ internal sealed class ToldValues {
             }
 
             values.Add((name!, value));
+        }
+
+        return values.Count == 0 ? None : new ToldValues(values);
+    }
+
+    /// <summary>
+    /// Takes the values that the given variables of an FSM hold, of those of a kind that is sent.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="names">The names of the variables.</param>
+    public static ToldValues Of(HutongGames.PlayMaker.Fsm fsm, IEnumerable<string> names) {
+        var values = new List<(string Name, object Value)>();
+        foreach (var name in names) {
+            if (values.Count >= MaxValues) {
+                break;
+            }
+
+            if (ValueOf(fsm.Variables.GetVariable(name)) is { } value) {
+                values.Add((name, value));
+            }
         }
 
         return values.Count == 0 ? None : new ToldValues(values);
