@@ -11,9 +11,16 @@ namespace SSMP.Game.Client.Entity;
 /// SharedDice), the hits it takes, as the room's own objects take them (see CoopHits.IsRoomObject), and the state that
 /// the scene host's game has it in (see CoopSave.OwnCreatures).
 ///
-/// A trial of keeping to the game's own creature and sending what is listed, rather than showing a copy of it whose
-/// every state machine the mod has to teach (USER 11-14, "用游戏本身那只，更像是一种白名单",
-/// "先微微试一下").
+/// Begun as a trial of keeping to the game's own creature and sending what is listed, rather than showing a copy of
+/// it whose every state machine the mod has to teach (USER 11-14, "用游戏本身那只，更像是一种白名单",
+/// "先微微试一下"). A kind whose copy goes wrong comes over to this rather than the copy being taught more (USER 11-15
+/// "再也不想干复制品这种蠢事了").
+///
+/// The rocks that a boss's fight lets fall are run so too, though they have no health. The game keeps them hidden
+/// where they hang until the fight calls them down; a copy never ran the step that hides them, and hung in the air
+/// in every player's sight, to be struck and stood on (USER 11-15 "这个石头停在半空中是正常的吗",
+/// "我这边石头也停在半空"). Which ones fall is the fight's own roll, the same in every game, and each one's steps
+/// are the scene host's as a creature's are.
 /// </summary>
 internal static class OwnCreatures {
     /// <summary>

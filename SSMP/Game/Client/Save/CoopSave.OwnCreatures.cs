@@ -194,7 +194,7 @@ internal partial class CoopSave {
 
         foreach (var pair in OwnCreatures.All) {
             var creature = pair.Key;
-            if (creature == null || creature.GetComponent<HealthManager>().isDead) {
+            if (creature == null || creature.TryGetComponent<HealthManager>(out var health) && health.isDead) {
                 Logger.Info($"[Own creatures] {player.Username} is told that '{pair.Value.Place}' is dead here");
                 Send(new CoopSaveUpdate {
                     TargetId = player.Id,
@@ -242,8 +242,9 @@ internal partial class CoopSave {
             return;
         }
 
-        var health = creature.GetComponent<HealthManager>();
-        if (!creature.activeInHierarchy || health.isDead) {
+        // The rocks that a fight lets fall have no health, and never die (see OwnCreatures)
+        var hasHealth = creature.TryGetComponent<HealthManager>(out var health);
+        if (!creature.activeInHierarchy || hasHealth && health.isDead) {
             Logger.Info(
                 $"[Own creatures] {player.Username}'s game told of '{place}', which is dead or not out here" +
                 (update.PartCount > 0 ? ", and dead there too" : $", and went to '{update.StateName}' there")
