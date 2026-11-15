@@ -136,11 +136,25 @@ internal partial class CoopSave {
 
         var creature = machine.gameObject;
 
+        // The way into a step of the scene host's, which plays as it came: nothing holds it back, and the step itself
+        // is that one, which nothing here keeps to be found again (see TakeOwnStep)
+        if (OwnCreatures.PlaysSceneHostsStep(self)) {
+            if (toState.Name == OwnCreatures.SceneHostsStep!.Value.State) {
+                OwnCreatures.SceneHostsStep = null;
+            }
+
+            _heldOwnSteps.Remove(self);
+            orig(self, toState);
+            return;
+        }
+
         // A step that goes by where the players are, or that another state machine told it, is the scene host's: it
-        // waits for that, which has mostly come already, as this game is a moment behind
-        if (!OwnCreatures.PlayingSceneHostsStep && OwnCreatures.FollowsSceneHost(creature) &&
+        // waits for that, which has mostly come already, as this game is a moment behind. The switch that the game
+        // was to make is let go of, as the game tries it again at once until it is made
+        if (OwnCreatures.FollowsSceneHost(creature) &&
             (self.ActiveState is { } from && GoesByPlayers(from) || Fsm.EventData?.SentByFsm is { } sender &&
                 sender != self)) {
+            MachineSwitchToStateField?.SetValue(self, null);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
                 _heldOwnSteps[self] = self.ActiveStateName;
                 Logger.Info(
@@ -268,7 +282,9 @@ internal partial class CoopSave {
 
             foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
                 var fsm = machine.Fsm;
-                var last = _ownSteps.TryGetValue(fsm, out var steps) ? steps[steps.Count - 1] : (OwnStep?) null;
+                var last = _ownSteps.TryGetValue(fsm, out var steps) && steps.Count > 0
+                    ? steps[^1]
+                    : (OwnStep?) null;
                 var counts = last is { } step && step.State == fsm.ActiveStateName
                     ? step.Counts
                     : SharedDice.RollCounts(creature);
@@ -362,8 +378,7 @@ internal partial class CoopSave {
         var fsm = machine.Fsm;
         var transform = creature.transform;
         var there = new Vector3(update.Values[0], update.Values[1], transform.position.z);
-        _heldOwnSteps.Remove(fsm);
-        if (FindOwnStep(fsm, update) is { } took) {
+        if (TakeOwnStep(fsm, update, out var newest) is { } took) {
             var off = there - took.Place;
             off.z = 0f;
             if (off.magnitude > OwnCreatureDrift) {
@@ -377,7 +392,7 @@ internal partial class CoopSave {
 
             // Facing the way it faces there, when that is the step it is at: it faced the player it went after
             // where this game has them
-            if (_ownSteps[fsm][^1] == took && !Mathf.Approximately(transform.localScale.x, update.Values[2])) {
+            if (newest && !Mathf.Approximately(transform.localScale.x, update.Values[2])) {
                 Logger.Info($"[Own creatures] '{place}' faces the way it does in {player.Username}'s game");
                 var turned = transform.localScale;
                 turned.x = update.Values[2];
@@ -402,7 +417,7 @@ internal partial class CoopSave {
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
         SharedDice.SetSong(creature, (int) update.Values[4]);
-        OwnCreatures.PlayingSceneHostsStep = true;
+        OwnCreatures.SceneHostsStep = (fsm, update.StateName);
         try {
             if (way != null) {
                 fsm.Event(way);
@@ -410,7 +425,7 @@ internal partial class CoopSave {
                 fsm.SetState(update.StateName);
             }
         } finally {
-            OwnCreatures.PlayingSceneHostsStep = false;
+            OwnCreatures.SceneHostsStep = null;
         }
     }
 
@@ -490,21 +505,33 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The last step of a state machine here that went to the state of a step of the scene host's creature after as
-    /// many rolls, which is that step, or null if it took none.
+    /// The first step of a state machine here, of those that no step of the scene host's answered yet, that went to the
+    /// state of a step of the scene host's creature after as many rolls, which is that step, or null if it took none.
+    /// It is answered, and so are the steps before it, which the scene host's did not take: a later step of the scene
+    /// host's that goes to the same state after as many rolls, like the next of two that a state machine with no
+    /// rolls goes between, is not taken for it. With none found, none of them is on the way of the scene host's.
     /// </summary>
-    private OwnStep? FindOwnStep(Fsm fsm, CoopSaveUpdate update) {
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="update">The step of the scene host's.</param>
+    /// <param name="newest">Whether the step is the last that it took, the one it is at.</param>
+    private OwnStep? TakeOwnStep(Fsm fsm, CoopSaveUpdate update, out bool newest) {
+        newest = false;
         if (!_ownSteps.TryGetValue(fsm, out var steps)) {
             return null;
         }
 
-        for (var i = steps.Count - 1; i >= 0; i--) {
-            if (steps[i].State == update.StateName && steps[i].Counts.SequenceEqual(update.Amounts)) {
-                return steps[i];
-            }
+        var index = steps.FindIndex(
+            step => step.State == update.StateName && step.Counts.SequenceEqual(update.Amounts)
+        );
+        if (index < 0) {
+            steps.Clear();
+            return null;
         }
 
-        return null;
+        var took = steps[index];
+        newest = index == steps.Count - 1;
+        steps.RemoveRange(0, index + 1);
+        return took;
     }
 
     /// <summary>

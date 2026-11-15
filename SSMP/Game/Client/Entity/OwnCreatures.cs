@@ -57,10 +57,18 @@ internal static class OwnCreatures {
     public static Func<bool?>? SceneRole { get; set; }
 
     /// <summary>
-    /// Whether the step that is played now is one of the scene host's creature (see CoopSave.OnOwnCreature), which
-    /// nothing here holds back.
+    /// The state machine that goes into a step of the scene host's creature now, and the state that the step goes to
+    /// (see CoopSave.OnOwnCreature). Nothing here holds back the way into it; what the state does once it is in goes
+    /// as anything else of the creature here does.
     /// </summary>
-    public static bool PlayingSceneHostsStep { get; set; }
+    public static (HutongGames.PlayMaker.Fsm Fsm, string State)? SceneHostsStep { get; set; }
+
+    /// <summary>
+    /// Whether a state machine goes into a step of the scene host's creature now (see <see cref="SceneHostsStep"/>).
+    /// </summary>
+    public static bool PlaysSceneHostsStep(HutongGames.PlayMaker.Fsm fsm) {
+        return SceneHostsStep is { } step && step.Fsm == fsm;
+    }
 
     /// <summary>
     /// Takes a creature of the room as one that every game runs by itself.

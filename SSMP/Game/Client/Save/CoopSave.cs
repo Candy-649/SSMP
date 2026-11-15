@@ -530,7 +530,14 @@ internal partial class CoopSave {
             UpdateStoryFlags();
             UpdateLifts();
             UpdateTrapdoors();
+        }
+
+        // Also once the partner is gone, so that a creature that waited here for a step of the scene host's goes on
+        // when the scene host left and this game runs the room
+        try {
             UpdateOwnCreatureHolds();
+        } catch (Exception e) {
+            LogInteractionError(e);
         }
 
         if (IsGroupComplete(marker, members)) {

@@ -239,7 +239,7 @@ internal partial class BossRoomCoop {
         // The scene host already waited for the events of its bosses that other players receive
         // Started already where it came from: an event of the network, or a step of the scene host's creature that
         // every game runs by itself
-        if (_networkSender != null || Entity.OwnCreatures.PlayingSceneHostsStep) {
+        if (_networkSender != null || Entity.OwnCreatures.PlaysSceneHostsStep(fsm)) {
             return false;
         }
 
