@@ -1046,6 +1046,7 @@ internal partial class BossRoomCoop {
         private HashSet<string> _leadingStates = [];
         private HashSet<string> _inevitableStates = [];
         private HashSet<string> _fightReachableStates = [];
+        private HashSet<string> _entryStates = [];
 
         public FightGraph(Fsm fsm, bool isEntity) {
             Fsm = fsm;
@@ -1123,6 +1124,7 @@ internal partial class BossRoomCoop {
             UpdateLeadingStates();
             UpdateInevitableStates();
             UpdateFightReachableStates();
+            UpdateEntryStates();
             PreFightStates = FindPreFightStates();
         }
 
@@ -1130,6 +1132,25 @@ internal partial class BossRoomCoop {
         /// Finds the states from which the fight starts by steps that happen by themselves.
         /// </summary>
         private void UpdateLeadingStates() {
+            _leadingStates = StatesLeadingTo(_fightStates);
+        }
+
+        /// <summary>
+        /// Finds the states that are no part of the fight and from which the FSM goes into it by steps that happen by
+        /// themselves, though not through a state where the fight begins: a boss that waits again where it waited after
+        /// a player died to it goes from there at the players as soon as it notices one, with no title and no gate to
+        /// close (USER 11-15 "我朋友刚进存档就被打死了，但是那时候我还没到……那个boss前等待似乎没有正常生效").
+        /// </summary>
+        private void UpdateEntryStates() {
+            _entryStates = StatesLeadingTo(_fightReachableStates);
+            _entryStates.ExceptWith(_fightReachableStates);
+        }
+
+        /// <summary>
+        /// The states from which one of the given states is reached by steps that happen by themselves, in at most
+        /// MaxEventStartSteps steps, the given states among them.
+        /// </summary>
+        private HashSet<string> StatesLeadingTo(IEnumerable<string> targets) {
             var sources = new Dictionary<string, List<string>>();
             foreach (var state in _states) {
                 foreach (var transition in state.Transitions ?? []) {
@@ -1148,9 +1169,9 @@ internal partial class BossRoomCoop {
 
             var steps = new Dictionary<string, int>();
             var queue = new Queue<string>();
-            foreach (var fightState in _fightStates) {
-                steps[fightState] = 0;
-                queue.Enqueue(fightState);
+            foreach (var target in targets) {
+                steps[target] = 0;
+                queue.Enqueue(target);
             }
 
             while (queue.Count > 0) {
@@ -1167,7 +1188,7 @@ internal partial class BossRoomCoop {
                 }
             }
 
-            _leadingStates = new HashSet<string>(steps.Keys);
+            return new HashSet<string>(steps.Keys);
         }
 
         /// <summary>
@@ -1314,13 +1335,25 @@ internal partial class BossRoomCoop {
 
         /// <summary>
         /// Whether a transition is caused from outside the state and leads to the fight by steps that happen by
-        /// themselves.
+        /// themselves: to where the fight begins, or as the notice of a player that takes the FSM into the fight by
+        /// itself (see <see cref="IsEntryNotice"/>).
         /// </summary>
         private bool IsStartTransition(string? stateName, FsmTransition transition) {
             return transition.EventName is { Length: > 0 } eventName && eventName != FinishedEventName &&
-                   !IsCombatEvent(eventName) && transition.ToState != null &&
-                   _leadingStates.Contains(transition.ToState) &&
+                   !IsCombatEvent(eventName) && transition.ToState is { } toState &&
+                   (_leadingStates.Contains(toState) || IsEntryNotice(stateName, eventName, toState)) &&
                    (stateName == null || !IsOwnEvent(stateName, eventName));
+        }
+
+        /// <summary>
+        /// Whether an event is the notice of a player, by an action of the state that looks for them, that takes the
+        /// FSM out of a state that is no part of its fight into one that goes into the fight by itself (see
+        /// UpdateEntryStates). Any other way into such a state, like a boss's partner calling it in or the end of a
+        /// move that another FSM tells, is a step of a fight that began elsewhere.
+        /// </summary>
+        private bool IsEntryNotice(string? stateName, string eventName, string toState) {
+            return stateName != null && !_fightReachableStates.Contains(stateName) && _entryStates.Contains(toState) &&
+                   IsDetectionEvent(_statesByName[stateName], eventName);
         }
 
         /// <summary>

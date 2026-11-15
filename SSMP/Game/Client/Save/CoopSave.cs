@@ -284,6 +284,7 @@ internal partial class CoopSave {
         RegisterMaggotHooks();
         RegisterDeliveryLookHooks();
         RegisterOwnCreatureHooks();
+        RegisterQuestShopHooks();
         RegisterArrivalHooks();
         RegisterTrapdoorHooks();
         RegisterPrisonCaptureHooks();
@@ -689,6 +690,7 @@ internal partial class CoopSave {
         _rosterStarted = false;
         _declinedBy.Clear();
         _updatesOutOfRoom.Clear();
+        _questShopChanges.Clear();
 
         // A step of dialogue that waits for the partner doesn't go on: its scene is going, and going on would run what
         // comes after the wish, like saving the game, on the way out (CoopSave.WishRead)
@@ -1201,6 +1203,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.OwnCreature:
                 OnOwnCreature(player, update);
+                break;
+            case CoopSaveUpdateKind.QuestShopPicks:
+                OnQuestShopPicks(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);

@@ -58,6 +58,12 @@ internal partial class CoopSave {
     private const float OwnCreatureDrift = 0.5f;
 
     /// <summary>
+    /// The most steps that a state machine takes through the states between on its way into a step of the scene host's
+    /// (see WalkInto).
+    /// </summary>
+    private const int MaxWayInSteps = 16;
+
+    /// <summary>
     /// The last steps of the state machines of the creatures that every game runs by itself, the last one last.
     /// </summary>
     private readonly Dictionary<Fsm, List<OwnStep>> _ownSteps = new();
@@ -95,6 +101,15 @@ internal partial class CoopSave {
     /// a creature that every game runs by itself whose steps this game has looked at (see GoesByPlayers).
     /// </summary>
     private readonly Dictionary<Fsm, HashSet<string>> _playerWayValues = new();
+
+    /// <summary>
+    /// While a state machine goes through the states between into a step of the scene host's (see WalkInto): the
+    /// states of the part of it that the step goes round in, the step, and the states that it went through.
+    /// </summary>
+    private HashSet<string>? _wayInLoop;
+
+    private CoopSaveUpdate? _wayInStep;
+    private readonly List<string> _wayInStates = [];
 
     /// <summary>
     /// Watches the creatures that every game runs by itself go from one state to another and die.
@@ -137,10 +152,22 @@ internal partial class CoopSave {
         var creature = machine.gameObject;
 
         // The way into a step of the scene host's, which plays as it came: nothing holds it back, and the step itself
-        // is that one, which nothing here keeps to be found again (see TakeOwnStep)
+        // is that one, which nothing here keeps to be found again (see TakeOwnStep). On a way through the states
+        // between, the first state of the part that the step goes round in that it comes to is the step, where it is
+        // put again as the scene host's was, as the states on the way may have moved it or rolled (see WalkInto)
         if (OwnCreatures.PlaysSceneHostsStep(self)) {
-            if (toState.Name == OwnCreatures.SceneHostsStep!.Value.State) {
+            var hostsStep = OwnCreatures.SceneHostsStep!.Value.State;
+            if (_wayInLoop != null && toState.Name != hostsStep && _wayInLoop.Contains(toState.Name)) {
+                toState = self.GetState(hostsStep);
+            }
+
+            if (toState.Name == hostsStep) {
                 OwnCreatures.SceneHostsStep = null;
+                if (_wayInStep != null) {
+                    PutAtSceneHostsStep(creature, _wayInStep);
+                }
+            } else if (_wayInLoop != null) {
+                _wayInStates.Add(toState.Name);
             }
 
             _heldOwnSteps.Remove(self);
@@ -403,13 +430,37 @@ internal partial class CoopSave {
         }
 
         var way = WayInto(fsm, update.StateName);
-        Logger.Info(
-            $"[Own creatures] '{place}' goes from '{fsm.ActiveStateName}' to '{update.StateName}' " +
-            (way == null ? "straight" : $"by '{way.Name}'") + $" as in {player.Username}'s game, where it was there, " +
-            $"{Vector2.Distance(transform.position, there):F1} away"
-        );
+        var from = fsm.ActiveStateName;
+        var away = Vector2.Distance(transform.position, there);
         MoveOwnSteps(creature, there - transform.position);
-        transform.position = there;
+        PutAtSceneHostsStep(creature, update);
+        OwnCreatures.SceneHostsStep = (fsm, update.StateName);
+        try {
+            if (way != null) {
+                fsm.Event(way);
+            } else {
+                WalkInto(fsm, update);
+            }
+        } finally {
+            OwnCreatures.SceneHostsStep = null;
+        }
+
+        var how = way != null ? $"by '{way.Name}'"
+            : _wayInStates.Count > 0 ? $"through '{string.Join("', '", _wayInStates)}'"
+            : "straight";
+        Logger.Info(
+            $"[Own creatures] '{place}' goes from '{from}' to '{update.StateName}' {how} as in {player.Username}'s " +
+            $"game, where it was there, {away:F1} away"
+        );
+    }
+
+    /// <summary>
+    /// Puts a creature that every game runs by itself where the scene host's was as it took a step, turned the way it
+    /// was turned there, with the rolls and the song that it took the step with.
+    /// </summary>
+    private static void PutAtSceneHostsStep(GameObject creature, CoopSaveUpdate update) {
+        var transform = creature.transform;
+        transform.position = new Vector3(update.Values[0], update.Values[1], transform.position.z);
         var scale = transform.localScale;
         scale.x = update.Values[2];
         transform.localScale = scale;
@@ -417,16 +468,116 @@ internal partial class CoopSave {
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
         SharedDice.SetSong(creature, (int) update.Values[4]);
-        OwnCreatures.SceneHostsStep = (fsm, update.StateName);
+    }
+
+    /// <summary>
+    /// Takes a state machine into a step of the scene host's creature that no way out of its state leads to, the way
+    /// the game goes there: through the states between, each of which does what it does as it is entered and is left
+    /// by the way that leads on, so that what they do on the way is done here too. A boss that a member found in the
+    /// room's hiding place as they came in was set straight into its move, and the states that show it in the room, on
+    /// its way into the fight in the scene host's game, never ran here (USER 11-15 "我刚进房主世界的时候，这个怪是透明的，
+    /// 我看不到但是可以撞我"). Of the part of the state machine that the step goes round in, the first state that it would
+    /// go to is the step itself, and where no way leads on it is set to the step.
+    /// </summary>
+    private void WalkInto(Fsm fsm, CoopSaveUpdate update) {
+        _wayInLoop = LoopOf(fsm, update.StateName);
+        _wayInStep = update;
+        _wayInStates.Clear();
         try {
-            if (way != null) {
-                fsm.Event(way);
-            } else {
+            for (var i = 0; i < MaxWayInSteps && OwnCreatures.PlaysSceneHostsStep(fsm) &&
+                 !_wayInLoop.Contains(fsm.ActiveStateName) && FirstStepOfWay(fsm, update.StateName) is { } next; i++) {
+                fsm.Event(next);
+            }
+
+            if (OwnCreatures.PlaysSceneHostsStep(fsm)) {
                 fsm.SetState(update.StateName);
             }
         } finally {
-            OwnCreatures.SceneHostsStep = null;
+            _wayInLoop = null;
+            _wayInStep = null;
         }
+    }
+
+    /// <summary>
+    /// The states of the part of a state machine that a state goes round in: those that it can go to from the state
+    /// and come back to it from, by the ways out of the states, the state among them.
+    /// </summary>
+    private static HashSet<string> LoopOf(Fsm fsm, string stateName) {
+        var sources = new Dictionary<string, List<string>>();
+        foreach (var state in fsm.States) {
+            // A way out that leads nowhere, which the game's state machines have, leads to no state
+            foreach (var transition in state.Transitions) {
+                if (transition.ToState is not { } to) {
+                    continue;
+                }
+
+                if (!sources.TryGetValue(to, out var list)) {
+                    list = [];
+                    sources[to] = list;
+                }
+
+                list.Add(state.Name);
+            }
+        }
+
+        var after = new HashSet<string> { stateName };
+        var queue = new Queue<string>(after);
+        while (queue.Count > 0) {
+            foreach (var transition in fsm.GetState(queue.Dequeue()).Transitions) {
+                if (fsm.GetState(transition.ToState) != null && after.Add(transition.ToState)) {
+                    queue.Enqueue(transition.ToState);
+                }
+            }
+        }
+
+        // What it comes back to the state from, of what it goes to from it, is all of what leads back
+        var loop = new HashSet<string> { stateName };
+        queue.Enqueue(stateName);
+        while (queue.Count > 0) {
+            if (!sources.TryGetValue(queue.Dequeue(), out var list)) {
+                continue;
+            }
+
+            foreach (var source in list) {
+                if (after.Contains(source) && loop.Add(source)) {
+                    queue.Enqueue(source);
+                }
+            }
+        }
+
+        return loop;
+    }
+
+    /// <summary>
+    /// The event of the first step of the shortest way from the state that a state machine is in to the given state, by
+    /// the ways out of the states, or null if none leads there. An event that a global transition of the state machine
+    /// takes too leads no way: the game goes by the global transition first, wherever the state machine is.
+    /// </summary>
+    private static FsmEvent? FirstStepOfWay(Fsm fsm, string target) {
+        var globalEvents = fsm.GlobalTransitions.Select(transition => transition.EventName).ToHashSet();
+        var start = fsm.ActiveStateName;
+        var firstSteps = new Dictionary<string, FsmEvent>();
+        var queue = new Queue<string>();
+        queue.Enqueue(start);
+        while (queue.Count > 0) {
+            var name = queue.Dequeue();
+            foreach (var transition in fsm.GetState(name).Transitions) {
+                if (globalEvents.Contains(transition.EventName) || fsm.GetState(transition.ToState) is not { } next ||
+                    next.Name == start || firstSteps.ContainsKey(next.Name)) {
+                    continue;
+                }
+
+                var first = name == start ? transition.FsmEvent : firstSteps[name];
+                if (next.Name == target) {
+                    return first;
+                }
+
+                firstSteps[next.Name] = first;
+                queue.Enqueue(next.Name);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

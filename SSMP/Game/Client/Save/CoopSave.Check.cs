@@ -522,6 +522,7 @@ internal partial class CoopSave {
         SendPendingWishTurnIns(members);
         AskAboutWishesRead(members);
         TellRoomLayoutAfterCheck(members);
+        TellQuestShopPicksAfterCheck(members);
 
         foreach (var member in members) {
             if (FindMarkerMember(marker, member) is { } entry) {

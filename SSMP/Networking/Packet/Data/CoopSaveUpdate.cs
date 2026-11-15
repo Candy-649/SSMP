@@ -910,5 +910,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// times its actions had rolled before (SharedDice.RollCounts), and <see cref="CoopSaveUpdate.Values"/> where it
     /// was, as x and y, the x of its scale, how far it was turned and which song it was at (SharedDice.SongOf).
     /// </summary>
-    OwnCreature
+    OwnCreature,
+
+    /// <summary>
+    /// A change to the wishes that a shop of wishes picked to offer, like the deliveries of the couriers, which the
+    /// sender's game made as its player opened the shop or handed one in (see CoopSave.QuestShopPicks):
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> names the field of the player data that keeps them,
+    /// <see cref="CoopSaveUpdate.Names"/> holds them after the change, <see cref="CoopSaveUpdate.Sequence"/> counts the
+    /// change, and <see cref="CoopSaveUpdate.Key"/> decides between two changes that count as many.
+    /// </summary>
+    QuestShopPicks
 }
