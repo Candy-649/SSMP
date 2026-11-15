@@ -46,9 +46,16 @@ internal partial class CoopSave {
     private Hook? _questShopHook;
 
     /// <summary>
-    /// The hook that sees a delivery that is handed in use up the couriers' picks.
+    /// The hooks that see a delivery that is handed in, or anything else, use up the couriers' picks.
     /// </summary>
     private Hook? _deliveryConsumeHook;
+
+    private Hook? _clearCourierPicksHook;
+
+    /// <summary>
+    /// Whether the couriers' picks were told used up while a delivery was handed in (see OnDeliveryConsume).
+    /// </summary>
+    private bool _courierPicksUseTold;
 
     /// <summary>
     /// Watches the shops of wishes make their lists, and the deliveries handed in use up the couriers' picks.
@@ -61,12 +68,20 @@ internal partial class CoopSave {
             )
         );
 
-        // Consume rather than the ClearGenericQuests that it calls, which is short enough to be inlined into it
+        // Consume as well as the ClearGenericQuests that it calls, which is short enough to be inlined into it. A
+        // state machine calls ClearGenericQuests itself too, as the wish that readies the last fight's other end is
+        // granted (song_enclave, 'Enclave Caretaker' 'Wish Granted')
         _deliveryConsumeHook = CreateHook(
             typeof(DeliveryQuestItem).GetMethod(
                 nameof(DeliveryQuestItem.Consume), InstanceFlags, null, [typeof(int), typeof(bool)], null
             ),
             new Action<Action<DeliveryQuestItem, int, bool>, DeliveryQuestItem, int, bool>(OnDeliveryConsume)
+        );
+        _clearCourierPicksHook = CreateHook(
+            typeof(DeliveryQuestItem).GetMethod(
+                nameof(DeliveryQuestItem.ClearGenericQuests), StaticFlags, null, Type.EmptyTypes, null
+            ),
+            new Action<Action>(OnClearCourierPicks)
         );
     }
 
@@ -110,9 +125,22 @@ internal partial class CoopSave {
         bool showCounter
     ) {
         var had = PlayerData.instance.BelltownCouriersGenericQuests is { Count: > 0 };
+        _courierPicksUseTold = false;
         orig(self, amount, showCounter);
+        if (had && !_courierPicksUseTold) {
+            TellQuestShopPicks(nameof(PlayerData.BelltownCouriersGenericQuests), []);
+        }
+    }
+
+    /// <summary>
+    /// Hook for the couriers' picks being used up, which does so in the saves of the other players too.
+    /// </summary>
+    private void OnClearCourierPicks(Action orig) {
+        var had = PlayerData.instance.BelltownCouriersGenericQuests is { Count: > 0 };
+        orig();
         if (had) {
             TellQuestShopPicks(nameof(PlayerData.BelltownCouriersGenericQuests), []);
+            _courierPicksUseTold = true;
         }
     }
 
