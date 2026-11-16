@@ -39,10 +39,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 ///
 /// A step that goes by where the players are - whether one stands in a range, where the one it goes after is, how far,
 /// whether it charged past them - is the scene host's to take, and so is a step that another state machine told it,
-/// which decided by them too, as a part of its own that caught the player of the game does (see CoopSave.OwnCatches).
-/// In the other games the creature waits for it there: each of them has the players a moment late and a little
-/// elsewhere, and a boss chose other moves in each game. Whom it goes after comes with each step, and a member who
-/// comes in takes its health too. All else of a move each game plays itself, with the same
+/// which decided by them too, but for a catch of the player of the game by a part of its own, which that game plays by
+/// itself (see CoopSave.OwnCatches). In the other games the creature waits for it there: each of them has the players
+/// a moment late and a little elsewhere, and a boss chose other moves in each game. Whom it goes after comes with each
+/// step, and a member who comes in takes its health too. All else of a move each game plays itself, with the same
 /// dice: what it rolls goes by the rolls that came with the step, so nothing waits for a number (USER 11-15
 /// "总之以房主那边传过来的招式为单位。尽量需要的随机数就一起过来，应该不会出现中途等房主一个随机数的情况吧").
 /// </summary>
@@ -192,8 +192,9 @@ internal partial class CoopSave {
 
         // A step that goes by where the players are, or that another state machine told it, is the scene host's: it
         // waits for that, which has mostly come already, as this game is a moment behind. The switch that the game
-        // was to make is let go of, as the game tries it again at once until it is made
-        if (OwnCreatures.FollowsSceneHost(creature) &&
+        // was to make is let go of, as the game tries it again at once until it is made. A catch of this game's player
+        // is this game's to play, to its end (see CoopSave.OwnCatches)
+        if (OwnCreatures.FollowsSceneHost(creature) && !TakesOwnCatchStep(machine, toState) &&
             (self.ActiveState is { } from && GoesByPlayers(from) || Fsm.EventData?.SentByFsm is { } sender &&
                 sender != self)) {
             MachineSwitchToStateField?.SetValue(self, null);
@@ -203,9 +204,6 @@ internal partial class CoopSave {
                     $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' would go from '{self.ActiveStateName}' to " +
                     $"'{toState.Name}' of '{self.Name}' here, and waits for the scene host's step"
                 );
-                if (CatchesLocalPlayer(self, toState, creature)) {
-                    TellOwnCatch(machine);
-                }
             }
 
             return;
@@ -452,9 +450,16 @@ internal partial class CoopSave {
             return;
         }
 
-        // A part of its own caught the player of that game, which waits for this game to say whether it did
+        // A part of its own caught the player of that game, which plays the catch by itself
         if (update.PartCount == OwnCatchPart) {
             TakeOwnCatch(player, creature, update);
+            return;
+        }
+
+        // A step of the scene host's while this game plays a catch of its own player by itself (see
+        // CoopSave.OwnCatches)
+        var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
+        if (SkipsForOwnCatch(player, fsm, update)) {
             return;
         }
 
@@ -477,8 +482,6 @@ internal partial class CoopSave {
             OwnThreads.TookHealth(creature);
         }
 
-        var machine = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName);
-        var fsm = machine.Fsm;
         var transform = creature.transform;
         var there = new Vector3(update.Values[0], update.Values[1], transform.position.z);
         if (TakeOwnStep(fsm, update, out var newest) is { } took) {

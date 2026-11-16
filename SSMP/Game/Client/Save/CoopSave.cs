@@ -541,6 +541,14 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a creature through a catch of the local player that the scene host's
+        // did not take goes on from the step that the scene host's took after its leap
+        try {
+            UpdateOwnCatches();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         if (IsGroupComplete(marker, members)) {
             UpdateCheckedPlayTime(marker);
             ReleaseHold(hero);
@@ -752,6 +760,7 @@ internal partial class CoopSave {
         _heldOwnSteps.Clear();
         _playerWayValues.Clear();
         _keptOut.Clear();
+        _ownCatchesHere.Clear();
 
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
