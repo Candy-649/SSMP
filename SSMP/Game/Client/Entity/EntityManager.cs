@@ -271,6 +271,7 @@ internal class EntityManager {
         _spawnsToTell.Clear();
         _roomCreatures.Settle(share: true);
         DrainPendingUpdates();
+        OwnThreads.OnRoleSettled();
     }
 
     /// <summary>
@@ -292,6 +293,7 @@ internal class EntityManager {
         _sceneRoleDetermined = true;
         _roomCreatures.Settle(share: false);
         DrainPendingUpdates();
+        OwnThreads.OnRoleSettled();
     }
 
     /// <summary>
@@ -343,6 +345,7 @@ internal class EntityManager {
 
         // Immediately refresh targeting fields for all active enemies
         GamePatcher.ForceImmediateRetarget();
+        OwnThreads.OnRoleSettled();
     }
 
     /// <summary>

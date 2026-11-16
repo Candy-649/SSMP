@@ -32,7 +32,7 @@ internal class BlackThreadComponent : EntityComponent {
     /// <summary>
     /// The attack index that stands for none.
     /// </summary>
-    private const byte NoAttack = byte.MaxValue;
+    internal const byte NoAttack = byte.MaxValue;
 
     /// <summary>
     /// The component of each creature's own object and copy, by its state, for the hooks on the game's own code.
@@ -606,7 +606,14 @@ internal class BlackThreadComponent : EntityComponent {
     /// Has a state strike with the attack that the game that runs it chose.
     /// </summary>
     private void TakeAttack(BlackThreadState state) {
-        if (AttackAt(state, _attack) is { } attack) {
+        Choose(state, _attack);
+    }
+
+    /// <summary>
+    /// Has a state strike with its attack at an index, if it has one there.
+    /// </summary>
+    internal static void Choose(BlackThreadState state, byte index) {
+        if (AttackAt(state, index) is { } attack) {
             state.chosenAttack = attack;
             state.hasChosenAttack = true;
         }
@@ -811,7 +818,17 @@ internal class BlackThreadComponent : EntityComponent {
     /// Writes into this game's save whether the creature turns, the way the game keeps it until the player rests.
     /// </summary>
     private void WriteSaved(bool threaded, string why) {
-        var roomObject = GameObject.Host;
+        SaveThreaded(GameObject.Host, threaded, why);
+    }
+
+    /// <summary>
+    /// Writes into this game's save whether a creature of the room turns, the way the game keeps it until the player
+    /// rests.
+    /// </summary>
+    /// <param name="roomObject">The creature's object of the room.</param>
+    /// <param name="threaded">Whether it turns.</param>
+    /// <param name="why">Why, for the log.</param>
+    internal static void SaveThreaded(GameObject? roomObject, bool threaded, string why) {
         var sceneData = SceneData.instance;
         if (roomObject == null || sceneData == null) {
             return;
@@ -842,7 +859,7 @@ internal class BlackThreadComponent : EntityComponent {
     /// <summary>
     /// Which of its attacks a state strikes with, or <see cref="NoAttack"/>.
     /// </summary>
-    private static byte IndexOf(BlackThreadState state, BlackThreadAttack? attack) {
+    internal static byte IndexOf(BlackThreadState state, BlackThreadAttack? attack) {
         var attacks = AttacksOf(state);
         if (attack == null || attacks == null) {
             return NoAttack;

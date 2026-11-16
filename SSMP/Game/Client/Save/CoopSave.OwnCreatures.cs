@@ -117,6 +117,7 @@ internal partial class CoopSave {
     /// </summary>
     private void RegisterOwnCreatureHooks() {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        OwnThreads.SendToRoomMembers = SendToRoomMembers;
         _ownCreatureHooks.Add(CreateHook(
             typeof(Fsm).GetMethod("SwitchState", flags, null, [typeof(FsmState)], null),
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnOwnCreatureStep)
@@ -324,6 +325,13 @@ internal partial class CoopSave {
                 continue;
             }
 
+            // What the third act does to it, out or not, before its steps: the health that comes with them has what
+            // the game doubles for one that turns already
+            if (OwnThreads.WordFor(creature) is { } thread) {
+                thread.TargetId = player.Id;
+                Send(thread);
+            }
+
             // One that has not come out of where the room keeps it, as the save has it, does nothing yet
             if (!creature.activeInHierarchy) {
                 continue;
@@ -365,6 +373,13 @@ internal partial class CoopSave {
         var place = update.ObjectPath;
         if (OwnCreatures.Find(update.Scene, place) is not { } creature) {
             Logger.Info($"[Own creatures] {player.Username}'s game told of '{place}', which does not run here");
+            return;
+        }
+
+        // What the third act does to it there, whether it is out here yet or not: one that comes out later is set up
+        // by it as it starts
+        if (update.PartCount == OwnThreads.WordPart) {
+            OwnThreads.Take(creature, update, player.Username);
             return;
         }
 
@@ -415,12 +430,16 @@ internal partial class CoopSave {
         }
 
         // The health that it has there, for a member who has just come in
-        if (update.Values.Count > 7 && hasHealth && health.hp != (int) update.Values[7]) {
-            Logger.Info(
-                $"[Own creatures] '{place}' has {(int) update.Values[7]} health as in {player.Username}'s game, " +
-                $"rather than {health.hp}"
-            );
-            health.hp = (int) update.Values[7];
+        if (update.Values.Count > 7 && hasHealth) {
+            if (health.hp != (int) update.Values[7]) {
+                Logger.Info(
+                    $"[Own creatures] '{place}' has {(int) update.Values[7]} health as in {player.Username}'s game, " +
+                    $"rather than {health.hp}"
+                );
+                health.hp = (int) update.Values[7];
+            }
+
+            OwnThreads.TookHealth(creature);
         }
 
         var machine = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName);

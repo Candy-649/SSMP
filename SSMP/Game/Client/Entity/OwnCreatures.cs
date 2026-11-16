@@ -174,10 +174,11 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
-    /// Forgets the creatures, as the room is left.
+    /// Forgets the creatures, as the room is left, with what is known of what the third act does to them.
     /// </summary>
     public static void Clear() {
         Creatures.Clear();
         Dead.Clear();
+        OwnThreads.Clear();
     }
 }
