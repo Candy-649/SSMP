@@ -113,10 +113,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a state is one of a leap that catches: one that a catch can come from (see Entity.CatchEvents).
+    /// Whether a state is one of a leap that catches: one that a catch can come from (see Entity.CatchEvents), and that
+    /// does something. A state of nothing but ways out is one where a state machine waits to hear of a catch, like the
+    /// one by which the knight holds the player for its blows, which waits so all the time (review: one that came to it
+    /// as a game that follows the scene host's took the room played every step of its own there ever after, and told
+    /// the scene host's game of each catch of its own too).
     /// </summary>
     private static bool IsLeapState(FsmState state) {
-        return state.Transitions.Any(transition => Entity.Entity.CatchEvents.Contains(transition.EventName));
+        return state.Actions.Length > 0 &&
+               state.Transitions.Any(transition => Entity.Entity.CatchEvents.Contains(transition.EventName));
     }
 
     /// <summary>
@@ -183,24 +188,27 @@ internal partial class CoopSave {
     /// itself, or through the landing, until it comes to a state that goes by where the players are, whose way on is
     /// the scene host's. The steps of the scene host's that come meanwhile wait, and it goes on from the latest of
     /// them once it is through (see <see cref="UpdateOwnLeaps"/>). A catch of this game's player is told to the scene
-    /// host's game (see <see cref="TellOwnCatch"/>). A talk is played so too, to its end (see CoopSave.OwnTalks).
+    /// host's game by the state machine that leapt (see <see cref="TellOwnCatch"/>), and the steps that the others of
+    /// the creature are told meanwhile are this game's too (see <see cref="ToldInOwnLeap"/>). A talk is played so too,
+    /// to its end (see CoopSave.OwnTalks).
     /// </summary>
     private bool PlaysOwnLeap(PlayMakerFSM machine, FsmState toState) {
         var fsm = machine.Fsm;
-        if (CatchesLocalPlayer(fsm, toState, machine.gameObject)) {
+        var creature = machine.gameObject;
+        _ownLeaps.TryGetValue(fsm, out var leap);
+        if (leap is { Talk: false } && CatchesLocalPlayer(fsm, toState, creature)) {
             TellOwnCatch(machine);
         }
 
         // A talk that the local player starts is this game's to play, and the scene host's game is told of it (see
         // CoopSave.OwnTalks)
-        _ownLeaps.TryGetValue(fsm, out var leap);
         if (leap is not { Through: false } && OwnCreatures.LocalTalk is { } talk && talk.Fsm == fsm) {
             StartsLocalTalk(machine, toState, talk.Event);
             return true;
         }
 
         if (leap == null) {
-            return StartsOwnLeap(machine, toState) || StartsOwnTalk(machine, toState);
+            return StartsOwnLeap(machine, toState) || StartsOwnTalk(machine, toState) || ToldInOwnLeap(fsm, creature);
         }
 
         if (leap.Through) {
@@ -217,6 +225,28 @@ internal partial class CoopSave {
             $"[Own creatures] '{leap.Place}' is through its {leap.What} in '{fsm.Name}', as it goes to " +
             $"'{toState.Name}'"
         );
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
+    /// takes a step that another one of the creature or a part of it told it while the creature leaps at this game's
+    /// player here, which is this game's to play as the leap is: the catch of this game's player and what it sets off,
+    /// like the knight's hold of the player for its blows and the bounds of its arena that it keeps them in after it,
+    /// which waited for a step of the scene host's that never came (review).
+    /// </summary>
+    private bool ToldInOwnLeap(Fsm fsm, GameObject creature) {
+        if (Fsm.EventData?.SentByFsm is not { } sender || sender == fsm || sender.GameObject == null ||
+            OwnCreatures.Owning(sender.GameObject) != creature) {
+            return false;
+        }
+
+        foreach (var pair in _ownLeaps) {
+            if (pair.Value is { Talk: false, Through: false } && pair.Key.GameObject == creature) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -277,7 +307,7 @@ internal partial class CoopSave {
 
         foreach (var pair in _ownLeaps.ToList()) {
             var leap = pair.Value;
-            if (!leap.Through || leap.Talk && !TalkGoesOn(leap)) {
+            if (!leap.Through || leap.Talk && !TalkGoesOn(pair.Key, leap)) {
                 continue;
             }
 

@@ -177,7 +177,8 @@ internal partial class CoopSave {
                 toState = self.GetState(hostsStep);
             }
 
-            if (toState.Name == hostsStep) {
+            var isTheStep = toState.Name == hostsStep;
+            if (isTheStep) {
                 OwnCreatures.SceneHostsStep = null;
                 if (_wayInStep != null) {
                     PutAtSceneHostsStep(self, _wayInStep);
@@ -187,11 +188,31 @@ internal partial class CoopSave {
             }
 
             _heldOwnSteps.Remove(self);
-            if (!StartsOwnLeap(machine, toState)) {
-                StartsOwnTalk(machine, toState);
+
+            // The step itself may be a leap at this game's player or a talk, which this game plays from there; a state
+            // on the way into it is neither, and does what it does as it is entered but for a line of a talk or a
+            // prompt, which would take this game's player into a talk that the way leaves at once (review: a member
+            // who came in after the talk went through it on the way, and played every step after it by itself)
+            if (isTheStep) {
+                if (!StartsOwnLeap(machine, toState)) {
+                    StartsOwnTalk(machine, toState);
+                }
+
+                EnterOwnState(orig, self, toState);
+                return;
             }
 
-            EnterOwnState(orig, self, toState);
+            var muted = Entity.Entity.RunsTalk(toState) ? MuteTalk(toState) : null;
+            try {
+                EnterOwnState(orig, self, toState);
+            } finally {
+                if (muted != null) {
+                    foreach (var action in muted) {
+                        action.Enabled = true;
+                    }
+                }
+            }
+
             return;
         }
 

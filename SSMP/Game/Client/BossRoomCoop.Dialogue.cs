@@ -277,9 +277,13 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        // Entities that aren't bosses, like characters to talk to, keep their dialogue to the player who talks to them
+        // Entities that aren't bosses, like characters to talk to, keep their dialogue to the player who talks to them.
+        // A creature that every game runs by itself talks in each game, to each player as they read it (see
+        // CoopSave.OwnTalks): shared too, its lines came again in another game over the talk that played there
+        // (review)
         var info = GetInfo(fsm);
-        if (!info.IsEntity || (!info.ClosesGates && !info.IsInBossScene)) {
+        if (!info.IsEntity || (!info.ClosesGates && !info.IsInBossScene) ||
+            fsm.GameObject != null && Entity.OwnCreatures.Owning(fsm.GameObject) != null) {
             return;
         }
 

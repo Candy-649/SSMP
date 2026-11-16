@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using HutongGames.PlayMaker;
+using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
@@ -24,7 +26,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// wait, as for a leap at this game's player (see CoopSave.OwnCatches). It is over as it leaves the state that ended
 /// its dialogue with no more of the talk to come, as a talk with a copy is (see Entity.EndsTalk): it waits there for
 /// the scene host's to come as far, or goes on from where that one is already (see <see cref="WaitsAfterOwnTalk"/>).
-/// The copy of the knight that the room had before played the talk of the player who woke it in their game, and the
+/// Each game shows its own lines alone: the boss room shares none of them (BossRoomCoop.OnStartDialogue), and a way
+/// into a step of the scene host's through a talk runs none (see OnOwnCreatureStep). The copy of the knight that the room had before played the talk of the player who woke it in their game, and the
 /// talk that the scene host's game started a moment later took the box from it (USER 11-16 "为啥我这里没有对话框").
 /// </summary>
 internal partial class CoopSave {
@@ -81,14 +84,14 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Takes a step of the scene host's creature, in a game that follows it, while its creature here waits at the end
-    /// of a talk that it played by itself: one into a state of the talk, which the creature here went through already,
+    /// of a talk that it played by itself: one into or before the talk, which the creature here went through already,
     /// is let go of, and the first beyond the talk ends the wait and is taken as any step. Whether it is let go of.
     /// </summary>
     private bool WaitsForSceneHostsTalk(ClientPlayerData player, Fsm fsm, OwnLeap talk, CoopSaveUpdate update) {
-        if (talk.Passed.Contains(update.StateName)) {
+        if (LiesBeforeTalkEnd(fsm, talk, update.StateName)) {
             Logger.Info(
                 $"[Own creatures] '{talk.Place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
-                "game, still in the talk that is over here"
+                "game, in or before the talk that is over here"
             );
             return true;
         }
@@ -105,8 +108,59 @@ internal partial class CoopSave {
     /// Whether a creature that every game runs by itself that is through a talk here goes on from the latest step of
     /// the scene host's that came meanwhile: one beyond the talk, as the scene host's player was through it first.
     /// </summary>
-    private static bool TalkGoesOn(OwnLeap talk) {
-        return talk.Latest is { } latest && !talk.Passed.Contains(latest.StateName);
+    private static bool TalkGoesOn(Fsm fsm, OwnLeap talk) {
+        return talk.Latest is { } latest && !LiesBeforeTalkEnd(fsm, talk, latest.StateName);
+    }
+
+    /// <summary>
+    /// Whether a state of a state machine lies in or before a talk that its creature played here by itself: it is a
+    /// state of the talk, or the ways out of the states lead from it into the talk still, like the bow of a creature
+    /// that a noise woke in the scene host's game, whose player has yet to talk to it there (review: a step into that
+    /// bow, taken for one beyond the talk, set the creature here back to it, and its player heard the talk again).
+    /// </summary>
+    private static bool LiesBeforeTalkEnd(Fsm fsm, OwnLeap talk, string stateName) {
+        if (talk.Passed.Contains(stateName)) {
+            return true;
+        }
+
+        var seen = new HashSet<string> { stateName };
+        var queue = new Queue<string>(seen);
+        while (queue.Count > 0) {
+            if (fsm.GetState(queue.Dequeue()) is not { } state) {
+                continue;
+            }
+
+            // A way out that leads nowhere, which the game's state machines have, leads to no state
+            foreach (var transition in state.Transitions) {
+                if (transition.ToState is not { } to || !seen.Add(to)) {
+                    continue;
+                }
+
+                if (talk.Passed.Contains(to)) {
+                    return true;
+                }
+
+                queue.Enqueue(to);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Switches off the lines of a talk and the prompts of a state, for a way through it into a step of the scene
+    /// host's (see OnOwnCreatureStep), returning them to be switched on again once it is entered.
+    /// </summary>
+    private static List<FsmStateAction> MuteTalk(FsmState state) {
+        var muted = new List<FsmStateAction>();
+        foreach (var action in state.Actions) {
+            if (action.Enabled && action is RunDialogueBase or YesNoAction) {
+                action.Enabled = false;
+                muted.Add(action);
+            }
+        }
+
+        return muted;
     }
 
     /// <summary>
