@@ -2846,6 +2846,23 @@
   {
     "base_object_name": "Song Knight",
     "type": "SecondSentinel",
+    "own_in_each_game": true,
+    "parent_name": "Boss Scene - To Additive Load",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Song Knight",
+    "fsm_names": [
+      "Control",
+      "Cross Slash Block",
+      "FSM",
+      "Save Hero",
+      "Stun Control"
+    ]
+  },
+  {
+    "base_object_name": "Song Knight",
+    "type": "SecondSentinel",
     "parent_name": null,
     "components": [
       "Rotation"

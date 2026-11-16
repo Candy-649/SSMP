@@ -148,7 +148,7 @@ internal partial class Entity {
     /// <summary>
     /// Puts the hook on how a talking character tells its FSM about a talk in place, once.
     /// </summary>
-    private static void HookTalks() {
+    internal static void HookTalks() {
         if (_talkHook != null) {
             return;
         }
@@ -173,22 +173,37 @@ internal partial class Entity {
     /// game runs runs that FSM here for the talk, rather than switching it on for good.
     /// </summary>
     private static bool OnNpcSendEvent(Func<PlayMakerNPC, string, bool> orig, PlayMakerNPC self, string eventName) {
-        PlayMakerFSM target;
-        Entity entity;
+        PlayMakerFSM? own = null;
+        PlayMakerFSM target = null!;
+        Entity entity = null!;
         try {
             var told = self.CustomEventTarget != null
                 ? self.CustomEventTarget
                 : NpcDialogueFsmField?.GetValue(self) as PlayMakerFSM;
-            if (told == null || told.enabled || FindByCopyPart(told.gameObject) is not { } found ||
-                !found._fsms.Client.Contains(told) || !found.IsRunBySceneHostAlone(told)) {
-                return orig(self, eventName);
-            }
 
-            target = told;
-            entity = found;
+            // A creature that every game runs by itself takes the talk as the game has it, and the step that the talk
+            // takes it on is the local player's (see CoopSave.OwnTalks)
+            if (told != null && OwnCreatures.Owning(told.gameObject) != null) {
+                own = told;
+            } else if (told == null || told.enabled || FindByCopyPart(told.gameObject) is not { } found ||
+                       !found._fsms.Client.Contains(told) || !found.IsRunBySceneHostAlone(told)) {
+                return orig(self, eventName);
+            } else {
+                target = told;
+                entity = found;
+            }
         } catch (Exception e) {
             Logger.Warn($"Could not check a talk with a copy: {e.Message}");
             return orig(self, eventName);
+        }
+
+        if (own != null) {
+            OwnCreatures.LocalTalk = (own.Fsm, eventName);
+            try {
+                return orig(self, eventName);
+            } finally {
+                OwnCreatures.LocalTalk = null;
+            }
         }
 
         // The game ends a talk by force when the player is interrupted (InteractManager.OnHeroInterrupted, the only
@@ -326,6 +341,21 @@ internal partial class Entity {
             return true;
         }
 
+        if (!EndsTalk(fsm, toState)) {
+            return false;
+        }
+
+        _talkEnd = toState;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether an FSM that plays a talk is through it as it goes to a state: it leaves the state that ended its
+    /// dialogue on this visit, and no more of the talk comes after (see <see cref="MoreTalkFollows"/>). The talk of a
+    /// copy (see <see cref="HoldsTalkAt"/>) and that of a creature that every game runs by itself (see
+    /// CoopSave.OwnTalks) end so.
+    /// </summary>
+    internal static bool EndsTalk(HutongGames.PlayMaker.Fsm fsm, FsmState toState) {
         if (fsm.ActiveState is not { } leaving) {
             return false;
         }
@@ -337,12 +367,7 @@ internal partial class Entity {
         // A talk with a pause in it goes on: a creature ends its call, wakes, bows and then speaks again, and all of it
         // is the talk of the player who started it. Cut at the pause, the rest was played in the scene host's game, to
         // its player, who had not talked at all, and the player who had never heard it.
-        if (!ended || MoreTalkFollows(fsm, toState)) {
-            return false;
-        }
-
-        _talkEnd = toState;
-        return true;
+        return ended && !MoreTalkFollows(fsm, toState);
     }
 
     /// <summary>
@@ -365,7 +390,7 @@ internal partial class Entity {
     private static bool MoreTalkFollows(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
         var state = from;
         for (var i = 0; i < TalkLookAhead && state != null; i++) {
-            if (Array.Exists(state.Actions, action => action.Enabled && action is RunDialogueBase or YesNoAction)) {
+            if (RunsTalk(state)) {
                 return true;
             }
 
@@ -375,6 +400,13 @@ internal partial class Entity {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether a state runs a line of a talk or a prompt.
+    /// </summary>
+    internal static bool RunsTalk(FsmState state) {
+        return Array.Exists(state.Actions, action => action.Enabled && action is RunDialogueBase or YesNoAction);
     }
 
     /// <summary>

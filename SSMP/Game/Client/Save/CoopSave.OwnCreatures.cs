@@ -40,7 +40,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// A step that goes by where the players are - whether one stands in a range, where the one it goes after is, how far,
 /// whether it charged past them - is the scene host's to take, and so is a step that another state machine told it,
 /// which decided by them too, but for those of a leap at the player of the game, which that game plays to its end by
-/// itself (see CoopSave.OwnCatches). In the other games the creature waits for it there: each of them has the players
+/// itself (see CoopSave.OwnCatches), and those of a talk, which each game plays to its end at its player's pace (see
+/// CoopSave.OwnTalks). In the other games the creature waits for it there: each of them has the players
 /// a moment late and a little elsewhere, and a boss chose other moves in each game. Whom it goes after comes with each
 /// step, and a member who comes in takes its health too. All else of a move each game plays itself, with the same
 /// dice: what it rolls goes by the rolls that came with the step, so nothing waits for a number (USER 11-15
@@ -186,7 +187,10 @@ internal partial class CoopSave {
             }
 
             _heldOwnSteps.Remove(self);
-            StartsOwnLeap(machine, toState);
+            if (!StartsOwnLeap(machine, toState)) {
+                StartsOwnTalk(machine, toState);
+            }
+
             EnterOwnState(orig, self, toState);
             return;
         }
@@ -194,10 +198,11 @@ internal partial class CoopSave {
         // A step that goes by where the players are, or that another state machine told it, is the scene host's: it
         // waits for that, which has mostly come already, as this game is a moment behind. The switch that the game
         // was to make is let go of, as the game tries it again at once until it is made. A leap at this game's player
-        // is this game's to play, to its end (see CoopSave.OwnCatches)
-        if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
-            (self.ActiveState is { } from && GoesByPlayers(from) || Fsm.EventData?.SentByFsm is { } sender &&
-                sender != self)) {
+        // is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which it waits
+        // for the scene host's to come as far (see CoopSave.OwnTalks)
+        if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) && (WaitsAfterOwnTalk(self) ||
+                self.ActiveState is { } from && GoesByPlayers(from) ||
+                Fsm.EventData?.SentByFsm is { } sender && sender != self)) {
             MachineSwitchToStateField?.SetValue(self, null);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
                 _heldOwnSteps[self] = self.ActiveStateName;
@@ -457,8 +462,14 @@ internal partial class CoopSave {
             return;
         }
 
-        // A step of the scene host's while this game plays a leap at its own player by itself (see
-        // CoopSave.OwnCatches)
+        // The player of that game started a talk with it, which that game plays by itself
+        if (update.PartCount == OwnTalkPart) {
+            TakeOwnTalk(player, creature, update);
+            return;
+        }
+
+        // A step of the scene host's while this game plays a leap at its own player or a talk by itself (see
+        // CoopSave.OwnCatches, CoopSave.OwnTalks)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
         if (KeepsForOwnLeap(player, fsm, update)) {
             return;

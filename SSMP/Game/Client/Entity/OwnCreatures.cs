@@ -71,6 +71,12 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// The state machine of a creature that every game runs by itself that a talk of the local player tells its event
+    /// now, with the event, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
+    /// </summary>
+    public static (HutongGames.PlayMaker.Fsm Fsm, string Event)? LocalTalk { get; set; }
+
+    /// <summary>
     /// Takes a creature of the room as one that every game runs by itself.
     /// </summary>
     /// <param name="creature">The creature.</param>
@@ -80,6 +86,9 @@ internal static class OwnCreatures {
             return;
         }
 
+        // A talk with it goes through the hook on how a talking character tells its FSM about a talk, which a room with
+        // no copy in it never put in place
+        Entity.HookTalks();
         var place = ScenePath.Get(creature.transform);
         Creatures[creature] = (creature.scene.name, place);
         Logger.Info($"[Own creatures] '{place}' ({type}) runs in each game as the room's own, with no copy");

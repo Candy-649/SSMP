@@ -183,7 +183,7 @@ internal partial class CoopSave {
     /// itself, or through the landing, until it comes to a state that goes by where the players are, whose way on is
     /// the scene host's. The steps of the scene host's that come meanwhile wait, and it goes on from the latest of
     /// them once it is through (see <see cref="UpdateOwnLeaps"/>). A catch of this game's player is told to the scene
-    /// host's game (see <see cref="TellOwnCatch"/>).
+    /// host's game (see <see cref="TellOwnCatch"/>). A talk is played so too, to its end (see CoopSave.OwnTalks).
     /// </summary>
     private bool PlaysOwnLeap(PlayMakerFSM machine, FsmState toState) {
         var fsm = machine.Fsm;
@@ -191,21 +191,30 @@ internal partial class CoopSave {
             TellOwnCatch(machine);
         }
 
-        if (!_ownLeaps.TryGetValue(fsm, out var leap)) {
-            return StartsOwnLeap(machine, toState);
+        // A talk that the local player starts is this game's to play, and the scene host's game is told of it (see
+        // CoopSave.OwnTalks)
+        _ownLeaps.TryGetValue(fsm, out var leap);
+        if (leap is not { Through: false } && OwnCreatures.LocalTalk is { } talk && talk.Fsm == fsm) {
+            StartsLocalTalk(machine, toState, talk.Event);
+            return true;
+        }
+
+        if (leap == null) {
+            return StartsOwnLeap(machine, toState) || StartsOwnTalk(machine, toState);
         }
 
         if (leap.Through) {
             return false;
         }
 
-        if (!GoesByPlayers(toState)) {
+        if (leap.Talk ? !Entity.Entity.EndsTalk(fsm, toState) : !GoesByPlayers(toState)) {
+            leap.Passed.Add(toState.Name);
             return true;
         }
 
         leap.Through = true;
         Logger.Info(
-            $"[Own creatures] '{leap.Place}' is through its leap at the local player in '{fsm.Name}', as it goes to " +
+            $"[Own creatures] '{leap.Place}' is through its {leap.What} in '{fsm.Name}', as it goes to " +
             $"'{toState.Name}'"
         );
         return false;
@@ -221,7 +230,7 @@ internal partial class CoopSave {
             return false;
         }
 
-        var leap = new OwnLeap(OwnCreatures.PlaceOf(machine.gameObject));
+        var leap = new OwnLeap(OwnCreatures.PlaceOf(machine.gameObject), false);
         _ownLeaps[machine.Fsm] = leap;
         Logger.Info(
             $"[Own creatures] '{leap.Place}' leaps at the local player in '{toState.Name}' of '{machine.FsmName}', " +
@@ -240,11 +249,16 @@ internal partial class CoopSave {
             return false;
         }
 
+        // A talk that is through here waits for the scene host's to come as far (see CoopSave.OwnTalks)
+        if (leap is { Talk: true, Through: true }) {
+            return WaitsForSceneHostsTalk(player, fsm, leap, update);
+        }
+
         leap.Latest = update;
         leap.Host = player;
         Logger.Info(
             $"[Own creatures] '{leap.Place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
-            "game, which waits until its leap at the local player is through here"
+            $"game, which waits until its {leap.What} is through here"
         );
         return true;
     }
@@ -263,22 +277,22 @@ internal partial class CoopSave {
 
         foreach (var pair in _ownLeaps.ToList()) {
             var leap = pair.Value;
-            if (!leap.Through) {
+            if (!leap.Through || leap.Talk && !TalkGoesOn(leap)) {
                 continue;
             }
 
             _ownLeaps.Remove(pair.Key);
             if (leap is not { Latest: { } latest, Host: { } host }) {
                 Logger.Info(
-                    $"[Own creatures] '{leap.Place}' is through its leap at the local player here, and no step of " +
-                    "the scene host's came meanwhile"
+                    $"[Own creatures] '{leap.Place}' is through its {leap.What} here, and no step of the scene " +
+                    "host's came meanwhile"
                 );
                 continue;
             }
 
             Logger.Info(
-                $"[Own creatures] '{leap.Place}' is through its leap at the local player here, and goes on from the " +
-                $"latest step of {host.Username}'s game, to '{latest.StateName}'"
+                $"[Own creatures] '{leap.Place}' is through its {leap.What} here, and goes on from the latest step " +
+                $"of {host.Username}'s game, to '{latest.StateName}'"
             );
             OnOwnCreature(host, latest);
         }
@@ -364,15 +378,31 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A leap at this game's player that a creature that every game runs by itself plays here by itself, in a game
-    /// that follows the scene host's (see <see cref="PlaysOwnLeap"/>).
+    /// A leap at this game's player, or a talk, that a creature that every game runs by itself plays here by itself,
+    /// in a game that follows the scene host's (see <see cref="PlaysOwnLeap"/>, CoopSave.OwnTalks).
     /// </summary>
     /// <param name="place">Where the creature is in the room (see OwnCreatures.PlaceOf).</param>
-    private sealed class OwnLeap(string place) {
+    /// <param name="talk">Whether it is a talk.</param>
+    private sealed class OwnLeap(string place, bool talk) {
         /// <summary>
         /// Where the creature is in the room.
         /// </summary>
         public readonly string Place = place;
+
+        /// <summary>
+        /// Whether it is a talk.
+        /// </summary>
+        public readonly bool Talk = talk;
+
+        /// <summary>
+        /// What it is, for the log.
+        /// </summary>
+        public string What => Talk ? "talk" : "leap at the local player";
+
+        /// <summary>
+        /// The states that the creature went to here by itself in it, but for the one it is through at.
+        /// </summary>
+        public readonly HashSet<string> Passed = [];
 
         /// <summary>
         /// Whether the creature here is through the leap.
