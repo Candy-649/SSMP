@@ -191,15 +191,19 @@ internal partial class GamePatcher {
         var reason = (Walker.StopReasons) reader.ReadByte();
         int facing = reader.ReadSByte();
         int turning = reader.ReadSByte();
+        string? how = null;
         switch (state) {
             case Walker.States.Walking when walker.state != state || walker.currentFacing != facing:
+                how = "sets off walking";
                 walker.currentFacing = facing;
                 walker.BeginWalking(facing);
                 break;
             case Walker.States.Stopped when walker.state != state || walker.stopReason != reason:
+                how = reason == Walker.StopReasons.Bored ? "stands a while" : "stops";
                 walker.BeginStopped(reason);
                 break;
             case Walker.States.Turning when walker.state != state:
+                how = "begins to turn";
                 walker.BeginTurning(turning);
                 break;
         }
@@ -210,6 +214,14 @@ internal partial class GamePatcher {
         walker.pauseTimeRemaining = reader.ReadSingle();
         walker.turnCooldownRemaining = reader.ReadSingle();
         walker.aggroEdgeTurnCooldownRemaining = reader.ReadSingle();
-        Save.SharedDice.SetWalks(creature, reader.ReadInt32());
+        var walks = reader.ReadInt32();
+        if (how != null || Save.SharedDice.WalksOf(creature) != walks) {
+            Logger.Info(
+                $"[Own creatures] '{Entity.OwnCreatures.PlaceOf(creature)}' {how ?? "walks on"} as its walk goes in " +
+                $"the scene host's game, from number {walks} of its walk"
+            );
+        }
+
+        Save.SharedDice.SetWalks(creature, walks);
     }
 }
