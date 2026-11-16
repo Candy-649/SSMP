@@ -39,9 +39,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 ///
 /// A step that goes by where the players are - whether one stands in a range, where the one it goes after is, how far,
 /// whether it charged past them - is the scene host's to take, and so is a step that another state machine told it,
-/// which decided by them too. In the other games the creature waits for it there: each of them has the players a
-/// moment late and a little elsewhere, and a boss chose other moves in each game. Whom it goes after comes with each
-/// step, and a member who comes in takes its health too. All else of a move each game plays itself, with the same
+/// which decided by them too, as a part of its own that caught the player of the game does (see CoopSave.OwnCatches).
+/// In the other games the creature waits for it there: each of them has the players a moment late and a little
+/// elsewhere, and a boss chose other moves in each game. Whom it goes after comes with each step, and a member who
+/// comes in takes its health too. All else of a move each game plays itself, with the same
 /// dice: what it rolls goes by the rolls that came with the step, so nothing waits for a number (USER 11-15
 /// "总之以房主那边传过来的招式为单位。尽量需要的随机数就一起过来，应该不会出现中途等房主一个随机数的情况吧").
 /// </summary>
@@ -145,9 +146,21 @@ internal partial class CoopSave {
     /// </summary>
     private void OnOwnCreatureStep(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
         // A switch to no state, which the game makes nothing of, is passed on as it is
-        if (OwnCreatures.Count == 0 || toState == null || self.FsmComponent is not { } machine || machine == null ||
-            !OwnCreatures.Has(machine.gameObject)) {
+        if (OwnCreatures.Count == 0 || toState == null || self.FsmComponent is not { } machine || machine == null) {
             orig(self, toState!);
+            return;
+        }
+
+        // A part of such a creature catches the local player only while the creature goes after them (see
+        // CoopSave.OwnCatches)
+        if (!OwnCreatures.Has(machine.gameObject)) {
+            if (TellsACatch(toState) && OwnCreatures.Owning(machine.gameObject) is { } owner &&
+                !GoesAfterLocalPlayer(owner)) {
+                RefuseCatch(self, owner, toState);
+                return;
+            }
+
+            orig(self, toState);
             return;
         }
 
@@ -173,7 +186,7 @@ internal partial class CoopSave {
             }
 
             _heldOwnSteps.Remove(self);
-            orig(self, toState);
+            EnterOwnState(orig, self, toState);
             return;
         }
 
@@ -190,6 +203,9 @@ internal partial class CoopSave {
                     $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' would go from '{self.ActiveStateName}' to " +
                     $"'{toState.Name}' of '{self.Name}' here, and waits for the scene host's step"
                 );
+                if (CatchesLocalPlayer(self, toState, creature)) {
+                    TellOwnCatch(machine);
+                }
             }
 
             return;
@@ -210,6 +226,13 @@ internal partial class CoopSave {
             steps.RemoveAt(0);
         }
 
+        // Where this game decides whom it goes after, it goes after the player it caught through the catch (see
+        // GamePatcher.GoAfterGrabbed), which the step tells every game: the catch is that player's
+        if (!OwnCreatures.FollowsSceneHost(creature) && CatchesLocalPlayer(self, toState, creature) &&
+            HeroController.SilentInstance is { } hero) {
+            GamePatcher.GoAfterGrabbed(creature, hero.gameObject);
+        }
+
         if (IsSceneHost?.Invoke() == true) {
             Logger.Info(
                 $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' goes from '{self.ActiveStateName}' to " +
@@ -218,7 +241,7 @@ internal partial class CoopSave {
             SendToRoomMembers(OwnCreatureUpdate(machine, step));
         }
 
-        orig(self, toState);
+        EnterOwnState(orig, self, toState);
     }
 
     /// <summary>
@@ -394,7 +417,7 @@ internal partial class CoopSave {
         if (!creature.activeInHierarchy || hasHealth && health.isDead) {
             Logger.Info(
                 $"[Own creatures] {player.Username}'s game told of '{place}', which is dead or not out here" +
-                (update.PartCount > 0 ? ", and dead there too" : $", and went to '{update.StateName}' there")
+                (update.PartCount is 1 or 2 ? ", and dead there too" : $", and went to '{update.StateName}' there")
             );
             return;
         }
@@ -426,6 +449,12 @@ internal partial class CoopSave {
                 _dyingAsTold = false;
             }
 
+            return;
+        }
+
+        // A part of its own caught the player of that game, which waits for this game to say whether it did
+        if (update.PartCount == OwnCatchPart) {
+            TakeOwnCatch(player, creature, update);
             return;
         }
 

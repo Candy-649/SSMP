@@ -114,7 +114,7 @@ internal static partial class SharedDice {
         "SpawnFromPool", "SpawnFromPoolV2", "CreatePoolObjects", "FlingObject", "FlingObjects", "FlingObjectsV2",
         "FlingObjectsFromGlobalPool", "FlingObjectsFromGlobalPoolV2", "FlingObjectsFromGlobalPoolV3",
         "FlingObjectsFromGlobalPoolVel", "AudioPlayerOneShot", "AudioPlayerOneShotSingle", "AudioPlayRandom",
-        "AudioPlayRandomSingle", "PlayRandomSound", "PlayRandomAnimation", "Tk2dSpriteSetIdRandom"
+        "AudioPlayRandomSingle", "PlayRandomSound", "PlayRandomAnimation", "Tk2dSpriteSetIdRandom", "WalkLeftRight"
     ];
 
     /// <summary>

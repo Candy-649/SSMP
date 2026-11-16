@@ -315,6 +315,7 @@
   {
     "base_object_name": "Understore Mite Giant",
     "type": "GiantDrapemite",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3042,6 +3043,7 @@
   {
     "base_object_name": "Mite Heavy",
     "type": "Drapemite",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
