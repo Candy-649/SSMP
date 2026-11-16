@@ -843,7 +843,7 @@ internal enum AnimationClip {
     WitchLash,
 
     /// <summary>
-    /// A heal, or the flash of a lash, of the tendrils of a bind of the Witch crest (see Effects.WitchHeal)
+    /// A heal of the tendrils of a bind of the Witch crest (see Effects.WitchHeal)
     /// </summary>
     WitchHeal
 }

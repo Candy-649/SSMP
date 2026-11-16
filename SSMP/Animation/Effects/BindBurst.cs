@@ -256,9 +256,13 @@ internal class BindBurst : Bind {
     /// <summary>
     /// Plays the end of a bind of any crest but the Witch crest's, as the game's "Heal" and "Bind Burst" play it on the
     /// hero: the player flashes white and lets out the sparks of a heal, and unless the bind shook their maggots off
-    /// instead of healing them ("Skip Heal"), a white flash and the burst of the heal come out on them. The flashes
-    /// never showed on the character (USER 11-13, with the heals of the Witch crest's tendrils, see
-    /// <see cref="WitchHeal"/>).
+    /// instead of healing them ("Skip Heal"), the burst of the heal comes out on them. The flash of the character never
+    /// showed (USER 11-13, with the heals of the Witch crest's tendrils, see <see cref="WitchHeal"/>).
+    ///
+    /// The white glow that the game lets out with it ("White Flash R") is the healing player's own, with the shake of
+    /// their screen: a soft light larger than the whole view, laid over it around them. Let out on the character, it
+    /// washed over the screen of the player who watched (USER 11-16 "我敷丝的时候我朋友那边会有一个很闪的白光（",
+    /// "不是的，是很大一片闪光，没有只在角色身上").
     /// </summary>
     private void PlayNormalEnd(GameObject playerObject, GameObject bindEffects, Flags flags) {
         playerObject.GetComponent<SpriteFlash>().flashFocusHeal();
@@ -270,12 +274,6 @@ internal class BindBurst : Bind {
         }
 
         if (!flags.Maggoted) {
-            SpawnHealFlash(
-                GetOrFindBindFsm().GetFirstAction<SpawnObjectFromGlobalPool>("Heal").gameObject.Value,
-                playerObject,
-                playerObject.transform.position
-            );
-
             // Play silk animation
             var healAnim = CreateEffectIfNotExists(bindEffects, HealAnimObjectName);
             if (healAnim != null) {

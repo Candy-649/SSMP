@@ -29,7 +29,10 @@ internal static class ToolCopyRules {
     /// <summary>
     /// The things that the hero's own handling of their tools spawns, rather than throws, that are copied, by the name
     /// of their prefab: what those tools shoot, set down or leave behind, and the effects they make around the hero;
-    /// and what the hero spawns with a tool on as they are hurt, the crystal that forms where they were hurt.
+    /// and what the hero spawns with a tool on as they are hurt, the crystal that forms where they were hurt. Not the
+    /// white glow of a big moment ("White Flash R"), which a tool lets out as it fires: it is a light larger than the
+    /// whole view, for the screen of the player who used it, and washed over the screen of whoever watched (USER 11-16
+    /// "不是的，是很大一片闪光，没有只在角色身上", of the one of a bind).
     /// </summary>
     public static readonly HashSet<string> HeroToolSpawns = [
         "WebShot Bullet",
@@ -37,7 +40,6 @@ internal static class ToolCopyRules {
         "WebShot Casing F",
         "WebShot Casing A",
         "WebShot Casing W",
-        "White Flash R",
         "Geo Small Projectile",
         "Tool Lightning Rod",
         "Silk Snare",

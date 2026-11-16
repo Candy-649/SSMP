@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
@@ -12,13 +11,15 @@ namespace SSMP.Animation.Effects;
 
 /// <summary>
 /// What the tendrils of a bind of the Witch crest show as they wound creatures (WitchBindEffects, on the hero's 'Bind
-/// Effects/Witch Bind'): each heal flashes the hero white and lets out the sparks of a heal ("Witch Pt Heal"), and the
-/// first wound of each lash in a bind lets out a white flash on the tendrils. The character of another player showed
-/// none of it (USER 11-13 "2吧", asked whether the copy of the tendrils works the heals out by what it touches here, or
-/// the player whose bind it is says each one). The player whose bind it is says each heal and each such flash as their
-/// game makes it, and the character here shows it as the game shows it on the hero. The heal itself, and the stop and
-/// the shake of the screen that come with the flash, are their game's alone (USER 11-13 "这种绑定给某个大黄蜂的动作和
-/// 函数，能不能就本地跑且指向那个大黄蜂").
+/// Effects/Witch Bind'): each heal flashes the hero white and lets out the sparks of a heal ("Witch Pt Heal"). The
+/// character of another player showed none of it (USER 11-13 "2吧", asked whether the copy of the tendrils works the
+/// heals out by what it touches here, or the player whose bind it is says each one). The player whose bind it is says
+/// each heal as their game makes it, and the character here shows it as the game shows it on the hero. The heal itself
+/// is their game's alone (USER 11-13 "这种绑定给某个大黄蜂的动作和函数，能不能就本地跑且指向那个大黄蜂").
+///
+/// So is the white glow that the first wound of each lash lets out, with the stop and the shake of the screen that
+/// come with it: a light larger than the whole view, for the screen of that player, which washed over the screen of
+/// whoever watched as the glow of the end of a bind did (USER 11-16 "不是的，是很大一片闪光，没有只在角色身上").
 /// </summary>
 internal class WitchHeal : Bind {
     /// <summary>
@@ -37,29 +38,18 @@ internal class WitchHeal : Bind {
     private const string HealSparksName = "Witch Pt Heal";
 
     /// <summary>
-    /// How far in front of the tendrils the game lets out the flash of a lash.
-    /// </summary>
-    private const float FlashInFront = -0.21f;
-
-    /// <summary>
     /// The sparks of a heal of WitchBindEffects, with how many it lets out at a time.
     /// </summary>
     private static readonly FieldInfo? HealEffectsField =
         typeof(WitchBindEffects).GetField("healEffects", InstanceFlags);
 
     /// <summary>
-    /// The flash that WitchBindEffects lets out at the first wound of each lash.
-    /// </summary>
-    private static readonly FieldInfo? FlashField =
-        typeof(WitchBindEffects).GetField("healFlashEffectPrefab", InstanceFlags);
-
-    /// <summary>
-    /// Sends the effect info of a heal or a flash of the local hero's tendrils to the other players.
+    /// Sends the effect info of a heal of the local hero's tendrils to the other players.
     /// </summary>
     private static Action<byte[]>? _send;
 
     /// <summary>
-    /// The hooks that see the local hero's tendrils heal them and flash, which stay for as long as the game runs.
+    /// The hooks that see the local hero's tendrils heal them, which stay for as long as the game runs.
     /// </summary>
     private static readonly List<ILHook> Hooks = [];
 
@@ -75,18 +65,12 @@ internal class WitchHeal : Bind {
         /// <summary>
         /// A wound that healed the player.
         /// </summary>
-        Heal,
-
-        /// <summary>
-        /// The first wound of a lash in the bind, which lets out the flash.
-        /// </summary>
-        LashFlash
+        Heal
     }
 
     /// <summary>
-    /// Starts telling the other players of the heals and the flashes of the local hero's tendrils. Only the local
-    /// hero's tendrils have WitchBindEffects: the copies of the tendrils of other players have it taken off (see
-    /// <see cref="BindBurst"/>).
+    /// Starts telling the other players of the heals of the local hero's tendrils. Only the local hero's tendrils have
+    /// WitchBindEffects: the copies of the tendrils of other players have it taken off (see <see cref="BindBurst"/>).
     /// </summary>
     /// <param name="send">Sends the effect info to the other players.</param>
     public static void Watch(Action<byte[]> send) {
@@ -97,15 +81,6 @@ internal class WitchHeal : Bind {
 
         _hooked = true;
         AddHook(typeof(WitchBindEffects).GetMethod("OnDamagedEnemy", InstanceFlags), ILHeal);
-
-        // The first wound of each lash is answered by a handler that Awake gives each damager of the tendrils, which
-        // the compiler makes a method of a class of its own
-        AddHook(
-            typeof(WitchBindEffects).GetNestedTypes(BindingFlags.NonPublic)
-                .SelectMany(type => type.GetMethods(InstanceFlags))
-                .FirstOrDefault(method => method.Name.StartsWith("<Awake>", StringComparison.Ordinal)),
-            ILLash
-        );
     }
 
     /// <summary>
@@ -137,19 +112,6 @@ internal class WitchHeal : Bind {
     }
 
     /// <summary>
-    /// Has the flash of a lash say itself, right after the game lets it out.
-    /// </summary>
-    private static void ILLash(ILContext il) {
-        var c = new ILCursor(il);
-        c.GotoNext(
-            MoveType.After,
-            i => i.MatchCall(typeof(ObjectPoolExtensions), nameof(ObjectPoolExtensions.Spawn)),
-            i => i.MatchPop()
-        );
-        c.EmitDelegate<Action>(OnLashFlash);
-    }
-
-    /// <summary>
     /// The local hero's tendrils healed them.
     /// </summary>
     private static void OnHeal() {
@@ -157,41 +119,23 @@ internal class WitchHeal : Bind {
         _send!([(byte) Kind.Heal]);
     }
 
-    /// <summary>
-    /// A lash of the local hero's tendrils wounded for the first time in the bind, and flashed.
-    /// </summary>
-    private static void OnLashFlash() {
-        Logger.Info("[Witch] A lash of the local hero's tendrils wounds for the first time in this bind, and flashes");
-        _send!([(byte) Kind.LashFlash]);
-    }
-
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
-        if (effectInfo is not { Length: 1 } || HeroController.SilentInstance is not { } hero ||
+        if (effectInfo is not [(byte) Kind.Heal] || HeroController.SilentInstance is not { } hero ||
             !CreateObjects(playerObject, out var bindEffects)) {
             return;
         }
 
-        // The game's own tendrils, on the local hero, which have what the game lets out, and where
+        // The game's own tendrils, on the local hero, which have what the game lets out
         var tendrils = hero.GetComponentInChildren<WitchBindEffects>(true);
         var at = playerObject.transform.position;
-        if ((Kind) effectInfo[0] == Kind.Heal) {
-            playerObject.GetComponent<SpriteFlash>().flashFocusHeal();
-            var heal = (WitchBindEffects.HealEffects) HealEffectsField!.GetValue(tendrils);
-            var sparks = CreateEffectIfNotExists(bindEffects, HealSparksName);
-            if (sparks != null) {
-                sparks.GetComponent<ParticleSystem>().Emit(heal.Emit.GetRandomValue(true));
-            }
-
-            Logger.Info($"[Witch] The tendrils of the character at ({at.x:0.0}, {at.y:0.0}) heal its player");
-            return;
+        playerObject.GetComponent<SpriteFlash>().flashFocusHeal();
+        var heal = (WitchBindEffects.HealEffects) HealEffectsField!.GetValue(tendrils);
+        var sparks = CreateEffectIfNotExists(bindEffects, HealSparksName);
+        if (sparks != null) {
+            sparks.GetComponent<ParticleSystem>().Emit(heal.Emit.GetRandomValue(true));
         }
 
-        SpawnHealFlash(
-            (GameObject) FlashField!.GetValue(tendrils),
-            playerObject,
-            bindEffects.transform.TransformPoint(tendrils.transform.localPosition) + new Vector3(0f, 0f, FlashInFront)
-        );
-        Logger.Info($"[Witch] A lash of the tendrils of the character at ({at.x:0.0}, {at.y:0.0}) flashes");
+        Logger.Info($"[Witch] The tendrils of the character at ({at.x:0.0}, {at.y:0.0}) heal its player");
     }
 }
