@@ -23,20 +23,19 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// <see cref="RefuseCatch"/>).
 ///
 /// Whether it caught them only the game of that player can tell: in another game they are a figure that no part of a
-/// creature feels. A leap is one whole move, which that game plays to its end by itself, the combo of blows if it
-/// caught them or the landing if not, and it tells the scene host's game that it caught them (USER 11-16 "扑人不管扑没
-/// 扑到都是一个完整的动作", "客机应该自己完成连斩，或者扑空", "实际上当然是客机自己回复扑到了"; see
-/// <see cref="TakesOwnCatchStep"/>, <see cref="TellOwnCatch"/>). Before, the catch waited there for a step of the
-/// scene host's, as a step that another state machine told the creature does, and the scene host's game said whether
-/// it caught them by where its own creature was as the word came, a round trip late: the player was held for the blows
-/// of a creature that landed and walked off. The scene host's game plays the catch too while its creature is still in
-/// the leap, and not once it landed (USER 11-16 "如果延迟大，房主那边已经没扑到了，那就不演扑到了"; see
-/// <see cref="TakeOwnCatch"/>), and every other game takes it from there as a step of the scene host's. The game of
-/// the player caught keeps to the scene host's steps again once its catch is through (USER 11-16 "至于客机什么时候做
-/// 下一招的校准，扑完再说"; see <see cref="SkipsForOwnCatch"/>). In a game whose player the creature does not go after,
-/// what it does to the player it caught is kept off that game's player (see <see cref="KeepOut"/>): the large mite
-/// pulls the player it caught up to its blows, and played as a step of the scene host's, it would pull the player of
-/// every game there.
+/// creature feels. A leap is one whole move, which that game plays to its end by itself, the combo of blows and the
+/// backing off after it if it caught them, the landing if not, and then goes on from the latest step of the scene
+/// host's (USER 11-16 "扑人不管扑没扑到都是一个完整的动作", "客机应该自己完成连斩，或者扑空", "求你了，让螃蟹自己扑好吗",
+/// "扑完之后跟最新的动作"; see <see cref="PlaysOwnLeap"/>, <see cref="UpdateOwnLeaps"/>). It tells the scene host's game
+/// that it caught them (USER 11-16 "实际上当然是客机自己回复扑到了"; see <see cref="TellOwnCatch"/>), which plays the
+/// catch too while its creature is still in that leap, and not once it landed (USER 11-16 "如果延迟大，房主那边已经没扑
+/// 到了，那就不演扑到了"; see <see cref="TakeOwnCatch"/>): every other game takes it from there as a step of the scene
+/// host's. Before, the catch waited there for a step of the scene host's, as a step that another state machine told
+/// the creature does, and the scene host's game said whether it caught them by where its own creature was as the word
+/// came, a round trip late: the player was held for the blows of a creature that landed and walked off. In a game
+/// whose player the creature does not go after, what it does to the player it caught is kept off that game's player
+/// (see <see cref="KeepOut"/>): the large mite pulls the player it caught up to its blows, and played as a step of the
+/// scene host's, it would pull the player of every game there.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -52,11 +51,11 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, (HashSet<FsmState> States, List<FsmStateAction> Muted)> _keptOut = new();
 
     /// <summary>
-    /// The state machines of creatures that every game runs by itself that caught this game's player, in a game that
-    /// follows the scene host's, until it is known what the scene host's game made of the catch (see
-    /// <see cref="SkipsForOwnCatch"/>).
+    /// The state machines of creatures that every game runs by itself that leap at this game's player, in a game that
+    /// follows the scene host's, which plays the leap here by itself until it is through (see
+    /// <see cref="PlaysOwnLeap"/>).
     /// </summary>
-    private readonly Dictionary<Fsm, OwnCatchHere> _ownCatchesHere = new();
+    private readonly Dictionary<Fsm, OwnLeap> _ownLeaps = new();
 
     /// <summary>
     /// Whether a state tells a creature that its part caught the player, by one of the events of a catch (see
@@ -111,6 +110,13 @@ internal partial class CoopSave {
         return fsm.GlobalTransitions.Concat(fsm.States.SelectMany(each => each.Transitions)).Any(
             transition => transition.ToState == state.Name && Entity.Entity.CatchEvents.Contains(transition.EventName)
         );
+    }
+
+    /// <summary>
+    /// Whether a state is one of a leap that catches: one that a catch can come from (see Entity.CatchEvents).
+    /// </summary>
+    private static bool IsLeapState(FsmState state) {
+        return state.Transitions.Any(transition => Entity.Entity.CatchEvents.Contains(transition.EventName));
     }
 
     /// <summary>
@@ -172,40 +178,110 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
-    /// takes a step as a part of a catch of this game's player: the catch, which it starts here and tells the scene
-    /// host's game of, or a step to one of the states that only the catch leads to, which it plays here to their end.
-    /// After them it goes on by itself as far as it does in such a game, and its move is through once it comes to a
-    /// state that goes by where the players are, whose way on is the scene host's: it keeps to the scene host's steps
-    /// again from there (see <see cref="SkipsForOwnCatch"/>). The large mite backs off after its blows (review: cut off
-    /// at the first state out of the catch, it was set straight to where the scene host's walked as it began to).
+    /// takes a step by itself as a part of a leap at this game's player, which this game plays to its end: from the
+    /// first state that a catch can come from, through the catch, the combo and what the creature does after it by
+    /// itself, or through the landing, until it comes to a state that goes by where the players are, whose way on is
+    /// the scene host's. The steps of the scene host's that come meanwhile wait, and it goes on from the latest of
+    /// them once it is through (see <see cref="UpdateOwnLeaps"/>). A catch of this game's player is told to the scene
+    /// host's game (see <see cref="TellOwnCatch"/>).
     /// </summary>
-    private bool TakesOwnCatchStep(PlayMakerFSM machine, FsmState toState) {
+    private bool PlaysOwnLeap(PlayMakerFSM machine, FsmState toState) {
         var fsm = machine.Fsm;
-        if (_ownCatchesHere.TryGetValue(fsm, out var catchHere)) {
-            if (catchHere.States.Contains(toState)) {
-                return true;
-            }
+        if (CatchesLocalPlayer(fsm, toState, machine.gameObject)) {
+            TellOwnCatch(machine);
+        }
 
-            if (!catchHere.Through && GoesByPlayers(toState)) {
-                catchHere.Through = true;
-                Logger.Info(
-                    $"[Own creatures] '{OwnCreatures.PlaceOf(machine.gameObject)}' is through its catch of the " +
-                    $"local player in '{fsm.Name}' and the move after it, as it goes to '{toState.Name}'"
-                );
-            }
+        if (!_ownLeaps.TryGetValue(fsm, out var leap)) {
+            return StartsOwnLeap(machine, toState);
+        }
 
+        if (leap.Through) {
             return false;
         }
 
-        if (!CatchesLocalPlayer(fsm, toState, machine.gameObject)) {
-            return false;
+        if (!GoesByPlayers(toState)) {
+            return true;
         }
 
-        _ownCatchesHere[fsm] = new OwnCatchHere(
-            toState.Name, Entity.Action.EntityFsmActions.StatesOnlyThrough(fsm, toState)
+        leap.Through = true;
+        Logger.Info(
+            $"[Own creatures] '{leap.Place}' is through its leap at the local player in '{fsm.Name}', as it goes to " +
+            $"'{toState.Name}'"
         );
-        TellOwnCatch(machine);
+        return false;
+    }
+
+    /// <summary>
+    /// Has a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
+    /// play a leap at this game's player here by itself, as it goes to the first state of it, by itself or as a step
+    /// of the scene host's (see <see cref="PlaysOwnLeap"/>). Whether it does.
+    /// </summary>
+    private bool StartsOwnLeap(PlayMakerFSM machine, FsmState toState) {
+        if (!IsLeapState(toState) || !GoesAfterLocalPlayer(machine.gameObject) || _ownLeaps.ContainsKey(machine.Fsm)) {
+            return false;
+        }
+
+        var leap = new OwnLeap(OwnCreatures.PlaceOf(machine.gameObject));
+        _ownLeaps[machine.Fsm] = leap;
+        Logger.Info(
+            $"[Own creatures] '{leap.Place}' leaps at the local player in '{toState.Name}' of '{machine.FsmName}', " +
+            "which it plays here by itself to its end"
+        );
         return true;
+    }
+
+    /// <summary>
+    /// Keeps a step of the scene host's creature, in a game that follows it, while its creature here plays a leap at
+    /// this game's player by itself (see <see cref="PlaysOwnLeap"/>), to go on from the latest once it is through.
+    /// Whether it does.
+    /// </summary>
+    private bool KeepsForOwnLeap(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
+        if (!_ownLeaps.TryGetValue(fsm, out var leap)) {
+            return false;
+        }
+
+        leap.Latest = update;
+        leap.Host = player;
+        Logger.Info(
+            $"[Own creatures] '{leap.Place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+            "game, which waits until its leap at the local player is through here"
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself go on from the latest step of the scene host's that came while it
+    /// played a leap at this game's player by itself, a frame after it is through here, outside of the step of its
+    /// state machine (see <see cref="PlaysOwnLeap"/>). That step is taken as any step: one that this game took already,
+    /// at the same rolls, like the scene host's own landing, moves it only by as much as it stood off (USER 11-16 "扑完
+    /// 之后跟最新的动作"). The rest of the steps of the scene host's come after that one.
+    /// </summary>
+    private void UpdateOwnLeaps() {
+        if (_ownLeaps.Count == 0) {
+            return;
+        }
+
+        foreach (var pair in _ownLeaps.ToList()) {
+            var leap = pair.Value;
+            if (!leap.Through) {
+                continue;
+            }
+
+            _ownLeaps.Remove(pair.Key);
+            if (leap is not { Latest: { } latest, Host: { } host }) {
+                Logger.Info(
+                    $"[Own creatures] '{leap.Place}' is through its leap at the local player here, and no step of " +
+                    "the scene host's came meanwhile"
+                );
+                continue;
+            }
+
+            Logger.Info(
+                $"[Own creatures] '{leap.Place}' is through its leap at the local player here, and goes on from the " +
+                $"latest step of {host.Username}'s game, to '{latest.StateName}'"
+            );
+            OnOwnCreature(host, latest);
+        }
     }
 
     /// <summary>
@@ -288,107 +364,26 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a step of the scene host's creature is left, in a game that follows it, while this game's creature
-    /// plays a catch of this game's player by itself, or after it, until it is known what the scene host's game made of
-    /// the catch. A step into the catch is the scene host's taking it, and so are the ones after it, which this game
-    /// took already: they are taken as any step. A step into a state that the catch could still come from is of the
-    /// leap that the creature here caught from, which it is past. Any other step tells that the scene host's creature
-    /// was through its leap as the word came, and caught nobody there: the creature here goes on from the last such
-    /// step once it is through its catch and the move after it (see <see cref="UpdateOwnCatches"/>).
+    /// A leap at this game's player that a creature that every game runs by itself plays here by itself, in a game
+    /// that follows the scene host's (see <see cref="PlaysOwnLeap"/>).
     /// </summary>
-    private bool SkipsForOwnCatch(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
-        if (!_ownCatchesHere.TryGetValue(fsm, out var catchHere)) {
-            return false;
-        }
-
-        var place = update.ObjectPath;
-        var state = fsm.GetState(update.StateName);
-        if (catchHere.States.Contains(state)) {
-            _ownCatchesHere.Remove(fsm);
-            Logger.Info(
-                $"[Own creatures] '{place}' went to '{state.Name}' of '{fsm.Name}' in {player.Username}'s game, " +
-                "which took the catch of the local player too, and keeps to the scene host's steps from there"
-            );
-            return false;
-        }
-
-        if (CatchWay(state, catchHere.Into) != null) {
-            Logger.Info(
-                $"[Own creatures] '{place}' went to '{state.Name}' of '{fsm.Name}' in {player.Username}'s game, in " +
-                "the leap that caught the local player here, which it is past"
-            );
-            return true;
-        }
-
-        if (catchHere.Through) {
-            _ownCatchesHere.Remove(fsm);
-            Logger.Info(
-                $"[Own creatures] '{place}' went to '{state.Name}' of '{fsm.Name}' in {player.Username}'s game, " +
-                "through its leap there without a catch, and goes on from there, as it is through its catch here"
-            );
-            return false;
-        }
-
-        catchHere.Missed = update;
-        catchHere.Host = player;
-        Logger.Info(
-            $"[Own creatures] '{place}' went to '{state.Name}' of '{fsm.Name}' in {player.Username}'s game, through " +
-            "its leap there without a catch, and goes on from there once it is through its catch here"
-        );
-        return true;
-    }
-
-    /// <summary>
-    /// Has a creature that every game runs by itself, through a catch of this game's player that the scene host's did
-    /// not take, go on from the last step of the scene host's (see <see cref="SkipsForOwnCatch"/>): a frame after its
-    /// move was through here, outside of the step of its state machine.
-    /// </summary>
-    private void UpdateOwnCatches() {
-        if (_ownCatchesHere.Count == 0) {
-            return;
-        }
-
-        foreach (var pair in _ownCatchesHere.ToList()) {
-            if (pair.Value is not { Through: true, Missed: { } missed, Host: { } host }) {
-                continue;
-            }
-
-            _ownCatchesHere.Remove(pair.Key);
-            Logger.Info(
-                $"[Own creatures] '{missed.ObjectPath}' is through its catch of the local player here, and goes on " +
-                $"from the step to '{missed.StateName}' of {host.Username}'s game, where it caught nobody"
-            );
-            OnOwnCreature(host, missed);
-        }
-    }
-
-    /// <summary>
-    /// A catch of this game's player that a creature that every game runs by itself plays here by itself, in a game
-    /// that follows the scene host's (see <see cref="TakesOwnCatchStep"/>), and what the scene host's game made of it.
-    /// </summary>
-    /// <param name="into">The state that the catch went to.</param>
-    /// <param name="states">The states that only the catch leads to, that one among them.</param>
-    private sealed class OwnCatchHere(string into, HashSet<FsmState> states) {
+    /// <param name="place">Where the creature is in the room (see OwnCreatures.PlaceOf).</param>
+    private sealed class OwnLeap(string place) {
         /// <summary>
-        /// The state that the catch went to.
+        /// Where the creature is in the room.
         /// </summary>
-        public readonly string Into = into;
+        public readonly string Place = place;
 
         /// <summary>
-        /// The states that only the catch leads to, which the creature plays here by itself.
-        /// </summary>
-        public readonly HashSet<FsmState> States = states;
-
-        /// <summary>
-        /// Whether the creature here is through the catch and the move after it.
+        /// Whether the creature here is through the leap.
         /// </summary>
         public bool Through;
 
         /// <summary>
-        /// The last step of the scene host's creature after its leap, in which it caught nobody, which the creature
-        /// here goes on from once it is through.
+        /// The latest step of the scene host's creature that came meanwhile, which the creature here goes on from once
+        /// it is through.
         /// </summary>
-        public CoopSaveUpdate? Missed;
+        public CoopSaveUpdate? Latest;
 
         /// <summary>
         /// The game that the step came from.
