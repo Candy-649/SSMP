@@ -197,7 +197,9 @@ internal partial class CoopSave {
 
         _heldOwnSteps.Remove(self);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
-        var step = new OwnStep(toState.Name, SharedDice.RollCounts(creature), creature.transform.position);
+        var step = new OwnStep(
+            toState.Name, SharedDice.RollCounts(creature), creature.transform.position, creature.transform.localScale.x
+        );
         if (!_ownSteps.TryGetValue(self, out var steps)) {
             steps = [];
             _ownSteps[self] = steps;
@@ -261,11 +263,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The word of a step that a creature that every game runs by itself took here, with how fast it went and what
-    /// the state that it leaves worked with, which a game that waits for the step takes it with: a boss reckons the
-    /// speed of its jump from where the player it goes after stands, which each game has a little elsewhere, and
-    /// jumped as far as its own game had it, to be moved where the scene host's landed as it landed (USER 11-15, of
-    /// that fight, "只有一步闪了一下，其他时候都很丝滑").
+    /// The word of a step that a creature that every game runs by itself took here, with how fast it went, what the
+    /// state that it leaves worked with and where its walk is (see GamePatcher.WriteWalk), which a game that waits for
+    /// the step takes it with: a boss reckons the speed of its jump from where the player it goes after stands, which
+    /// each game has a little elsewhere, and jumped as far as its own game had it, to be moved where the scene host's
+    /// landed as it landed (USER 11-15, of that fight, "只有一步闪了一下，其他时候都很丝滑").
     /// </summary>
     private static CoopSaveUpdate OwnCreatureUpdate(PlayMakerFSM machine, OwnStep step) {
         var transform = machine.transform;
@@ -283,6 +285,7 @@ internal partial class CoopSave {
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream)) {
             worked.Write(writer);
+            GamePatcher.WriteWalk(writer, machine.gameObject);
         }
 
         return new CoopSaveUpdate {
@@ -346,7 +349,10 @@ internal partial class CoopSave {
                     ? step.Counts
                     : SharedDice.RollCounts(creature);
                 var update = OwnCreatureUpdate(
-                    machine, new OwnStep(fsm.ActiveStateName, counts, creature.transform.position)
+                    machine,
+                    new OwnStep(
+                        fsm.ActiveStateName, counts, creature.transform.position, creature.transform.localScale.x
+                    )
                 );
                 update.TargetId = player.Id;
 
@@ -458,9 +464,21 @@ internal partial class CoopSave {
                 MoveOwnSteps(creature, off);
             }
 
-            // Facing the way it faces there, when that is the step it is at: it faced the player it went after
-            // where this game has them
-            if (newest && !Mathf.Approximately(transform.localScale.x, update.Values[2])) {
+            // A member who has just come in: its walk goes on where the scene host's walks now, rather than from the
+            // fresh start that the room gave it as it came in, which took it to the same step within a few frames
+            // (review)
+            if (newest && update.Values.Count > 7) {
+                using var reader = new BinaryReader(new MemoryStream(update.Bytes));
+                ToldValues.Read(reader);
+                GamePatcher.PutWalk(reader, creature);
+            }
+
+            // Facing the way it faced there as it took the step, when that is the step it is at and the state has not
+            // turned it here since: it faced the player it went after where this game has them. A state that turns it
+            // as it starts, toward the player it goes after, was turned back to the facing it had before, which the
+            // word tells, and turned again at the next step that came (review)
+            if (newest && !Mathf.Approximately(took.Facing, update.Values[2]) &&
+                Mathf.Approximately(transform.localScale.x, took.Facing)) {
                 Logger.Info($"[Own creatures] '{place}' faces the way it does in {player.Username}'s game");
                 var turned = transform.localScale;
                 turned.x = update.Values[2];
@@ -497,11 +515,18 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Puts a creature that every game runs by itself where the scene host's was as it took a step, turned the way it
-    /// was turned there, going as fast, with the rolls and the song that it took the step with, and with what the state
-    /// that its state machine left worked with there.
+    /// was turned there, going as fast, with the rolls and the song that it took the step with, with what the state
+    /// that its state machine left worked with there, and with its walk where it was there (see GamePatcher.PutWalk).
     /// </summary>
     private static void PutAtSceneHostsStep(Fsm fsm, CoopSaveUpdate update) {
         var creature = fsm.GameObject;
+        using var reader = new BinaryReader(new MemoryStream(update.Bytes));
+        var worked = ToldValues.Read(reader);
+
+        // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts as
+        // it was there
+        SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
+        GamePatcher.PutWalk(reader, creature);
         var transform = creature.transform;
         transform.position = new Vector3(update.Values[0], update.Values[1], transform.position.z);
         var scale = transform.localScale;
@@ -512,11 +537,9 @@ internal partial class CoopSave {
             body.linearVelocity = new Vector2(update.Values[5], update.Values[6]);
         }
 
-        SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetRollCounts(creature, update.Amounts);
         SharedDice.SetSong(creature, (int) update.Values[4]);
-        using var reader = new BinaryReader(new MemoryStream(update.Bytes));
-        ToldValues.Read(reader).ApplyTo(fsm);
+        worked.ApplyTo(fsm);
     }
 
     /// <summary>
@@ -752,7 +775,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// A step of a state machine of a creature that every game runs by itself: the state it went to, how many times
-    /// its actions had rolled before (see SharedDice.RollCounts), and where the creature was.
+    /// its actions had rolled before (see SharedDice.RollCounts), where the creature was and the way it faced.
     /// </summary>
-    private readonly record struct OwnStep(string State, List<int> Counts, Vector3 Place);
+    private readonly record struct OwnStep(string State, List<int> Counts, Vector3 Place, float Facing);
 }

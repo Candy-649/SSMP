@@ -1602,6 +1602,7 @@
   {
     "base_object_name": "Pilgrim 01 Song",
     "type": "ChoirPouncer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1615,6 +1616,7 @@
   {
     "base_object_name": "Pilgrim 02 Song",
     "type": "ChoirHornhead",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

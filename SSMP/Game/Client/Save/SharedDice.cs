@@ -520,6 +520,42 @@ internal static partial class SharedDice {
     }
 
     /// <summary>
+    /// Rolls a number of the walk of a creature that every game runs by itself, which its Walker rolls in the game's
+    /// code (see GamePatcher.RollWalk): from the creature's name and how many numbers of its walk it rolled before, the
+    /// same in every game that walked alike, whatever the frame rate. How many goes with each step of the scene host's
+    /// creature with the rest of where its walk is, and a creature that is put to the step goes on from there (see
+    /// GamePatcher.PutWalk). As the song's, it is not among the rolls that tell whether a game took a step already: the
+    /// walk goes on between the steps, and a game a moment behind has rolled a number of it less.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="roll">What rolls the number, with the game's dice.</param>
+    public static T RollForWalk<T>(GameObject creature, Func<T> roll) {
+        RollByName(creature, Entity.OwnCreatures.RollName(creature));
+        var named = NamedRollers[creature];
+        var result = default(T)!;
+        ThrownThings.Rolling(
+            ThrownThings.Seed(named.Name, Identify("", nameof(Walker), "", 0), named.Walks++), () => result = roll()
+        );
+        return result;
+    }
+
+    /// <summary>
+    /// How many numbers of its walk a creature that every game runs by itself rolled (see
+    /// <see cref="RollForWalk{T}"/>).
+    /// </summary>
+    public static int WalksOf(GameObject creature) {
+        return NamedRollers.TryGetValue(creature, out var named) ? named.Walks : 0;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself go on from how many numbers of its walk the creature of another
+    /// game rolled (see <see cref="RollForWalk{T}"/>).
+    /// </summary>
+    public static void SetWalks(GameObject creature, int walks) {
+        NamedRollers[creature].Walks = walks;
+    }
+
+    /// <summary>
     /// The name an object of the room rolls under now if nothing rolled or was told under it yet, or null: a name
     /// that the object was just given for what it is about to do, like a trap that another one tells to go off.
     /// </summary>
@@ -1057,5 +1093,10 @@ internal static partial class SharedDice {
         /// How many waits the song that goes on rolled.
         /// </summary>
         public int SongWaits { get; set; }
+
+        /// <summary>
+        /// How many numbers of its walk it rolled (see <see cref="RollForWalk{T}"/>).
+        /// </summary>
+        public int Walks { get; set; }
     }
 }
