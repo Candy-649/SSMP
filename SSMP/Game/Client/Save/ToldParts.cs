@@ -455,7 +455,9 @@ internal static class ToldParts {
     /// <summary>
     /// The parts of the room that an event goes to: the object it goes to, and the state machines there, or there and
     /// under it, that take events from it. Those of creatures, and of anything that isn't a part of the room itself,
-    /// are left out (see CoopHits.IsRoomObject). Null if it goes to no object of the room.
+    /// are left out (see CoopHits.IsRoomObject), and so are the parts of a creature that every game runs by itself,
+    /// which roll under names of their own and go after whom the creature goes after (see OwnCreatures). Null if it
+    /// goes to no object of the room.
     /// </summary>
     private static ToldMachines? FindTold(Fsm sender, FsmEventTarget eventTarget) {
         GameObject? target;
@@ -492,7 +494,8 @@ internal static class ToldParts {
             }
 
             everything.Add(machine);
-            if (CoopHits.IsRoomObject(machine) && IsFollowedInEveryState?.Invoke(machine) != true) {
+            if (CoopHits.IsRoomObject(machine) && IsFollowedInEveryState?.Invoke(machine) != true &&
+                !OwnCreatures.IsPart(machine.gameObject)) {
                 machines.Add(machine);
             }
         }

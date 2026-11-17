@@ -27,12 +27,25 @@ namespace SSMP.Game.Client.Entity;
 /// 再也不会打到这个怪了，所以这就是最好的测试时间"). The scene host's game decides every way that goes by where the
 /// players are, and whom it goes after; every other game plays each move that comes from there itself, with the
 /// same dice, rather than deciding it (USER 11-15 "总之以房主那边传过来的招式为单位。尽量需要的随机数就一起过来").
+///
+/// And so is the boss at the end of the second act, for the one fight of it before the third (USER 11-17 "话说今天可能
+/// 会打丝母，打完进第三幕就打不了丝母了，要不然你把丝母也本地化了（"). Its hands and the blades on them are parts with state
+/// machines of their own, which leave it as the fight wakes them and aim at the player it goes after: each part rolls
+/// under its own place in the room as the creature does, goes after whom the creature goes after, and takes the steps
+/// by which it looks at a player from the scene host's game as the creature does (see CoopSave.OwnCreatures).
 /// </summary>
 internal static class OwnCreatures {
     /// <summary>
     /// The creatures of the rooms loaded now, with their scenes and their places in them as the rooms loaded them.
     /// </summary>
     private static readonly Dictionary<GameObject, (string Scene, string Place)> Creatures = new();
+
+    /// <summary>
+    /// The parts of the creatures that have state machines of their own, with the creature that each is of, its scene
+    /// and its place in the room, as the room loaded them: the silk boss's hands leave it as the fight wakes them, with
+    /// the blades on them, and hang in the room by themselves after.
+    /// </summary>
+    private static readonly Dictionary<GameObject, (GameObject Creature, string Scene, string Place)> Parts = new();
 
     /// <summary>
     /// How many there are.
@@ -77,6 +90,16 @@ internal static class OwnCreatures {
     public static (HutongGames.PlayMaker.Fsm Fsm, string Event)? LocalTalk { get; set; }
 
     /// <summary>
+    /// Whether a state machine of a creature that every game runs by itself plays a catch of another player in a
+    /// state, with what it does to the player caught kept off the local player (see CoopSave.OwnCatches); what it
+    /// switches on of the room there keeps off the local player too (see Entity.OnAnyActivateGameObject).
+    /// </summary>
+    public static Func<HutongGames.PlayMaker.Fsm, HutongGames.PlayMaker.FsmState, bool>? KeepsLocalPlayerOut {
+        get;
+        set;
+    }
+
+    /// <summary>
     /// Takes a creature of the room as one that every game runs by itself.
     /// </summary>
     /// <param name="creature">The creature.</param>
@@ -91,7 +114,21 @@ internal static class OwnCreatures {
         Entity.HookTalks();
         var place = ScenePath.Get(creature.transform);
         Creatures[creature] = (creature.scene.name, place);
-        Logger.Info($"[Own creatures] '{place}' ({type}) runs in each game as the room's own, with no copy");
+
+        // Its parts with state machines of their own, while they still hang under it
+        var parts = 0;
+        foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            var part = machine.gameObject;
+            if (part != creature && !Parts.ContainsKey(part)) {
+                Parts[part] = (creature, creature.scene.name, ScenePath.Get(part.transform));
+                parts++;
+            }
+        }
+
+        Logger.Info(
+            $"[Own creatures] '{place}' ({type}) runs in each game as the room's own, with no copy, and {parts} " +
+            "part(s) with state machines of their own"
+        );
     }
 
     /// <summary>
@@ -109,6 +146,11 @@ internal static class OwnCreatures {
             return null;
         }
 
+        // A part that left the creature is its part still
+        if (Parts.TryGetValue(part, out var of)) {
+            return of.Creature;
+        }
+
         for (var current = part.transform; current != null; current = current.parent) {
             if (Creatures.ContainsKey(current.gameObject)) {
                 return current.gameObject;
@@ -116,6 +158,32 @@ internal static class OwnCreatures {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether an object is a part with state machines of its own of a creature that every game runs by itself (see
+    /// <see cref="Parts"/>).
+    /// </summary>
+    public static bool IsPart(GameObject gameObject) {
+        return Parts.Count > 0 && Parts.ContainsKey(gameObject);
+    }
+
+    /// <summary>
+    /// Whether an object rolls under its place in the room, the same in every game (see <see cref="RollName"/>): a
+    /// creature that every game runs by itself, or a part of one with state machines of its own.
+    /// </summary>
+    public static bool RollsUnderPlace(GameObject gameObject) {
+        return Has(gameObject) || IsPart(gameObject);
+    }
+
+    /// <summary>
+    /// The parts with state machines of their own of the creatures of the rooms loaded now (see <see cref="Parts"/>),
+    /// with the creature that each is of.
+    /// </summary>
+    public static IEnumerable<(GameObject Part, GameObject Creature)> AllParts() {
+        foreach (var pair in Parts) {
+            yield return (pair.Key, pair.Value.Creature);
+        }
     }
 
     /// <summary>
@@ -144,10 +212,17 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
-    /// The creature at a place of a scene as the room loaded it, if it is one that every game runs by itself.
+    /// The creature at a place of a scene as the room loaded it, if it is one that every game runs by itself, or the
+    /// part with state machines of its own of one there.
     /// </summary>
     public static GameObject? Find(string scene, string place) {
         foreach (var pair in Creatures) {
+            if (pair.Key != null && pair.Value.Scene == scene && pair.Value.Place == place) {
+                return pair.Key;
+            }
+        }
+
+        foreach (var pair in Parts) {
             if (pair.Key != null && pair.Value.Scene == scene && pair.Value.Place == place) {
                 return pair.Key;
             }
@@ -157,14 +232,15 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
-    /// The place of a creature as the room loaded it.
+    /// The place of a creature, or of a part of one with state machines of its own, as the room loaded it.
     /// </summary>
     public static string PlaceOf(GameObject creature) {
-        return Creatures[creature].Place;
+        return Creatures.TryGetValue(creature, out var at) ? at.Place : Parts[creature].Place;
     }
 
     /// <summary>
-    /// The name that a creature rolls under, the same in every game (see SharedDice.RollByName).
+    /// The name that a creature, or a part of one with state machines of its own, rolls under, the same in every game
+    /// (see SharedDice.RollByName).
     /// </summary>
     public static string RollName(GameObject creature) {
         return "Own " + Creatures[creature].Place;
@@ -187,6 +263,7 @@ internal static class OwnCreatures {
     /// </summary>
     public static void Clear() {
         Creatures.Clear();
+        Parts.Clear();
         Dead.Clear();
         OwnThreads.Clear();
     }

@@ -716,9 +716,10 @@ internal static partial class SharedDice {
         }
 
         // A creature that every game runs by itself rolls under its place in the room, the same in every game, from its
-        // first roll (see OwnCreatures)
+        // first roll, and so does each part of it with state machines of its own, under its own place (see
+        // OwnCreatures)
         if (Entity.OwnCreatures.Count > 0 && self.Fsm?.FsmComponent is { } ownFsm && ownFsm != null &&
-            Entity.OwnCreatures.Has(ownFsm.gameObject)) {
+            Entity.OwnCreatures.RollsUnderPlace(ownFsm.gameObject)) {
             RollByName(ownFsm.gameObject, Entity.OwnCreatures.RollName(ownFsm.gameObject));
         }
 

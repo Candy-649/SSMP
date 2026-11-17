@@ -2652,8 +2652,11 @@ internal partial class Entity {
             return;
         }
 
-        // For a catch of another player, which this game's player is kept out of
-        var forAnother = self.activate.Value && CatchOf(self.Fsm, self.State) == CatchKind.Another;
+        // For a catch of another player, which this game's player is kept out of, as a copy plays it here or a creature
+        // that every game runs by itself
+        var forAnother = self.activate.Value &&
+                         (CatchOf(self.Fsm, self.State) == CatchKind.Another ||
+                          OwnCreatures.KeepsLocalPlayerOut?.Invoke(self.Fsm, self.State) == true);
         var kept = target != null ? EntityFsmActions.BeforeSwitchingOn(target, self.Fsm.GameObject, forAnother) : null;
         orig(self);
         if (kept != null) {
@@ -3419,9 +3422,10 @@ internal partial class Entity {
 
     /// <summary>
     /// The events with which the game's catching parts - a blade, a claw, a coil that holds the player for a string of
-    /// blows - tell the creature they belong to that they caught the player, and which start its combo.
+    /// blows - tell the creature they belong to that they caught the player, and which start its combo. The strands of
+    /// the boss at the end of the second act tell it from the room that they hang in.
     /// </summary>
-    public static readonly HashSet<string> CatchEvents = ["MULTI HIT CONNECT"];
+    public static readonly HashSet<string> CatchEvents = ["MULTI HIT CONNECT", "HORNET CAUGHT"];
 
     /// <summary>
     /// The entities, by the object of their copy (see <see cref="OnBroadcastToObject"/>).

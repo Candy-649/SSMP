@@ -1573,6 +1573,12 @@ internal partial class GamePatcher {
             return obj;
         }
 
+        // A part of a creature that every game runs by itself goes after whom the creature goes after, also one that
+        // left it, as the silk boss's hands do as the fight wakes them, with the blades on them
+        if (Entity.OwnCreatures.Count > 0 && Entity.OwnCreatures.Owning(obj) is { } own) {
+            return own;
+        }
+
         var instanceId = obj.GetInstanceID();
         if (TargetOwnerCache.TryGetValue(instanceId, out var cachedOwner) && cachedOwner != null) {
             return cachedOwner;

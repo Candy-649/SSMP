@@ -3471,6 +3471,7 @@
   {
     "base_object_name": "Silk Boss",
     "type": "GrandMotherSilk",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3481,13 +3482,7 @@
       "Attack Control",
       "Phase Control",
       "Stun Control"
-    ],
-    "runs_here": {
-      "Control": {
-        "Dash": [],
-        "Juke": []
-      }
-    }
+    ]
   },
   {
     "base_object_name": "Bell Fly",

@@ -953,7 +953,8 @@ internal partial class GamePatcher {
     /// Has a creature go after the player that a part of its own grabbed (see Entity.GoAfterGrabbedPlayer), held to
     /// them as after any turn (see <see cref="IsHeldByTime"/>) also when it went after them already: what it does with
     /// the catch then goes to the player it holds, rather than to whichever player stands nearest to it (see
-    /// <see cref="AcquireNearestNoticed"/>).
+    /// <see cref="AcquireNearestNoticed"/>). So does a creature that every game runs by itself in a game that follows
+    /// the scene host's, which plays a catch of its own player by itself (see CoopSave.OwnCatches).
     /// </summary>
     /// <param name="creature">The creature.</param>
     /// <param name="player">The player it grabbed.</param>
@@ -969,7 +970,12 @@ internal partial class GamePatcher {
             return;
         }
 
-        ApproveEnemyTarget(owner, player);
+        _takingSceneHostsTarget = true;
+        try {
+            ApproveEnemyTarget(owner, player);
+        } finally {
+            _takingSceneHostsTarget = false;
+        }
     }
 
     /// <summary>
