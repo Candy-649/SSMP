@@ -25,12 +25,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// game takes it from there as a step of the scene host's. A strike back at a blow of the scene host's player is the
 /// scene host's game's, and comes to the others with its steps.
 ///
-/// The blow itself goes to every other game as blocked (CoopHitUpdate.Blocked) and takes no health there: the scene
-/// host's creature blocks it as the game does, and what else it does at a block, like the turn of the knight's bow
-/// into the fight, comes to the others with its steps, while they show only the spark and the clink of the block (see
-/// CoopHits). Before, each game judged the blow again by what its own creature was doing as it came: one whose creature
-/// had let go of its guard in the scene host's game took it as a wound, while the striker's game played a strike back
-/// that the scene host's never did.
+/// The blow itself is told as blocked (CoopHitUpdate.Blocked) and takes no health anywhere: the scene host's creature
+/// blocks it as the game does, and the scene host's game tells the others that it blocked it, whose creature blocks it
+/// so too (USER 11-17 "我觉得应该是房主跟其他人说boss的这一招格挡挡到了"; see CoopHits). Before, each game judged the blow
+/// again by what its own creature was doing as it came: one whose creature had let go of its guard in the scene host's
+/// game took it as a wound, while the striker's game played a strike back that the scene host's never did.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>

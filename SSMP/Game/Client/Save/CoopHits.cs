@@ -467,9 +467,14 @@ internal partial class CoopHits {
     /// scene host; the others leave it be (<see cref="ApplyKnockback"/>).
     /// </summary>
     /// <param name="update">The update.</param>
+    /// <param name="except">A member who is not sent it, like the player whose hit it is.</param>
     /// <returns>Whether anyone was there to send it to.</returns>
-    private bool SendToRoomMembers(CoopHitUpdate update) {
+    private bool SendToRoomMembers(CoopHitUpdate update, ushort? except = null) {
         var members = GetRoomMembers();
+        if (except is { } id) {
+            members.Remove(id);
+        }
+
         if (members.Count == 0) {
             return false;
         }
@@ -845,17 +850,13 @@ internal partial class CoopHits {
         // A blow on a creature that every game runs by itself goes here as it went in the game of the player who
         // struck, which says whether the creature blocked it there, and is not judged again by what the creature does
         // here as it comes (USER 11-17 "这一刀有没有让怪物掉血本来就要让房主知道的吧", "不需要重放啊", "就让客机说有没有
-        // 被挡住"). One that it blocked there takes no health here: the scene host's game has its creature block it as
-        // the game does, which is what it answers (see TakeAsBlock), and every other game shows only the spark and the
-        // clink of the block, as what the creature did at it comes with its steps, like the knight's strike back (see
-        // CoopSave.OwnStrikeBacks). One that it took there it takes here as the wound that it was (see TakeAsWound)
-        if (component is HealthManager guard && update.Blocked && OwnCreatures.FollowsSceneHost(guard.gameObject)) {
-            if (Clinks(guard)) {
-                var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(guard.transform, default));
-                ShowBlock(guard, sourceObject.transform.position, direction);
-            }
-
-            NoteReplayed(update, "hit", true, "blocked as in their game", waited);
+        // 被挡住"). One that it took there it takes here as the wound that it was (see TakeAsWound). One that it blocked
+        // there takes no health anywhere, and is the scene host's game's to tell (USER 11-17 "我觉得应该是房主跟其他人说
+        // boss的这一招格挡挡到了"): that game blocks it as the game does and tells the others (see RelayBlock), who block
+        // it so too as they are told (see TakeAsBlock), and leave be the word of the player who struck
+        if (component is HealthManager guard && update.Blocked && !update.FromSceneHost &&
+            OwnCreatures.FollowsSceneHost(guard.gameObject)) {
+            NotReplayed(update, "hit", "the creature blocked it there, which the scene host's game tells");
             return;
         }
 
@@ -899,6 +900,26 @@ internal partial class CoopHits {
             update, "hit", response.response != IHitResponder.Response.None || answered, DescribeMoves(component),
             waited
         );
+
+        // The scene host's game tells the others of a block of another member's player that it took (see above)
+        if (update.Blocked && !update.FromSceneHost && OwnCreatures.RunsHere(component.gameObject)) {
+            RelayBlock(update);
+        }
+    }
+
+    /// <summary>
+    /// Tells the members in the room but the player who struck that a creature that every game runs by itself blocked a
+    /// blow of that player's, as the scene host's game, which took the block from them (see ReplayHit): each of them
+    /// blocks it as the game does (see TakeAsBlock).
+    /// </summary>
+    private void RelayBlock(CoopHitUpdate update) {
+        var told = update.Copy();
+        told.FromSceneHost = true;
+        if (SendToRoomMembers(told, update.PlayerId)) {
+            NoteTraffic(
+                update.Scene, update.Path, $"told the others that the creature blocked a hit on {update.Responder}"
+            );
+        }
     }
 
     /// <summary>
@@ -1414,6 +1435,7 @@ internal partial class CoopHits {
                     breakable.hitsLeft == hitsLeft;
                 update.Blocked = responder is HealthManager &&
                                  response.response == IHitResponder.Response.Invincible;
+                update.FromSceneHost = update.Blocked && OwnCreatures.RunsHere(component.gameObject);
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
                 SendToRoomMembers(update);
                 NoteTraffic(
@@ -1579,12 +1601,14 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Has a creature that every game runs by itself, in the scene host's game, block a blow of another player as it
-    /// blocked it in their game, which says so (see CoopHitUpdate.Blocked): the game's own block, without the check of
-    /// its guard here. Its state machines hear of it as they do of a block, and what they do at it, like the turn of
-    /// the knight's bow into the fight, comes to the others with the steps of this game; a strike back that the block
-    /// took the creature into in their game this game was told of, and plays already (see CoopSave.OwnStrikeBacks).
-    /// One that died here already blocks none, as the game has it (HealthManager.Hit).
+    /// Has a creature that every game runs by itself block a blow of another player as it blocked it in their game: the
+    /// game's own block, without the check of its guard here (see CoopHitUpdate.Blocked). The scene host's game takes
+    /// it from the game of the player who struck, and every other game from the scene host's (see RelayBlock). The
+    /// state machines hear of it as they do of a block; what they do at it, like the turn of the knight's bow into the
+    /// fight, is the scene host's, and comes to the others with its steps as well. A strike back that the block took
+    /// the creature into in the game of the player who struck the scene host's game was told of before, and plays
+    /// already (see CoopSave.OwnStrikeBacks). One that died here already blocks none, as the game has it
+    /// (HealthManager.Hit).
     /// </summary>
     private static IHitResponder.HitResponse TakeAsBlock(HealthManager creature, HitInstance hit) {
         if (creature.isDead) {

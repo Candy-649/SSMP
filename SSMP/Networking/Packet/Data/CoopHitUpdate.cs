@@ -61,10 +61,16 @@ internal class CoopHitUpdate : IPacketData {
 
     /// <summary>
     /// For a blow on a creature that every game runs by itself: that the creature blocked it in the game it comes from.
-    /// Every other game takes the blow as that game says, blocked or a wound, and does not judge it again (see
-    /// CoopHits).
+    /// No game judges the blow again: a wound is taken as a wound, and a block as a block (see CoopHits).
     /// </summary>
     public bool Blocked { get; set; }
+
+    /// <summary>
+    /// For a blocked blow on a creature that every game runs by itself: that the scene host's game sends it, which
+    /// tells the others of the blocks of the creature, of a blow of its own player or of another's that it took from
+    /// them. A block that another game sends is the scene host's game's alone to take (see CoopHits).
+    /// </summary>
+    public bool FromSceneHost { get; set; }
 
     /// <summary>
     /// The hit itself, or the direction and magnitude of the knockback of an enemy, which only the games of the
@@ -88,6 +94,7 @@ internal class CoopHitUpdate : IPacketData {
             Index = Index,
             Uncounted = Uncounted,
             Blocked = Blocked,
+            FromSceneHost = FromSceneHost,
             Hit = Hit
         };
     }
@@ -104,6 +111,7 @@ internal class CoopHitUpdate : IPacketData {
         packet.Write(Index);
         packet.Write(Uncounted);
         packet.Write(Blocked);
+        packet.Write(FromSceneHost);
         packet.Write((ushort) Hit.Length);
         packet.Write(Hit);
     }
@@ -120,6 +128,7 @@ internal class CoopHitUpdate : IPacketData {
         Index = packet.ReadByte();
         Uncounted = packet.ReadBool();
         Blocked = packet.ReadBool();
+        FromSceneHost = packet.ReadBool();
         Hit = packet.ReadBytes(packet.ReadUShort());
     }
 }
