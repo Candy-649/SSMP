@@ -267,6 +267,7 @@ internal partial class CoopSave {
         }
 
         EnterOwnState(orig, self, toState);
+        TakeEarlyCatch(self, toState);
     }
 
     /// <summary>
@@ -486,6 +487,12 @@ internal partial class CoopSave {
         // The player of that game started a talk with it, which that game plays by itself
         if (update.PartCount == OwnTalkPart) {
             TakeOwnTalk(player, creature, update);
+            return;
+        }
+
+        // It struck back at a blow of the player of that game that it blocked there, which that game plays by itself
+        if (update.PartCount == OwnStrikeBackPart) {
+            TakeOwnStrikeBack(player, creature, update);
             return;
         }
 

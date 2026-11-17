@@ -58,6 +58,13 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, OwnLeap> _ownLeaps = new();
 
     /// <summary>
+    /// The catches of other players that came to the scene host's game before its creature got to the state that the
+    /// catch came from there, each to be played as the creature gets there (see <see cref="TakeOwnCatch"/>,
+    /// <see cref="TakeEarlyCatch"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, (ClientPlayerData Player, CoopSaveUpdate Word)> _earlyCatches = new();
+
+    /// <summary>
     /// Whether a state tells a creature that its part caught the player, by one of the events of a catch (see
     /// Entity.CatchEvents).
     /// </summary>
@@ -208,7 +215,8 @@ internal partial class CoopSave {
         }
 
         if (leap == null) {
-            return StartsOwnLeap(machine, toState) || StartsOwnTalk(machine, toState) || ToldInOwnLeap(fsm, creature);
+            return StartsOwnStrikeBack(machine, toState) || StartsOwnLeap(machine, toState) ||
+                   StartsOwnTalk(machine, toState) || ToldInOwnLeap(fsm, creature);
         }
 
         if (leap.Through) {
@@ -356,12 +364,19 @@ internal partial class CoopSave {
     /// Plays in the scene host's game the catch of the player of another member's game, whose creature caught them
     /// there and plays it by itself (see <see cref="TellOwnCatch"/>), while its creature here is still in the leap: in
     /// a state that the catch can come from into the state that it went to there, taken at the rolls that the catch
-    /// came with. Then it is put where theirs caught them, goes after the player it caught (see
-    /// GamePatcher.GoAfterGrabbed) and takes the catch, which every other game takes from here, with what it does to
-    /// that player kept off this game's (see <see cref="KeepOut"/>). One that landed already, as the word came late,
-    /// plays none of it (USER 11-16 "如果延迟大，房主那边已经没扑到了，那就不演扑到了"), and nor does one in a later
-    /// leap, which rolled since (review: a word held up a second or two by a stall of the network came in the next
-    /// leap, which was turned to that player with the dice set back, and its catch played again where it was over).
+    /// came with (see <see cref="PlayOthersCatch"/>). One that landed already, as the word came late, plays none of it
+    /// (USER 11-16 "如果延迟大，房主那边已经没扑到了，那就不演扑到了"), and nor does one in a later leap, which rolled
+    /// since (review: a word held up a second or two by a stall of the network came in the next leap, which was turned
+    /// to that player with the dice set back, and its catch played again where it was over).
+    ///
+    /// Their game may be ahead of this one, by a step that it took by itself, like the knight's strike back at a blow
+    /// of their player that it blocked, which this game hears of a moment later: the catch at the start of its flurry
+    /// came while the creature here was still in the dash before it. One that is still on its way into the state that
+    /// the catch came from, and was not in it at those rolls yet, plays the catch as it gets there, so that the blows
+    /// that only a catch leads to show here too (see <see cref="TakeEarlyCatch"/>; USER 11-17 "只要在不一样之前房主收到
+    /// 消息客机抓到人了就可以演最后的横扫"). The rolls are the ones of the state that the catch came from, which the states
+    /// on the way there roll on to (review: a word held for the same rolls as the step before the catch was never held,
+    /// as the strike back rolls its sounds on the way).
     /// </summary>
     private void TakeOwnCatch(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
         var place = update.ObjectPath;
@@ -374,10 +389,19 @@ internal partial class CoopSave {
         }
 
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
-        var into = fsm.GetState(update.StateName).Transitions.Concat(fsm.GlobalTransitions).First(
-            transition => Entity.Entity.CatchEvents.Contains(transition.EventName)
-        ).ToState;
-        if (CatchWay(fsm.ActiveState, into) is not { } way) {
+        var into = CatchInto(fsm, update);
+        var way = CatchWay(fsm.ActiveState, into);
+        if (way == null && !WasAt(fsm, update) &&
+            GoesOnInto(fsm.ActiveState, state => state.Name == update.StateName)) {
+            _earlyCatches[fsm] = (player, update);
+            Logger.Info(
+                $"[Own creatures] '{place}' caught {player.Username} from '{update.StateName}' in their game, and is " +
+                $"in '{fsm.ActiveStateName}' of '{fsm.Name}' here on its way there, where it plays the catch"
+            );
+            return;
+        }
+
+        if (way == null) {
             Logger.Info(
                 $"[Own creatures] '{place}' caught {player.Username} from '{update.StateName}' in their game, but is " +
                 $"in '{fsm.ActiveStateName}' of '{fsm.Name}' here, through its leap, and plays no catch here"
@@ -385,8 +409,7 @@ internal partial class CoopSave {
             return;
         }
 
-        if (!_ownSteps.TryGetValue(fsm, out var steps) || steps.Count == 0 ||
-            !steps[^1].Counts.SequenceEqual(update.Amounts)) {
+        if (!AtRollsOf(fsm, update)) {
             Logger.Info(
                 $"[Own creatures] '{place}' caught {player.Username} from '{update.StateName}' in their game, but is " +
                 $"in '{fsm.ActiveStateName}' of '{fsm.Name}' here in a later leap, and plays no catch here"
@@ -394,10 +417,56 @@ internal partial class CoopSave {
             return;
         }
 
+        PlayOthersCatch(player, fsm, update, into, way);
+    }
+
+    /// <summary>
+    /// Plays in the scene host's game a catch of another player's that came before its creature got to the state that
+    /// the catch came from there, as the creature gets there (see <see cref="TakeOwnCatch"/>). One whose creature went
+    /// another way, or rolled on its way there, plays none of it.
+    /// </summary>
+    private void TakeEarlyCatch(Fsm fsm, FsmState toState) {
+        if (!_earlyCatches.TryGetValue(fsm, out var early) || fsm.ActiveState != toState) {
+            return;
+        }
+
+        var word = early.Word;
+        if (toState.Name != word.StateName && GoesOnInto(toState, state => state.Name == word.StateName)) {
+            return;
+        }
+
+        _earlyCatches.Remove(fsm);
+        var into = CatchInto(fsm, word);
+        if (toState.Name != word.StateName || !AtRollsOf(fsm, word) || CatchWay(toState, into) is not { } way) {
+            Logger.Info(
+                $"[Own creatures] '{word.ObjectPath}' went to '{toState.Name}' of '{fsm.Name}' here on its way to " +
+                $"'{word.StateName}', where it caught {early.Player.Username} in their game, and plays no catch here"
+            );
+            return;
+        }
+
+        PlayOthersCatch(early.Player, fsm, word, into, way);
+    }
+
+    /// <summary>
+    /// Plays in the scene host's game the catch of the player of another member's game (see
+    /// <see cref="TakeOwnCatch"/>): the creature is put where theirs caught them, goes after the player it caught (see
+    /// GamePatcher.GoAfterGrabbed) and takes the catch, which every other game takes from here, with what it does to
+    /// that player kept off this game's (see <see cref="KeepOut"/>).
+    /// </summary>
+    private void PlayOthersCatch(
+        ClientPlayerData player,
+        Fsm fsm,
+        CoopSaveUpdate update,
+        string into,
+        FsmTransition way
+    ) {
+        var creature = fsm.GameObject;
         var away = Vector2.Distance(creature.transform.position, new Vector2(update.Values[0], update.Values[1]));
         Logger.Info(
-            $"[Own creatures] '{place}' caught {player.Username} from '{update.StateName}' in their game, and goes " +
-            $"from '{fsm.ActiveStateName}' to '{into}' of '{fsm.Name}' here too, where it was there, {away:F1} away"
+            $"[Own creatures] '{update.ObjectPath}' caught {player.Username} from '{update.StateName}' in their " +
+            $"game, and goes from '{fsm.ActiveStateName}' to '{into}' of '{fsm.Name}' here too, where it was there, " +
+            $"{away:F1} away"
         );
         PutAtSceneHostsStep(fsm, update);
         if (ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is { } figure && figure != null) {
@@ -408,12 +477,66 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A leap at this game's player, or a talk, that a creature that every game runs by itself plays here by itself,
-    /// in a game that follows the scene host's (see <see cref="PlaysOwnLeap"/>, CoopSave.OwnTalks).
+    /// The state that a catch of another player's took their creature to, from the state that it caught them in.
+    /// </summary>
+    private static string CatchInto(Fsm fsm, CoopSaveUpdate catchWord) {
+        return fsm.GetState(catchWord.StateName).Transitions.Concat(fsm.GlobalTransitions).First(
+            transition => Entity.Entity.CatchEvents.Contains(transition.EventName)
+        ).ToState;
+    }
+
+    /// <summary>
+    /// Whether the creature of a state machine in the scene host's game took its latest step at the rolls that a catch
+    /// of another player's came with: it is in the leap that the catch came from, not in a later one.
+    /// </summary>
+    private bool AtRollsOf(Fsm fsm, CoopSaveUpdate catchWord) {
+        return _ownSteps.TryGetValue(fsm, out var steps) && steps.Count > 0 &&
+               steps[^1].Counts.SequenceEqual(catchWord.Amounts);
+    }
+
+    /// <summary>
+    /// Whether the creature of a state machine in the scene host's game went into the state that a catch of another
+    /// player's came from, at the rolls that the catch came with, so that it is through that state or in it (see
+    /// <see cref="TakeOwnCatch"/>).
+    /// </summary>
+    private bool WasAt(Fsm fsm, CoopSaveUpdate catchWord) {
+        return _ownSteps.TryGetValue(fsm, out var steps) && steps.Any(
+            step => step.State == catchWord.StateName && step.Counts.SequenceEqual(catchWord.Amounts)
+        );
+    }
+
+    /// <summary>
+    /// Whether a state machine in a state goes on by itself into a state that is one of those looked for, from state to
+    /// state as each one finishes, like the knight from its strike back at a blocked blow through its dash into its
+    /// flurry.
+    /// </summary>
+    private static bool GoesOnInto(FsmState state, Func<FsmState, bool> isTarget) {
+        var seen = new HashSet<string>();
+        for (var at = state; seen.Add(at.Name);) {
+            if (at.Transitions.FirstOrDefault(transition => transition.EventName == "FINISHED") is not { } finished ||
+                at.Fsm.GetState(finished.ToState) is not { } next) {
+                return false;
+            }
+
+            if (isTarget(next)) {
+                return true;
+            }
+
+            at = next;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// A leap at this game's player, a strike back at their blow, or a talk, that a creature that every game runs by
+    /// itself plays here by itself, in a game that follows the scene host's (see <see cref="PlaysOwnLeap"/>,
+    /// CoopSave.OwnStrikeBacks, CoopSave.OwnTalks).
     /// </summary>
     /// <param name="place">Where the creature is in the room (see OwnCreatures.PlaceOf).</param>
     /// <param name="talk">Whether it is a talk.</param>
-    private sealed class OwnLeap(string place, bool talk) {
+    /// <param name="what">What it is, for the log, if it is not a leap or a talk.</param>
+    private sealed class OwnLeap(string place, bool talk, string? what = null) {
         /// <summary>
         /// Where the creature is in the room.
         /// </summary>
@@ -427,7 +550,7 @@ internal partial class CoopSave {
         /// <summary>
         /// What it is, for the log.
         /// </summary>
-        public string What => Talk ? "talk" : "leap at the local player";
+        public string What => what ?? (Talk ? "talk" : "leap at the local player");
 
         /// <summary>
         /// The states that the creature went to here by itself in it, but for the one it is through at.

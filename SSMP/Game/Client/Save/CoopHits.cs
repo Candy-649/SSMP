@@ -842,6 +842,23 @@ internal partial class CoopHits {
         hit.Source = sourceObject;
         PutThrownWhereItWas(target, update);
 
+        // A blow on a creature that every game runs by itself goes here as it went in the game of the player who
+        // struck, which says whether the creature blocked it there, and is not judged again by what the creature does
+        // here as it comes (USER 11-17 "这一刀有没有让怪物掉血本来就要让房主知道的吧", "不需要重放啊", "就让客机说有没有
+        // 被挡住"). One that it blocked there takes no health here: the scene host's game has its creature block it as
+        // the game does, which is what it answers (see TakeAsBlock), and every other game shows only the spark and the
+        // clink of the block, as what the creature did at it comes with its steps, like the knight's strike back (see
+        // CoopSave.OwnStrikeBacks). One that it took there it takes here as the wound that it was (see TakeAsWound)
+        if (component is HealthManager guard && update.Blocked && OwnCreatures.FollowsSceneHost(guard.gameObject)) {
+            if (Clinks(guard)) {
+                var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(guard.transform, default));
+                ShowBlock(guard, sourceObject.transform.position, direction);
+            }
+
+            NoteReplayed(update, "hit", true, "blocked as in their game", waited);
+            return;
+        }
+
         // A blow of the partner on a creature that every game runs by itself counts for this player's journal too, as a
         // blow of the player does (see OwnCreatures.AwardJournalKill)
         if (component is HealthManager ownHealth && OwnCreatures.Has(ownHealth.gameObject)) {
@@ -856,8 +873,13 @@ internal partial class CoopHits {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
             SetReplayedRanges(target, source.Ranges);
             var striker = _playerData.TryGetValue(update.PlayerId, out var partner) ? partner.PlayerObject : null;
+            Func<IHitResponder.HitResponse> strike = component is not HealthManager creature
+                ? () => responder.Hit(hit)
+                : update.Blocked
+                    ? () => TakeAsBlock(creature, hit)
+                    : () => TakeAsWound(creature, hit);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
-                () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(responder, hit, component, striker))
+                () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(strike, component, striker))
             ), source.HitName);
         } catch (Exception e) {
             Logger.Warn($"Could not replay a hit of the partner on {update.Path}:\n{e}");
@@ -1381,13 +1403,17 @@ internal partial class CoopHits {
             var hero = own ? HeroController.SilentInstance : null;
             var striker = hero != null ? hero.gameObject : null;
             var answered = AnswersAttack(
-                () => dice = SharedDice.Record(() => response = HitRoomObject(responder, hit, component, striker)),
+                () => dice = SharedDice.Record(
+                    () => response = HitRoomObject(() => responder.Hit(hit), component, striker)
+                ),
                 hitName, seeds
             ) || response.response != IHitResponder.Response.None &&
                 (breakable == null || wasBroken || breakable.isBroken || breakable.hitsLeft != hitsLeft);
             if (update != null && answered && _netClient.IsConnected) {
                 update.Uncounted = breakable != null && breakable.isBroken == wasBroken &&
                     breakable.hitsLeft == hitsLeft;
+                update.Blocked = responder is HealthManager &&
+                                 response.response == IHitResponder.Response.Invincible;
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
                 SendToRoomMembers(update);
                 NoteTraffic(
@@ -1519,23 +1545,54 @@ internal partial class CoopHits {
     /// struck in the scene host's game, as a creature that this game runs answers a wound (GamePatcher.AnswerWound),
     /// and the others go after whom it goes after there.
     /// </summary>
-    /// <param name="responder">What the blow struck.</param>
-    /// <param name="hit">The blow.</param>
+    /// <param name="strike">The blow on what it struck.</param>
     /// <param name="struck">The object of the room.</param>
     /// <param name="striker">Who struck: this game's player, the figure of another, or null.</param>
     private static IHitResponder.HitResponse HitRoomObject(
-        IHitResponder responder,
-        HitInstance hit,
+        Func<IHitResponder.HitResponse> strike,
         Component struck,
         GameObject? striker
     ) {
         if (striker == null || !OwnCreatures.RunsHere(struck.gameObject)) {
-            return responder.Hit(hit);
+            return strike();
         }
 
         var response = default(IHitResponder.HitResponse);
-        GamePatcher.AnswerWound(struck.gameObject, striker, () => response = responder.Hit(hit));
+        GamePatcher.AnswerWound(struck.gameObject, striker, () => response = strike());
         return response;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself take a blow of another player as the wound that it was in their
+    /// game, which says that the creature did not block it there (see CoopHitUpdate.Blocked): the game's own wound,
+    /// without the check of the creature's guard here, which the scene host's game raises a moment before the others
+    /// do: a blow that wounded in theirs glanced off it here, and the health of the two games went apart. One that
+    /// died here already takes none, as the game has it (HealthManager.Hit).
+    /// </summary>
+    private static IHitResponder.HitResponse TakeAsWound(HealthManager creature, HitInstance hit) {
+        if (creature.isDead) {
+            return IHitResponder.Response.None;
+        }
+
+        creature.TakeDamage(hit);
+        return IHitResponder.Response.DamageEnemy;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself, in the scene host's game, block a blow of another player as it
+    /// blocked it in their game, which says so (see CoopHitUpdate.Blocked): the game's own block, without the check of
+    /// its guard here. Its state machines hear of it as they do of a block, and what they do at it, like the turn of
+    /// the knight's bow into the fight, comes to the others with the steps of this game; a strike back that the block
+    /// took the creature into in their game this game was told of, and plays already (see CoopSave.OwnStrikeBacks).
+    /// One that died here already blocks none, as the game has it (HealthManager.Hit).
+    /// </summary>
+    private static IHitResponder.HitResponse TakeAsBlock(HealthManager creature, HitInstance hit) {
+        if (creature.isDead) {
+            return IHitResponder.Response.None;
+        }
+
+        creature.Invincible(hit);
+        return IHitResponder.Response.Invincible;
     }
 
     /// <summary>
@@ -3702,29 +3759,47 @@ internal partial class CoopHits {
         var enemy = healthManager.transform;
         var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(enemy, default));
 
-        // The game plays one block at a time for an enemy, and none at all for the ones that never clink
-        var clinks = healthManager.tinkTimer <= 0f && healthManager.GetComponent<DontClinkGates>() == null;
+        var clinks = Clinks(healthManager);
         if (_entityManager.IsSceneHost && FindEntity(update.EntityId) is { } entity) {
             HitCounters.Block(healthManager, hit, entity.Type, direction, clinks);
         }
 
-        if (!clinks) {
-            return;
+        if (clinks) {
+            ShowBlock(healthManager, hit.Source.transform.position, direction);
         }
+    }
 
+    /// <summary>
+    /// Whether a creature clinks at a blow that it blocks now: the game plays one block at a time for it, and none at
+    /// all for one that never clinks.
+    /// </summary>
+    private static bool Clinks(HealthManager healthManager) {
+        return healthManager.tinkTimer <= 0f && healthManager.GetComponent<DontClinkGates>() == null;
+    }
+
+    /// <summary>
+    /// Shows a blow that a creature blocked as the game shows one: the spark where it struck and the clink, one block
+    /// at a time.
+    /// </summary>
+    /// <param name="healthManager">The creature.</param>
+    /// <param name="from">Where the blow came from.</param>
+    /// <param name="direction">The way it came, as one of the four.</param>
+    private static void ShowBlock(HealthManager healthManager, Vector3 from, int direction) {
         healthManager.tinkTimer = 0.1f;
         if (healthManager.PreventInvincibleEffect || healthManager.blockHitPrefab == null) {
             return;
         }
 
-        GetBlockEffectPlace(healthManager, hit.Source.transform.position, direction, out var position, out var angle);
+        GetBlockEffectPlace(healthManager, from, direction, out var position, out var angle);
 
         var spark = healthManager.blockHitPrefab.Spawn();
         spark.transform.position = position;
         spark.transform.eulerAngles = new Vector3(0f, 0f, angle);
 
         if (!healthManager.hasAlternateInvincibleSound) {
-            healthManager.regularInvincibleAudio.SpawnAndPlayOneShot(healthManager.audioPlayerPrefab, enemy.position);
+            healthManager.regularInvincibleAudio.SpawnAndPlayOneShot(
+                healthManager.audioPlayerPrefab, healthManager.transform.position
+            );
         } else if (healthManager.alternateInvincibleSound != null &&
                    healthManager.TryGetComponent<AudioSource>(out var audioSource)) {
             audioSource.PlayOneShot(healthManager.alternateInvincibleSound);

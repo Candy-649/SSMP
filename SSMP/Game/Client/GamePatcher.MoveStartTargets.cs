@@ -973,6 +973,34 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Has a creature that every game runs by itself go after the player whose blow it blocked and strikes back at,
+    /// held to them as after any turn (see <see cref="IsHeldByTime"/>): in the game of that player, which plays the
+    /// strike back by itself, though it follows the scene host's otherwise, and in the scene host's, which follows it
+    /// (see CoopSave.OwnStrikeBacks).
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="player">The player who struck: this game's, or the figure of another.</param>
+    public static void GoAfterStriker(GameObject creature, GameObject player) {
+        var owner = GetEnemyTargetOwner(creature);
+        if (owner == null) {
+            return;
+        }
+
+        Logger.Info($"{owner.name} strikes back at the blow of {DescribePlayer(player)} and goes after them");
+        if (GetApprovedEnemyTarget(owner) == player) {
+            NoteTurn(owner.GetInstanceID(), null);
+            return;
+        }
+
+        _takingSceneHostsTarget = true;
+        try {
+            ApproveEnemyTarget(owner, player);
+        } finally {
+            _takingSceneHostsTarget = false;
+        }
+    }
+
+    /// <summary>
     /// Whom a creature that moves by a component of its own - a walker - goes after, by the one rule for every creature:
     /// whom it keeps going after (see <see cref="KeptTarget"/>), or, for one that can be fought, the nearest player it
     /// notices as it first looks for one (see <see cref="AcquireNearestNoticed"/>); otherwise whom it was set on, or

@@ -60,6 +60,13 @@ internal class CoopHitUpdate : IPacketData {
     public bool Uncounted { get; set; }
 
     /// <summary>
+    /// For a blow on a creature that every game runs by itself: that the creature blocked it in the game it comes from.
+    /// Every other game takes the blow as that game says, blocked or a wound, and does not judge it again (see
+    /// CoopHits).
+    /// </summary>
+    public bool Blocked { get; set; }
+
+    /// <summary>
     /// The hit itself, or the direction and magnitude of the knockback of an enemy, which only the games of the
     /// players read.
     /// </summary>
@@ -80,6 +87,7 @@ internal class CoopHitUpdate : IPacketData {
             Responder = Responder,
             Index = Index,
             Uncounted = Uncounted,
+            Blocked = Blocked,
             Hit = Hit
         };
     }
@@ -95,6 +103,7 @@ internal class CoopHitUpdate : IPacketData {
         packet.Write(Responder);
         packet.Write(Index);
         packet.Write(Uncounted);
+        packet.Write(Blocked);
         packet.Write((ushort) Hit.Length);
         packet.Write(Hit);
     }
@@ -110,6 +119,7 @@ internal class CoopHitUpdate : IPacketData {
         Responder = packet.ReadString();
         Index = packet.ReadByte();
         Uncounted = packet.ReadBool();
+        Blocked = packet.ReadBool();
         Hit = packet.ReadBytes(packet.ReadUShort());
     }
 }

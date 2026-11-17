@@ -761,6 +761,7 @@ internal partial class CoopSave {
         _playerWayValues.Clear();
         _keptOut.Clear();
         _ownLeaps.Clear();
+        _earlyCatches.Clear();
 
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
