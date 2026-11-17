@@ -417,8 +417,9 @@ internal static partial class SharedDice {
 
     /// <summary>
     /// How many times each action of an object rolled under the name it rolls under, as pairs of the number of the
-    /// action and the times, in the order of the numbers: the same in another game whose object rolled alike. Empty
-    /// for an object that rolls with the game's own dice.
+    /// action and the times, in the order of the numbers, and how many things it told, under a number of no action:
+    /// the same in another game whose object rolled and told alike. Empty for an object that rolls with the game's own
+    /// dice.
     /// </summary>
     public static List<int> RollCounts(GameObject gameObject) {
         var counts = new List<int>();
@@ -433,20 +434,39 @@ internal static partial class SharedDice {
             counts.Add(named.Times[roller]);
         }
 
+        if (named.Tells > 0) {
+            counts.Add(TellsCount);
+            counts.Add(named.Tells);
+        }
+
         return counts;
     }
 
     /// <summary>
-    /// Has an object that rolls under a name go on from how many times each of its actions rolled in another game (see
-    /// <see cref="RollCounts"/>), so that it rolls from there what the object of that game rolls.
+    /// Has an object that rolls under a name go on from how many times each of its actions rolled in another game, and
+    /// how many things it told there (see <see cref="RollCounts"/>), so that it rolls from there what the object of
+    /// that game rolls, and what it tells rolls so too (see <see cref="NextTellName"/>). The boss at the end of the
+    /// second act names its strands by how many things it told: a member who came in, who had told none, would see
+    /// them elsewhere.
     /// </summary>
     public static void SetRollCounts(GameObject gameObject, List<int> counts) {
         var named = NamedRollers[gameObject];
         named.Times.Clear();
+        named.Tells = 0;
         for (var i = 0; i + 1 < counts.Count; i += 2) {
-            named.Times[counts[i]] = counts[i + 1];
+            if (counts[i] == TellsCount) {
+                named.Tells = counts[i + 1];
+            } else {
+                named.Times[counts[i]] = counts[i + 1];
+            }
         }
     }
+
+    /// <summary>
+    /// The number under which the roll counts of an object say how many things it told (see <see cref="RollCounts"/>),
+    /// which is no action's.
+    /// </summary>
+    private const int TellsCount = int.MinValue;
 
     /// <summary>
     /// The numbers of a song of a creature that every game runs by itself (see OwnCreatures), each of which comes
