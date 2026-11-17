@@ -317,8 +317,13 @@ internal partial class CoopSave {
         );
 
         // One whose state machines play its death, like a boss, is never marked dead, and dies again at each blow
-        // that finds it with no health: it is told once
-        if (!tells || !self.isDead && !(self.hasSpecialDeath && self.hp <= 0) ||
+        // that finds it with no health: it is told once, where they play it as the game tells them that it has none.
+        // One whose state machines go on by their own look at its health, like the boss at the end of the second act
+        // through its phases, comes to no health at the end of each phase, which is no death: every game takes every
+        // blow, and its own look plays its phases and its death (USER 11-17 "转阶段后的报数之类的会有问题吗": the end
+        // of its first phase would go to the others as its death, and their game would play a death of it that did
+        // nothing but let go of the blows that it still had to take)
+        if (!tells || !self.isDead && !(self.hasSpecialDeath && self.hp <= 0 && HearsNoHealth(self)) ||
             !OwnCreatures.MarkDead(self.gameObject)) {
             return;
         }
@@ -333,6 +338,22 @@ internal partial class CoopSave {
             PartCount = 2,
             Values = attackDirection is { } direction ? [direction] : []
         });
+    }
+
+    /// <summary>
+    /// Whether a state machine of a creature goes on as the game tells it that it has no health left (ZERO HP), by
+    /// which it plays its death, like the boss whose fight lets rocks fall.
+    /// </summary>
+    private static bool HearsNoHealth(HealthManager health) {
+        foreach (var machine in health.GetComponents<PlayMakerFSM>()) {
+            var fsm = machine.Fsm;
+            if (fsm.GlobalTransitions.Concat(fsm.States.SelectMany(state => state.Transitions))
+                .Any(transition => transition.EventName == "ZERO HP")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
