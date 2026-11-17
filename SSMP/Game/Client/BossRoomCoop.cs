@@ -521,9 +521,8 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Tells a player who entered the local scene which rooms the local player already reached, and the fights and
-    /// steps of the story that they got to, and what their bosses told them, and shares the dialogue that is still
-    /// being read. A player who told of a film of theirs before they
+    /// Tells a player who entered the local scene which rooms the local player already reached and what their bosses
+    /// told them, and shares the dialogue that is still being read. A player who told of a film of theirs before they
     /// came in is kept off the list of whom creatures go after (see KeepInCutsceneOffTargets).
     /// </summary>
     public void OnPlayerEnterScene() {
@@ -531,15 +530,6 @@ internal partial class BossRoomCoop {
         foreach (var pair in _arrivals) {
             if (pair.Value.Local && pair.Key.GameObject != null) {
                 Send(BossRoomUpdateKind.Arrived, pair.Key, "", "", "");
-            }
-        }
-
-        // So too where the local player got after the dialogue of a room, or to a step of the story that waits for
-        // every player: the word went before that player was here, and a step of the flea festival's ending that they
-        // got to later waited for it for good
-        foreach (var pair in _fightReadiness) {
-            if (pair.Value.Local && pair.Key.GameObject != null) {
-                Send(BossRoomUpdateKind.Ready, pair.Key, "", "", "");
             }
         }
 

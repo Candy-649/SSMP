@@ -632,20 +632,12 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// <param name="update">The hit.</param>
     public void AddCoopHitUpdateData(CoopHitUpdate update) {
         lock (Lock) {
+            // All that the hit carries goes on. Built here field by field, it dropped what the hit was given later:
+            // whether a creature blocked a blow, and whether something that breaks counted a hit, came to no game, so
+            // a blow that the knight blocked wounded it in every other game and a lantern broke a hit early there
+            // (review)
             var coopHitUpdateCollection = GetOrCreateCollection<CoopHitUpdate>(ClientUpdatePacketId.CoopHitUpdate);
-            coopHitUpdateCollection.DataInstances.Add(
-                new CoopHitUpdate {
-                    PlayerId = update.PlayerId,
-                    TargetId = update.TargetId,
-                    Kind = update.Kind,
-                    EntityId = update.EntityId,
-                    Scene = update.Scene,
-                    Path = update.Path,
-                    Responder = update.Responder,
-                    Index = update.Index,
-                    Hit = update.Hit
-                }
-            );
+            coopHitUpdateCollection.DataInstances.Add(update.Copy());
         }
     }
 
