@@ -121,6 +121,20 @@ internal static class ToldParts {
     }
 
     /// <summary>
+    /// For an action of a creature that every game runs by itself that tells a part of the room which it picked by
+    /// where a player is: true in a game that does not follow the scene host's, which tells it, false in one that does,
+    /// which tells the part that the scene host's game picked instead; null for any other action (see
+    /// CoopSave.OwnPicks).
+    /// </summary>
+    public static Func<FsmStateAction, bool?>? OwnPick { get; set; }
+
+    /// <summary>
+    /// Tells the others which part of the room an action told just now, which its creature picked by where a player is
+    /// (see <see cref="OwnPick"/>).
+    /// </summary>
+    public static Action<FsmStateAction>? ToldOwnPick { get; set; }
+
+    /// <summary>
     /// Registers the hooks on the actions with which a creature tells something, for the game that runs it to name
     /// what it tells before it goes.
     /// </summary>
@@ -152,18 +166,38 @@ internal static class ToldParts {
 
     /// <summary>
     /// Hook on an action that tells something: in the game that runs the creature it belongs to, names what it tells
-    /// before the event goes.
+    /// before the event goes. A part of the room that a creature that every game runs by itself picked by where a
+    /// player is, a game that follows the scene host's does not tell, and the scene host's game tells the others which
+    /// part it told (see <see cref="OwnPick"/>).
     /// </summary>
     private static void OnTell(Action<FsmStateAction> orig, FsmStateAction self) {
+        bool? ownPick = null;
         try {
             if (Entity.Entity.TryGetThrower(self, out var creature)) {
                 NameWhatIsTold(self, creature);
+            } else {
+                ownPick = OwnPick?.Invoke(self);
             }
         } catch (Exception e) {
             SayFailed(e);
         }
 
+        // Told once and at once, it is through as it would have been
+        if (ownPick == false) {
+            self.Finish();
+            return;
+        }
+
         orig(self);
+        if (ownPick != true) {
+            return;
+        }
+
+        try {
+            ToldOwnPick?.Invoke(self);
+        } catch (Exception e) {
+            SayFailed(e);
+        }
     }
 
     /// <summary>

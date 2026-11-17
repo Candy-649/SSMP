@@ -469,6 +469,22 @@ internal static partial class SharedDice {
     private const int TellsCount = int.MinValue;
 
     /// <summary>
+    /// How many things an object that rolls under a name told under it (see <see cref="NextTellName"/>), or none for
+    /// one that rolls with the game's own dice.
+    /// </summary>
+    public static int TellsOf(GameObject gameObject) {
+        return NamedRollers.TryGetValue(gameObject, out var named) ? named.Tells : 0;
+    }
+
+    /// <summary>
+    /// Has an object that rolls under a name go on from how many things it told in another game, so that what it tells
+    /// next rolls under the name that it rolled under there (see <see cref="NextTellName"/>).
+    /// </summary>
+    public static void SetTells(GameObject gameObject, int tells) {
+        NamedRollers[gameObject].Tells = tells;
+    }
+
+    /// <summary>
     /// The numbers of a song of a creature that every game runs by itself (see OwnCreatures), each of which comes
     /// from the dice of that song (see <see cref="RollForSong"/>).
     /// </summary>

@@ -127,6 +127,8 @@ internal partial class CoopSave {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         OwnThreads.SendToRoomMembers = SendToRoomMembers;
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
+        ToldParts.OwnPick = OwnPickOf;
+        ToldParts.ToldOwnPick = TellOwnPick;
         _ownCreatureHooks.Add(CreateHook(
             typeof(Fsm).GetMethod("SwitchState", flags, null, [typeof(FsmState)], null),
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnOwnCreatureStep)
@@ -532,6 +534,12 @@ internal partial class CoopSave {
         // It struck back at a blow of the player of that game that it blocked there, which that game plays by itself
         if (update.PartCount == OwnStrikeBackPart) {
             TakeOwnStrikeBack(player, creature, update);
+            return;
+        }
+
+        // It told a part of the room there that it picked by where a player is, which it tells here too
+        if (update.PartCount == OwnPickPart) {
+            TakeOwnPick(player, creature, update);
             return;
         }
 
