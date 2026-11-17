@@ -2703,7 +2703,9 @@ internal partial class CoopHits {
         HitInstance hit
     ) {
         // A thing that a creature threw goes after the player who struck it, and goes by its name and where it was as
-        // they struck: what the tink tells it can put it back into the pool, which takes its name off it
+        // they struck: what the tink tells it can put it back into the pool, which takes its name off it. The tink is
+        // a strike of this game's player, to what it tells too (see IsMakingLocalStrike)
+        using var strike = new LocalStrike(true);
         var turned = TurnThrownToLocalPlayer(tink.gameObject, out var before);
         var thrownPath = turned != null ? ThrownThings.PathOf(told.gameObject) : null;
 
