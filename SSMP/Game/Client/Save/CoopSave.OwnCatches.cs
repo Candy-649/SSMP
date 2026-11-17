@@ -59,11 +59,24 @@ internal partial class CoopSave {
         new();
 
     /// <summary>
+    /// The state machines of creatures that every game runs by itself, each with the first state of a catch of each of
+    /// its states that only a catch leads to (see <see cref="CatchStateOf"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, Dictionary<FsmState, FsmState>> _catchStates = new();
+
+    /// <summary>
     /// The state machines of creatures that every game runs by itself that leap at this game's player, in a game that
     /// follows the scene host's, which plays the leap here by itself until it is through (see
     /// <see cref="PlaysOwnLeap"/>).
     /// </summary>
     private readonly Dictionary<Fsm, OwnLeap> _ownLeaps = new();
+
+    /// <summary>
+    /// The latest step of the scene host's of each part of a creature that every game runs by itself that came while
+    /// the creature played a move here by itself, which the part goes on from once the creature is through (see
+    /// <see cref="TakePartStepsAfter"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, (ClientPlayerData Host, CoopSaveUpdate Step)> _partStepsInLeap = new();
 
     /// <summary>
     /// The catches of other players that came to the scene host's game before its creature got to the state that the
@@ -133,6 +146,29 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The state that a catch takes a state machine to (see <see cref="IsCatchState"/>), if a state is that one or one
+    /// that only it leads to, or null.
+    /// </summary>
+    private FsmState? CatchStateOf(Fsm fsm, FsmState state) {
+        if (!_catchStates.TryGetValue(fsm, out var firsts)) {
+            firsts = new Dictionary<FsmState, FsmState>();
+            foreach (var each in fsm.States) {
+                if (!IsCatchState(fsm, each)) {
+                    continue;
+                }
+
+                foreach (var inCatch in Entity.Action.EntityFsmActions.StatesOnlyThrough(fsm, each)) {
+                    firsts.TryAdd(inCatch, each);
+                }
+            }
+
+            _catchStates[fsm] = firsts;
+        }
+
+        return firsts.TryGetValue(state, out var first) ? first : null;
+    }
+
+    /// <summary>
     /// Whether a state is one of a leap that catches: one that a catch can come from (see Entity.CatchEvents), and that
     /// does something. A state of nothing but ways out is one where a state machine waits to hear of a catch, like the
     /// one by which the knight holds the player for its blows, which waits so all the time (review: one that came to it
@@ -157,12 +193,17 @@ internal partial class CoopSave {
     /// <summary>
     /// Lets a state machine of a creature that every game runs by itself go to a state. Out of the states of a catch
     /// that was not of this game's player, what it does to the player it caught is let back in, but on a way that every
-    /// state has, into what it does as it lets go of them (see <see cref="KeepOutOfTheAftermath"/>); into one, it is
-    /// kept off this game's player (see <see cref="KeepOut"/>).
+    /// state has, into what it does as it lets go of them (see <see cref="KeepOutOfTheAftermath"/>), and so it is as
+    /// something tells it that it caught this game's player meanwhile, whose catch it is then (review: the strands of
+    /// the boss at the end of the second act caught the player of a game that played a catch of another player, who
+    /// was neither held nor hurt by their own catch). Into a state of a catch of another player from outside it, its
+    /// first or one after it, as a member who comes in while it plays the catch is put there, it is kept off this
+    /// game's player (see <see cref="KeepOut"/>; review: put into the slash of that boss, they were cut by it).
     /// </summary>
     private void EnterOwnState(Action<Fsm, FsmState> orig, Fsm fsm, FsmState toState) {
-        if (_keptOut.TryGetValue(fsm, out var kept) && !kept.States.Contains(toState) &&
-            !KeepOutOfTheAftermath(fsm, toState, kept)) {
+        if (_keptOut.TryGetValue(fsm, out var kept) &&
+            (CatchesLocalPlayer(fsm, toState, fsm.GameObject) ||
+             !kept.States.Contains(toState) && !KeepOutOfTheAftermath(fsm, toState, kept))) {
             foreach (var action in kept.Muted) {
                 action.Enabled = true;
             }
@@ -174,8 +215,9 @@ internal partial class CoopSave {
             );
         }
 
-        if (!_keptOut.ContainsKey(fsm) && IsCatchState(fsm, toState) && !GoesAfterLocalPlayer(fsm.GameObject)) {
-            KeepOut(fsm, toState);
+        if (!_keptOut.ContainsKey(fsm) && CatchStateOf(fsm, toState) is { } catchState &&
+            CatchStateOf(fsm, fsm.ActiveState) != catchState && !GoesAfterLocalPlayer(fsm.GameObject)) {
+            KeepOut(fsm, catchState);
         }
 
         orig(fsm, toState);
@@ -183,8 +225,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Keeps off this game's player what a state machine of a creature that every game runs by itself does to the
-    /// player it caught, as it goes into a catch of another player, until it is through the states that only the catch
-    /// leads to.
+    /// player it caught, as it goes into a catch of another player, of which the given state is the first, until it is
+    /// through the states that only the catch leads to.
     /// </summary>
     private void KeepOut(Fsm fsm, FsmState toState) {
         var states = Entity.Action.EntityFsmActions.StatesOnlyThrough(fsm, toState);
@@ -437,14 +479,41 @@ internal partial class CoopSave {
                     $"[Own creatures] '{leap.Place}' is through its {leap.What} here, and no step of the scene " +
                     "host's came meanwhile"
                 );
+            } else {
+                Logger.Info(
+                    $"[Own creatures] '{leap.Place}' is through its {leap.What} here, and goes on from the latest " +
+                    $"step of {host.Username}'s game, to '{latest.StateName}'"
+                );
+                OnOwnCreature(host, latest);
+            }
+
+            TakePartStepsAfter(pair.Key.GameObject);
+        }
+    }
+
+    /// <summary>
+    /// Has the parts of a creature that every game runs by itself go on from the latest steps of the scene host's that
+    /// came while it played a move here by itself, once it is through every one of them: they went on as the creature
+    /// told them here meanwhile (review: one that the move told something, like the blades that the boss at the end of
+    /// the second act sends away as it slashes, waited after it for the scene host's next word, at its next move).
+    /// </summary>
+    private void TakePartStepsAfter(GameObject leapt) {
+        if (_partStepsInLeap.Count == 0 || OwnCreatures.Owning(leapt) is not { } creature || InOwnLeap(creature)) {
+            return;
+        }
+
+        foreach (var pair in _partStepsInLeap.ToList()) {
+            if (OwnCreatures.Owning(pair.Key.GameObject) != creature) {
                 continue;
             }
 
+            _partStepsInLeap.Remove(pair.Key);
             Logger.Info(
-                $"[Own creatures] '{leap.Place}' is through its {leap.What} here, and goes on from the latest step " +
-                $"of {host.Username}'s game, to '{latest.StateName}'"
+                $"[Own creatures] '{OwnCreatures.PlaceOf(pair.Key.GameObject)}' goes on from the latest step of " +
+                $"{pair.Value.Host.Username}'s game, to '{pair.Value.Step.StateName}' of '{pair.Key.Name}', as its " +
+                "creature is through its move here"
             );
-            OnOwnCreature(host, latest);
+            OnOwnCreature(pair.Value.Host, pair.Value.Step);
         }
     }
 

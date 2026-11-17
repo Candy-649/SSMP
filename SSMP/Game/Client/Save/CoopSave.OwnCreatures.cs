@@ -535,11 +535,13 @@ internal partial class CoopSave {
         }
 
         // A step of a part while its creature here plays a move by itself: the part goes on as the creature tells it
-        // here, and takes the steps of the scene host's again after
+        // here, and from the latest of these once the creature is through (see TakePartStepsAfter)
         if (OwnCreatures.IsPart(creature) && OwnCreatures.Owning(creature) is { } owner && InOwnLeap(owner)) {
+            _partStepsInLeap[fsm] = (player, update);
             Logger.Info(
                 $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
-                "game, while its creature plays a move here by itself, and goes on as the creature tells it here"
+                "game, while its creature plays a move here by itself, and goes on as the creature tells it here " +
+                "until it is through"
             );
             return;
         }

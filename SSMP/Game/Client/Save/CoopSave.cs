@@ -760,7 +760,9 @@ internal partial class CoopSave {
         _heldOwnSteps.Clear();
         _playerWayValues.Clear();
         _keptOut.Clear();
+        _catchStates.Clear();
         _ownLeaps.Clear();
+        _partStepsInLeap.Clear();
         _earlyCatches.Clear();
 
         GrowBackPustulesThePartnerDrew();

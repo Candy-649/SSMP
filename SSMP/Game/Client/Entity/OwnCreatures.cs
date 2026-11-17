@@ -243,7 +243,7 @@ internal static class OwnCreatures {
     /// (see SharedDice.RollByName).
     /// </summary>
     public static string RollName(GameObject creature) {
-        return "Own " + Creatures[creature].Place;
+        return "Own " + PlaceOf(creature);
     }
 
     /// <summary>
