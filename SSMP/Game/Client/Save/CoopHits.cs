@@ -229,7 +229,13 @@ internal partial class CoopHits {
     /// <summary>
     /// Whether a hit or touch of the partner is being replayed.
     /// </summary>
-    private bool _isReplaying;
+    private static bool _isReplaying;
+
+    /// <summary>
+    /// Whether a hit or touch of another member's player is being played here as it came (see
+    /// CoopSave.OnOwnCreatureStep).
+    /// </summary>
+    public static bool IsReplayingPartnersStrike => _isReplaying;
 
     /// <summary>
     /// Whether the hit being replayed did not count on the thing that breaks in the partner's game, so it doesn't count

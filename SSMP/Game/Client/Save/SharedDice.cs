@@ -485,6 +485,69 @@ internal static partial class SharedDice {
     }
 
     /// <summary>
+    /// How many more times each action rolled, and how many more things the object told, in some roll counts than in
+    /// others (see <see cref="RollCounts"/>), for those that are more, in the same form.
+    /// </summary>
+    public static List<int> CountsAhead(List<int> counts, List<int> than) {
+        var ahead = TimesOf(counts);
+        foreach (var (roller, times) in TimesOf(than)) {
+            ahead.TryGetValue(roller, out var more);
+            ahead[roller] = more - times;
+        }
+
+        return CountsOf(ahead);
+    }
+
+    /// <summary>
+    /// Roll counts with others added to them (see <see cref="RollCounts"/>), in the same form.
+    /// </summary>
+    public static List<int> AddCounts(List<int> counts, List<int> more) {
+        var sums = TimesOf(counts);
+        foreach (var (roller, times) in TimesOf(more)) {
+            sums.TryGetValue(roller, out var sum);
+            sums[roller] = sum + times;
+        }
+
+        return CountsOf(sums);
+    }
+
+    /// <summary>
+    /// The times of each action, and how many things were told, in roll counts (see <see cref="RollCounts"/>).
+    /// </summary>
+    private static Dictionary<int, int> TimesOf(List<int> counts) {
+        var times = new Dictionary<int, int>();
+        for (var i = 0; i + 1 < counts.Count; i += 2) {
+            times[counts[i]] = counts[i + 1];
+        }
+
+        return times;
+    }
+
+    /// <summary>
+    /// Roll counts of the times of each action and how many things were told (see <see cref="RollCounts"/>), of those
+    /// that are more than none.
+    /// </summary>
+    private static List<int> CountsOf(Dictionary<int, int> times) {
+        var rollers = new List<int>(times.Keys);
+        rollers.Remove(TellsCount);
+        rollers.Sort();
+        var counts = new List<int>();
+        foreach (var roller in rollers) {
+            if (times[roller] > 0) {
+                counts.Add(roller);
+                counts.Add(times[roller]);
+            }
+        }
+
+        if (times.TryGetValue(TellsCount, out var tells) && tells > 0) {
+            counts.Add(TellsCount);
+            counts.Add(tells);
+        }
+
+        return counts;
+    }
+
+    /// <summary>
     /// The numbers of a song of a creature that every game runs by itself (see OwnCreatures), each of which comes
     /// from the dice of that song (see <see cref="RollForSong"/>).
     /// </summary>

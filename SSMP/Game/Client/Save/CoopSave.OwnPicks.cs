@@ -21,8 +21,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// where the player stood between two. What looks at a player is the scene host's move (USER 11-16 "看人的就房主传过来
 /// 招式"; USER 11-17 "我现在很怀疑你丝线和手之类的怎么写的（"): the scene host's game picks the part and tells it, and
 /// tells the others which part it told, with how many things the creature had told before, so that the part rolls
-/// under the same name there (see SharedDice.NextTellName). A game that follows it tells none of the parts it picks
-/// so itself, and tells the one that the scene host's game picked as it is told.
+/// under the same name there (see SharedDice.NextTellName). A game that follows it goes into the state that picks as
+/// the scene host's step comes, right before which part comes (see CoopSave.OnOwnCreatureStep), tells none of the
+/// parts it picks so itself, and tells the one that the scene host's game picked as it is told (review: it went into
+/// the second pick of a move by itself, before or after the word came, and what it told until the word came was
+/// named by one less).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -38,6 +41,13 @@ internal partial class CoopSave {
     private static readonly Dictionary<Type, FieldInfo[]> PickFields = new();
 
     /// <summary>
+    /// The variable through which each action of a creature that every game runs by itself, or of a part of it, that
+    /// this game looked at tells a part of the room which it picked by where a player is, or null for one that tells
+    /// no such part (see <see cref="PickOf"/>).
+    /// </summary>
+    private readonly Dictionary<FsmStateAction, string?> _picks = new();
+
+    /// <summary>
     /// How many things the creature had told before the action that tells a part that it picked, in the scene host's
     /// game, from just before the action tells it to just after (see <see cref="OwnPickOf"/>).
     /// </summary>
@@ -51,8 +61,7 @@ internal partial class CoopSave {
     /// </summary>
     private bool? OwnPickOf(FsmStateAction action) {
         if (OwnCreatures.Count == 0 || action.Fsm is not { } fsm || fsm.GameObject is not { } teller ||
-            teller == null || !OwnCreatures.RollsUnderPlace(teller) || PickedVariable(action) is not { } variable ||
-            !PickedByPlayer(action, variable)) {
+            teller == null || !OwnCreatures.RollsUnderPlace(teller) || PickOf(action) == null) {
             return null;
         }
 
@@ -65,6 +74,7 @@ internal partial class CoopSave {
             return false;
         }
 
+        SharedDice.RollByName(teller, OwnCreatures.RollName(teller));
         _pickTells = SharedDice.TellsOf(teller);
         return true;
     }
@@ -77,7 +87,7 @@ internal partial class CoopSave {
     private void TellOwnPick(FsmStateAction action) {
         var fsm = action.Fsm;
         var teller = fsm.GameObject;
-        var variable = PickedVariable(action)!;
+        var variable = PickOf(action)!;
         if (fsm.Variables.GetFsmGameObject(variable).Value is not { } told || told == null) {
             return;
         }
@@ -119,12 +129,41 @@ internal partial class CoopSave {
         }
 
         fsm.Variables.GetFsmGameObject(update.Names[1]).Value = told;
+        SharedDice.RollByName(teller, OwnCreatures.RollName(teller));
         SharedDice.SetTells(teller, update.Amounts[0]);
         Logger.Info(
             $"[Own creatures] '{update.ObjectPath}' tells '{update.Names[0]}' from '{update.StateName}' of " +
             $"'{fsm.Name}' here, the part that it picked by where a player is in {player.Username}'s game"
         );
         fsm.Event(eventTarget, eventName);
+    }
+
+    /// <summary>
+    /// The variable through which an action tells a part of the room that its creature picked by where a player is
+    /// (see <see cref="PickedVariable"/>, <see cref="PickedByPlayer"/>), or null for an action that tells no such part,
+    /// found once for each action.
+    /// </summary>
+    private string? PickOf(FsmStateAction action) {
+        if (!_picks.TryGetValue(action, out var variable)) {
+            variable = PickedVariable(action) is { } held && PickedByPlayer(action, held) ? held : null;
+            _picks[action] = variable;
+        }
+
+        return variable;
+    }
+
+    /// <summary>
+    /// Whether a state of a creature that every game runs by itself, or of a part of it, tells a part of the room which
+    /// it picked by where a player is (see <see cref="PickOf"/>).
+    /// </summary>
+    private bool PicksAPart(FsmState state) {
+        foreach (var action in state.Actions) {
+            if (PickOf(action) != null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -160,9 +199,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether an action that comes before one that tells something, in its state, put what it tells into the variable
-    /// that it tells through by looking at a player: an action that looks at the player that the creature goes after,
-    /// where it looks at a player, like the closest of a kind of object to them (see ActionRegistry.IsRetargeted).
+    /// Whether an action that comes before one that tells something, in its state, puts what it tells into the
+    /// variable that it tells through by looking at a player: an action that looks at the player that the creature
+    /// goes after, where it looks at a player (see ActionRegistry.IsRetargeted), through a variable named for them (see
+    /// GamePatcher.IsTargetVariableName), like the closest of a kind of object to them. It goes by how the state is
+    /// made, the same in every game, rather than by what the variable holds as it is asked, which may be no one yet in
+    /// one game and the player in another (review).
     /// </summary>
     private static bool PickedByPlayer(FsmStateAction tell, string variable) {
         foreach (var pick in tell.State.Actions) {
@@ -170,24 +212,26 @@ internal partial class CoopSave {
                 return false;
             }
 
-            if (!pick.Enabled || !ActionRegistry.IsRetargeted(pick.GetType().Name)) {
+            if (!ActionRegistry.IsRetargeted(pick.GetType().Name)) {
                 continue;
             }
 
             var keeps = false;
             var looks = false;
             foreach (var field in FieldsOf(pick.GetType())) {
-                var kept = field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase);
-                switch (field.GetValue(pick)) {
-                    case FsmGameObject { UseVariable: true } into when kept:
-                        keeps |= into.Name == variable;
-                        break;
-                    case FsmGameObject at when !kept:
-                        looks |= PlayerTargetRegistry.IsHeroLikeObject(at.Value);
-                        break;
-                    case FsmOwnerDefault owner:
-                        looks |= PlayerTargetRegistry.IsHeroLikeObject(tell.Fsm.GetOwnerDefaultTarget(owner));
-                        break;
+                var held = field.GetValue(pick) switch {
+                    FsmGameObject gameObject => gameObject,
+                    FsmOwnerDefault { OwnerOption: OwnerDefaultOption.SpecifyGameObject } owner => owner.GameObject,
+                    _ => null
+                };
+                if (held is not { UseVariable: true }) {
+                    continue;
+                }
+
+                if (field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase)) {
+                    keeps |= held.Name == variable;
+                } else {
+                    looks |= GamePatcher.IsTargetVariableName(held.Name);
                 }
             }
 

@@ -112,6 +112,19 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, HashSet<string>> _playerWayValues = new();
 
     /// <summary>
+    /// The variables that a state adds to once as it starts, for each state machine of a creature that every game runs
+    /// by itself whose steps this game has looked at (see ChoosesByCount).
+    /// </summary>
+    private readonly Dictionary<Fsm, HashSet<string>> _countedValues = new();
+
+    /// <summary>
+    /// The state machines of creatures that every game runs by itself that took a step here that a blow set off, of
+    /// this game's player or another's as it came, and go on from there by themselves until they next wait for a step
+    /// of the scene host's (see TakeOwnStep).
+    /// </summary>
+    private readonly HashSet<Fsm> _ownWays = new();
+
+    /// <summary>
     /// While a state machine goes through the states between into a step of the scene host's (see WalkInto): the
     /// states of the part of it that the step goes round in, the step, and the states that it went through.
     /// </summary>
@@ -147,6 +160,9 @@ internal partial class CoopSave {
             new Action<Action<HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool>,
                 HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool>(OnOwnCreatureDie)
         ));
+
+        // Its look at its health (see CoopSave.OwnHealth)
+        _ownCreatureHooks.Add(OwnHealthHook());
     }
 
     /// <summary>
@@ -201,6 +217,7 @@ internal partial class CoopSave {
             }
 
             _heldOwnSteps.Remove(self);
+            _ownWays.Remove(self);
 
             // The step itself may be a leap at this game's player or a talk, which this game plays from there; a state
             // on the way into it is neither, and does what it does as it is entered but for a line of a talk or a
@@ -229,23 +246,27 @@ internal partial class CoopSave {
             return;
         }
 
-        // A step that goes by where the players are, or that another state machine told it, is the scene host's: it
-        // waits for that, which has mostly come already, as this game is a moment behind. The switch that the game
-        // was to make is let go of, as the game tries it again at once until it is made. A leap at this game's player
-        // is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which it waits
-        // for the scene host's to come as far (see CoopSave.OwnTalks). So is what a strike of this game's player sets
-        // off as it is made, as in a game of one: a wound, a block or a tink, and what they tell the other state
-        // machines of the creature at once, though not where a state that it went into chooses its way on by where
-        // the players are, which stays the scene host's. The scene host's game is told of the strike as it was taken
-        // here, and its creature answers it as the game does, which every other game takes as a step of the scene
-        // host's (USER 11-17 "如果这个会有反馈，我这边应该先演，然后通知房主，让房主那边的也触发这个弹开", "本地化就是为
-        // 了让自己的怪是活的，可以触发各种反应"; a blade of the boss at the end of the second act that the player tinked
-        // did nothing, as it went by where the players are, until the scene host's step came)
+        // A step that goes by where the players are or by a count that each game keeps for itself, or that another
+        // state machine told it, is the scene host's: it waits for that, which has mostly come already, as this game
+        // is a moment behind. So is a step into a state that tells a part of the room which it picks by where a player
+        // is, after which the scene host's game tells which part it picked (see CoopSave.OwnPicks). The switch that the
+        // game was to make is let go of, as the game tries it again at once until it is made. A leap at this game's
+        // player is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which
+        // it waits for the scene host's to come as far (see CoopSave.OwnTalks). So is what a strike of this game's
+        // player sets off as it is made, as in a game of one: a wound, a block or a tink, and what they tell the other
+        // state machines of the creature at once, though not where a state that it went into chooses its way on by
+        // where the players are or by a count, which stays the scene host's. The scene host's game is told of the
+        // strike as it was taken here, and its creature answers it as the game does, which every other game takes as a
+        // step of the scene host's (USER 11-17 "如果这个会有反馈，我这边应该先演，然后通知房主，让房主那边的也触发这个弹
+        // 开", "本地化就是为了让自己的怪是活的，可以触发各种反应"; a blade of the boss at the end of the second act that the
+        // player tinked did nothing, as it went by where the players are, until the scene host's step came)
         var waitedFor = IsWaitedFor(self);
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
+        var picks = PicksAPart(toState);
         if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
-            (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike)) {
+            (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike || picks)) {
             MachineSwitchToStateField?.SetValue(self, null);
+            _ownWays.Remove(self);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
                 _heldOwnSteps[self] = self.ActiveStateName;
                 Logger.Info(
@@ -257,10 +278,18 @@ internal partial class CoopSave {
             return;
         }
 
+        // A step that a blow sets off here, of this game's player or another's as it comes, and the steps that its
+        // state machine takes from there by itself, come at another moment of its way than in the scene host's game,
+        // after other rolls: the scene host's are found among them by their states (see TakeOwnStep)
         _heldOwnSteps.Remove(self);
+        if (CoopHits.IsMakingLocalStrike || CoopHits.IsReplayingPartnersStrike) {
+            _ownWays.Add(self);
+        }
+
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         var step = new OwnStep(
-            toState.Name, SharedDice.RollCounts(creature), creature.transform.position, creature.transform.localScale.x
+            toState.Name, SharedDice.RollCounts(creature), creature.transform.position, creature.transform.localScale.x,
+            _ownWays.Contains(self)
         );
         if (!_ownSteps.TryGetValue(self, out var steps)) {
             steps = [];
@@ -279,9 +308,10 @@ internal partial class CoopSave {
             GamePatcher.GoAfterGrabbed(creature, hero.gameObject);
         }
 
-        // A part tells only the steps that the others wait for, which it took by where the players are or as it was
-        // told: the rest of them the others take by themselves, and a part steps on many times in each move
-        if (IsSceneHost?.Invoke() == true && (!OwnCreatures.IsPart(creature) || waitedFor)) {
+        // A part tells only the steps that the others wait for, which it took by where the players are, by a count or
+        // as it was told, or into a state that picks a part of the room: the rest of them the others take by
+        // themselves, and a part steps on many times in each move
+        if (IsSceneHost?.Invoke() == true && (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
             Logger.Info(
                 $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' goes from '{self.ActiveStateName}' to " +
                 $"'{toState.Name}' of '{self.Name}' after {step.Counts.Count / 2} kinds of rolls, as the members in " +
@@ -320,9 +350,15 @@ internal partial class CoopSave {
         // that finds it with no health: it is told once, where they play it as the game tells them that it has none.
         // One whose state machines go on by their own look at its health, like the boss at the end of the second act
         // through its phases, comes to no health at the end of each phase, which is no death: every game takes every
-        // blow, and its own look plays its phases and its death (USER 11-17 "转阶段后的报数之类的会有问题吗": the end
-        // of its first phase would go to the others as its death, and their game would play a death of it that did
-        // nothing but let go of the blows that it still had to take)
+        // blow, and its own look plays its phases and its death, as the scene host's game tells that it has none (see
+        // CoopSave.OwnHealth; USER 11-17 "转阶段后的报数之类的会有问题吗": the end of its first phase would go to the
+        // others as its death, and their game would play a death of it that did nothing but let go of the blows that
+        // it still had to take)
+        if (tells && !self.isDead && self.hasSpecialDeath && self.hp <= 0 && !HearsNoHealth(self)) {
+            TellOwnEmptied(self);
+            return;
+        }
+
         if (!tells || !self.isDead && !(self.hasSpecialDeath && self.hp <= 0 && HearsNoHealth(self)) ||
             !OwnCreatures.MarkDead(self.gameObject)) {
             return;
@@ -564,6 +600,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // Its health came to none there, after which the next blow, of any player, plays here as the game has it
+        if (update.PartCount == OwnEmptiedPart && hasHealth) {
+            TakeOwnEmptied(player, health);
+            return;
+        }
+
         // A step of the scene host's while this game plays a leap at its own player or a talk by itself (see
         // CoopSave.OwnCatches, CoopSave.OwnTalks)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
@@ -605,6 +647,27 @@ internal partial class CoopSave {
         var transform = creature.transform;
         var there = new Vector3(update.Values[0], update.Values[1], transform.position.z);
         if (TakeOwnStep(fsm, update, out var newest) is { } took) {
+            // Played here already, from a blow that came here at another moment: where it is and the way it faces are
+            // its own, until it next waits for a step of the scene host's. What the scene host's game rolled and told
+            // on its way there between the blow here and the blow there, this one never does, as the blow stopped it
+            // before: it goes on from as many as there, and so do the steps that it took since, so that what comes
+            // after the blow rolls the same in every game (USER 11-17 "然后后面得泥石流，战吼，都是统一的")
+            if (took.OwnWay) {
+                var ahead = SharedDice.CountsAhead(update.Amounts, took.Counts);
+                if (ahead.Count > 0) {
+                    SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
+                    SharedDice.SetRollCounts(creature, SharedDice.AddCounts(SharedDice.RollCounts(creature), ahead));
+                    AddToOwnWays(creature, ahead);
+                }
+
+                Logger.Info(
+                    $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+                    $"game, which it played here already, as a blow set it off, {ahead.Count / 2} kinds of rolls " +
+                    "later there"
+                );
+                return;
+            }
+
             var off = there - took.Place;
             off.z = 0f;
             if (off.magnitude > OwnCreatureDrift) {
@@ -842,12 +905,47 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether the others wait for a step that a state machine of a creature that every game runs by itself takes now,
-    /// in the games that follow the scene host's: one out of a state that goes by where the players are, or one that
-    /// another state machine told it.
+    /// in the games that follow the scene host's: one out of a state that goes by where the players are or by a count
+    /// that each game keeps for itself, or one that another state machine told it.
     /// </summary>
     private bool IsWaitedFor(Fsm fsm) {
-        return fsm.ActiveState is { } from && GoesByPlayers(from) ||
+        return fsm.ActiveState is { } from && (GoesByPlayers(from) || ChoosesByCount(from)) ||
                Fsm.EventData?.SentByFsm is { } sender && sender != fsm;
+    }
+
+    /// <summary>
+    /// Whether a state chooses its way on by a count that each game keeps for itself: one of its actions decides where
+    /// it goes by a number that a state of its state machine adds to once as it starts (see HitCounters.CountedBy),
+    /// like the blows that the boss at the end of the second act took since it was last stunned. Each game takes in
+    /// the blows of every player, its own player's at once and the others' as they come, and counts some of them in
+    /// another state than the others, so that a count is full at another blow in each game: the scene host's is the
+    /// one (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
+    /// host's step came). Its health is no such count: what it does as it has none goes by the scene host's word that
+    /// it has none (see CoopSave.OwnHealth).
+    /// </summary>
+    private bool ChoosesByCount(FsmState state) {
+        var fsm = state.Fsm;
+        if (!_countedValues.TryGetValue(fsm, out var counted)) {
+            counted = [];
+            foreach (var each in fsm.States) {
+                foreach (var action in each.Actions) {
+                    if (HitCounters.CountedBy(action) is { Length: > 0 } name) {
+                        counted.Add(name);
+                    }
+                }
+            }
+
+            _countedValues[fsm] = counted;
+        }
+
+        foreach (var action in state.Actions) {
+            if (action.Enabled && Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
+                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -910,7 +1008,8 @@ internal partial class CoopSave {
     /// state of a step of the scene host's creature after as many rolls, which is that step, or null if it took none.
     /// It is answered, and so are the steps before it, which the scene host's did not take: a later step of the scene
     /// host's that goes to the same state after as many rolls, like the next of two that a state machine with no
-    /// rolls goes between, is not taken for it. With none found, none of them is on the way of the scene host's.
+    /// rolls goes between, is not taken for it. One that it took on a way of its own from a blow is found by its state
+    /// alone (see _ownWays). With none found, none of them is on the way of the scene host's.
     /// </summary>
     /// <param name="fsm">The state machine.</param>
     /// <param name="update">The step of the scene host's.</param>
@@ -924,6 +1023,14 @@ internal partial class CoopSave {
         var index = steps.FindIndex(
             step => step.State == update.StateName && step.Counts.SequenceEqual(update.Amounts)
         );
+
+        // One that it took on a way of its own from a blow came at another moment of its way here, after other rolls
+        // than there: it is the first of the same state (USER 11-17 "房主那边如果自己还没打到，客机打到了就演，自己已经
+        // 打到了那就已经演了", "房主传过来同理")
+        if (index < 0) {
+            index = steps.FindIndex(step => step.OwnWay && step.State == update.StateName);
+        }
+
         if (index < 0) {
             steps.Clear();
             return null;
@@ -933,6 +1040,25 @@ internal partial class CoopSave {
         newest = index == steps.Count - 1;
         steps.RemoveRange(0, index + 1);
         return took;
+    }
+
+    /// <summary>
+    /// Adds to the counts of rolls of the kept steps of a creature that every game runs by itself that it took on a way
+    /// of its own from a blow (see TakeOwnStep), as it was just given as many more, so that the scene host's game is
+    /// ahead of them by no more.
+    /// </summary>
+    private void AddToOwnWays(GameObject creature, List<int> more) {
+        foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
+            if (!_ownSteps.TryGetValue(machine.Fsm, out var steps)) {
+                continue;
+            }
+
+            for (var i = 0; i < steps.Count; i++) {
+                if (steps[i].OwnWay) {
+                    steps[i] = steps[i] with { Counts = SharedDice.AddCounts(steps[i].Counts, more) };
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -953,7 +1079,10 @@ internal partial class CoopSave {
 
     /// <summary>
     /// A step of a state machine of a creature that every game runs by itself: the state it went to, how many times
-    /// its actions had rolled before (see SharedDice.RollCounts), where the creature was and the way it faced.
+    /// its actions had rolled before (see SharedDice.RollCounts), where the creature was, the way it faced, and whether
+    /// it took it on a way of its own from a blow (see TakeOwnStep).
     /// </summary>
-    private readonly record struct OwnStep(string State, List<int> Counts, Vector3 Place, float Facing);
+    private readonly record struct OwnStep(
+        string State, List<int> Counts, Vector3 Place, float Facing, bool OwnWay = false
+    );
 }

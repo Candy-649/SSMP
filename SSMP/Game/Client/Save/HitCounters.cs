@@ -216,12 +216,23 @@ internal static class HitCounters {
     /// </summary>
     internal static bool Counts(HutongGames.PlayMaker.FsmState state) {
         foreach (var action in state.Actions) {
-            if (action.Enabled &&
-                action is IntAdd { everyFrame: false } or FloatAdd { everyFrame: false, perSecond: false }) {
+            if (action.Enabled && CountedBy(action) != null) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The variable that an action adds to once as it starts, as a state that counts does (see <see cref="Counts"/>),
+    /// or null for an action that counts nothing.
+    /// </summary>
+    internal static string? CountedBy(HutongGames.PlayMaker.FsmStateAction action) {
+        return action switch {
+            IntAdd { everyFrame: false } add => add.intVariable.Name,
+            FloatAdd { everyFrame: false, perSecond: false } add => add.floatVariable.Name,
+            _ => null
+        };
     }
 }
