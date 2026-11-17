@@ -387,7 +387,7 @@ internal partial class Entity {
     /// Whether a talk goes on from a state by itself: a line or a prompt comes within a few states that each go on to
     /// the next once they are done (see <see cref="TalkLookAhead"/>).
     /// </summary>
-    private static bool MoreTalkFollows(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
+    internal static bool MoreTalkFollows(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
         var state = from;
         for (var i = 0; i < TalkLookAhead && state != null; i++) {
             if (RunsTalk(state)) {

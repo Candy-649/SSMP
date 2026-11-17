@@ -23,7 +23,7 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// Dialogue rules for boss rooms. Dialogue of a boss only runs for the scene host, so the other players in the scene
 /// are shown the same lines, and nobody waits for them: each player reads at their own pace. A fight that comes after
 /// dialogue waits for every player to get to it: dialogue of a room runs for every player, so the room waits before
-/// its fight until every player got there.
+/// its fight until every player got there, and so does a creature that every game runs by itself after its talk.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
@@ -692,7 +692,9 @@ internal partial class BossRoomCoop {
                 return false;
             }
 
-            isAfterDialogue = _dialogueFsms.Contains(fsm);
+            // A creature that every game runs by itself comes there after its talk wherever it is: the steps of the
+            // scene host's take it there in the game of a player who came in on the talk, which showed them none of it
+            isAfterDialogue = _dialogueFsms.Contains(fsm) || GetInfo(fsm).IsOwn;
         } else if (sender != null && _dialogueFsms.Contains(sender) && GetBossRoom(fsm) is { } room &&
                    IsEventStart(room, fsm, state, eventName)) {
             isAfterDialogue = true;
@@ -822,7 +824,8 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Gets the transitions of an FSM with dialogue that go into a state that closes gates, which is where its fight
-    /// starts. FSMs of bosses and arenas, and FSMs without dialogue, have none.
+    /// starts, or, for a creature that every game runs by itself, those out of its talk. FSMs of bosses that only the
+    /// scene host's game runs and of arenas, and FSMs without dialogue, have none.
     /// </summary>
     private HashSet<string> GetFightTransitions(Fsm fsm) {
         if (_fightTransitions.TryGetValue(fsm, out var transitions)) {
@@ -837,7 +840,29 @@ internal partial class BossRoomCoop {
             return transitions;
         }
 
+        // A creature that every game runs by itself talks in every game, as a room does (see CoopSave.OwnTalks), and
+        // what comes after its talk, like its fight, starts by a way out of a state that ends its dialogue that leads
+        // to no more of the talk (see Entity.EndsTalk). Taken for a boss that only the scene host's game runs, it went
+        // into its fight there as the scene host's player was through the talk, while the others still read (USER
+        // 11-17 "为啥房主读完就开打，不应该都读完才开打吗", "所有对话框都各看各的，只在关键节点等对方看完/决策")
         var info = GetInfo(fsm);
+        if (info.IsOwn) {
+            foreach (var state in states) {
+                if (!state.Actions.Any(action => action.Enabled && action is EndDialogue)) {
+                    continue;
+                }
+
+                foreach (var transition in state.Transitions) {
+                    if ((transition.ToFsmState ?? fsm.GetState(transition.ToState)) is { } to &&
+                        !Entity.Entity.MoreTalkFollows(fsm, to)) {
+                        transitions.Add(GetTransitionKey(state.Name, transition.EventName));
+                    }
+                }
+            }
+
+            return transitions;
+        }
+
         var gameObject = fsm.GameObject;
         if (info.IsEntity || !info.ClosesGates || gameObject == null ||
             gameObject.GetComponentInParent<BattleScene>(true) != null) {

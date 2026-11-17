@@ -1579,7 +1579,8 @@ internal partial class BossRoomCoop {
 
         var isInArena = gameObject.GetComponentInParent<BattleScene>(true) != null;
         var isBossScene = gameObject.name.StartsWith(BossSceneNamePrefix, StringComparison.Ordinal);
-        info.IsEntity = EntityRegistry.TryGetEntry(gameObject, out _);
+        info.IsEntity = EntityRegistry.TryGetEntry(gameObject, out var entry);
+        info.IsOwn = entry is { OwnInEachGame: true };
         info.IsInBossScene = IsInBossScene(gameObject.transform);
         info.ClosesGates = closingStates.Count > 0;
         info.IsGate = !isInArena && hasCloseTransition && hasOpenTransition;
@@ -2003,6 +2004,12 @@ internal partial class BossRoomCoop {
         /// Whether the FSM belongs to an entity, which only runs for the scene host.
         /// </summary>
         public bool IsEntity;
+
+        /// <summary>
+        /// Whether the FSM belongs to a creature that every game runs by itself (see Entity.OwnCreatures), which talks
+        /// in every game as a room does.
+        /// </summary>
+        public bool IsOwn;
 
         /// <summary>
         /// Whether the object of the FSM is a boss scene or part of one.

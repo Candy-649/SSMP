@@ -24,11 +24,15 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// character starts by itself. A creature that goes into a talk, by a step of its own or of the scene host's, plays it
 /// here to its end, each line as this game's player reads it, while the steps of the scene host's that come meanwhile
 /// wait, as for a leap at this game's player (see CoopSave.OwnCatches). It is over as it leaves the state that ended
-/// its dialogue with no more of the talk to come, as a talk with a copy is (see Entity.EndsTalk): it waits there for
-/// the scene host's to come as far, or goes on from where that one is already (see <see cref="WaitsAfterOwnTalk"/>).
-/// Each game shows its own lines alone: the boss room shares none of them (BossRoomCoop.OnStartDialogue), and a way
-/// into a step of the scene host's through a talk runs none (see OnOwnCreatureStep). The copy of the knight that the room had before played the talk of the player who woke it in their game, and the
-/// talk that the scene host's game started a moment later took the box from it (USER 11-16 "为啥我这里没有对话框").
+/// its dialogue with no more of the talk to come, as a talk with a copy is (see Entity.EndsTalk). That step waits in
+/// every game until every player is through the talk, as the fight after the talk of a room does
+/// (BossRoomCoop.TryHoldFightGate; USER 11-17 "为啥房主读完就开打，不应该都读完才开打吗"); then the creature here
+/// waits for the scene host's step out of the talk, or goes on from it if it came first (see
+/// <see cref="WaitsAfterOwnTalk"/>). Each game shows its own lines alone: the boss room shares none of them
+/// (BossRoomCoop.OnStartDialogue), and a way into a step of the scene host's through a talk runs none (see
+/// OnOwnCreatureStep). The copy of the knight that the room had before played the talk of the player who woke it in
+/// their game, and the talk that the scene host's game started a moment later took the box from it (USER 11-16
+/// "为啥我这里没有对话框").
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -106,7 +110,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a creature that every game runs by itself that is through a talk here goes on from the latest step of
-    /// the scene host's that came meanwhile: one beyond the talk, as the scene host's player was through it first.
+    /// the scene host's that came meanwhile: one beyond the talk, which comes before the word that lets the talk end
+    /// here when the scene host's player is the last through it (see BossRoomCoop.TryHoldFightGate).
     /// </summary>
     private static bool TalkGoesOn(Fsm fsm, OwnLeap talk) {
         return talk.Latest is { } latest && !LiesBeforeTalkEnd(fsm, talk, latest.StateName);
