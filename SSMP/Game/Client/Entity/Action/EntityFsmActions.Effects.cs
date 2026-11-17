@@ -630,17 +630,60 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The states of a move of an FSM from its first state (USER 11-17 "先把招式切好，一招一招切好"): that state, and
+    /// every state it leads to that only the move leads into (see the states only through a state above), but for the
+    /// ways in from a state where the FSM rests (see <see cref="Rests"/>), each of which starts a move of its own: a
+    /// state that another move starts at and this one goes on into is this one's too, like the knight's hold of the
+    /// player, which its catch for its blows goes on into after it looked at whether it holds them, and which its
+    /// other catch starts at. The move ends where the FSM rests, or comes to a state that other moves come to as they
+    /// end, like the wait for the next move (review of the user's log: as only the states that its first state alone
+    /// leads to, the knight's catch for its blows was over at the hold, whose way on waited for a step of the scene
+    /// host's that never came, with the player held there).
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="first">The first state of the move.</param>
+    internal static HashSet<FsmState> MoveFrom(HutongGames.PlayMaker.Fsm fsm, FsmState first) {
+        var move = StatesOnlyThrough(fsm, [first], Rests, Rests);
+        move.RemoveWhere(state => state != first && Rests(state));
+        return move;
+    }
+
+    /// <summary>
+    /// Whether an FSM rests in a state, where it waits for something outside it: none of the ways out of it is one
+    /// that it takes by itself, as the actions of the state are through, or by an event that one of them is given.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    internal static bool Rests(FsmState state) {
+        foreach (var transition in state.Transitions) {
+            if (transition.EventName == "FINISHED") {
+                return false;
+            }
+
+            foreach (var action in state.Actions) {
+                if (action.Enabled && IsGiven(action, transition.EventName)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// The states of an FSM that it only ever gets to through some of its states: those states, and every state they
     /// lead to that is entered from those states alone (see the one for a single state above), not going on past the
-    /// states it ends at, which are counted in themselves.
+    /// states it ends at, which are counted in themselves. A way in from a state that starts moves of its own, if
+    /// those are given, leaves the state that it leads into to these (see <see cref="MoveFrom"/>).
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="through">The states, which are all counted in.</param>
     /// <param name="endsAt">Whether a state is one to end at, or null to go on wherever the states lead.</param>
+    /// <param name="startsMoves">Whether a state starts moves of its own, or null if none is.</param>
     private static HashSet<FsmState> StatesOnlyThrough(
         HutongGames.PlayMaker.Fsm fsm,
         HashSet<FsmState> through,
-        Func<FsmState, bool>? endsAt
+        Func<FsmState, bool>? endsAt,
+        Func<FsmState, bool>? startsMoves = null
     ) {
         var found = new HashSet<FsmState>(through);
         var toGo = new Stack<FsmState>(through);
@@ -685,7 +728,8 @@ internal static partial class EntityFsmActions {
             removed = false;
             foreach (var state in new List<FsmState>(found)) {
                 if (through.Contains(state) || !entries.Contains(state.Name) &&
-                    (!sources.TryGetValue(state, out var from) || from.TrueForAll(found.Contains))) {
+                    (!sources.TryGetValue(state, out var from) ||
+                     from.TrueForAll(source => found.Contains(source) || startsMoves?.Invoke(source) == true))) {
                     continue;
                 }
 
@@ -1090,10 +1134,29 @@ internal static partial class EntityFsmActions {
         }
 
         return false;
+    }
 
-        static bool IsEventField(FieldInfo field) {
-            return field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[]);
+    /// <summary>
+    /// Whether an action is given an event of a name, which it may send its own FSM on to another state with.
+    /// </summary>
+    private static bool IsGiven(FsmStateAction action, string eventName) {
+        foreach (var field in FieldsOf(action.GetType(), EventFields, IsEventField)) {
+            switch (field.GetValue(action)) {
+                case FsmEvent fsmEvent when fsmEvent.Name == eventName:
+                    return true;
+                case FsmEvent[] events when Array.Exists(events, each => each?.Name == eventName):
+                    return true;
+            }
         }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a field of an action holds an event, or events, that it may send its own FSM on with.
+    /// </summary>
+    private static bool IsEventField(FieldInfo field) {
+        return field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[]);
     }
 
     /// <summary>
