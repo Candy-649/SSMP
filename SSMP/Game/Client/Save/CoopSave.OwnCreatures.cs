@@ -233,14 +233,16 @@ internal partial class CoopSave {
         // is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which it waits
         // for the scene host's to come as far (see CoopSave.OwnTalks). So is what a strike of this game's player sets
         // off as it is made, as in a game of one: a wound, a block or a tink, and what they tell the other state
-        // machines of the creature at once. The scene host's game is told of the strike as it was taken here, and its
-        // creature answers it as the game does, which every other game takes as a step of the scene host's (USER
-        // 11-17 "如果这个会有反馈，我这边应该先演，然后通知房主，让房主那边的也触发这个弹开", "本地化就是为了让自己的怪是
-        // 活的，可以触发各种反应"; a blade of the boss at the end of the second act that the player tinked did nothing,
-        // as it went by where the players are, until the scene host's step came)
+        // machines of the creature at once, though not where a state that it went into chooses its way on by where
+        // the players are, which stays the scene host's. The scene host's game is told of the strike as it was taken
+        // here, and its creature answers it as the game does, which every other game takes as a step of the scene
+        // host's (USER 11-17 "如果这个会有反馈，我这边应该先演，然后通知房主，让房主那边的也触发这个弹开", "本地化就是为
+        // 了让自己的怪是活的，可以触发各种反应"; a blade of the boss at the end of the second act that the player tinked
+        // did nothing, as it went by where the players are, until the scene host's step came)
         var waitedFor = IsWaitedFor(self);
+        var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
         if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
-            (WaitsAfterOwnTalk(self) || waitedFor && !CoopHits.IsMakingLocalStrike)) {
+            (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike)) {
             MachineSwitchToStateField?.SetValue(self, null);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
                 _heldOwnSteps[self] = self.ActiveStateName;
