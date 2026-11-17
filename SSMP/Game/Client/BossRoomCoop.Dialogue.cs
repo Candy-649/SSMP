@@ -698,6 +698,10 @@ internal partial class BossRoomCoop {
         } else if (sender != null && _dialogueFsms.Contains(sender) && GetBossRoom(fsm) is { } room &&
                    IsEventStart(room, fsm, state, eventName)) {
             isAfterDialogue = true;
+        } else if (SharedStepOf(fsm) != null && IsFightTransition(GetFightTransitions(fsm), state.Name, eventName)) {
+            // A step of the story that waits for every player, whoever tells the FSM to take it, like the reward of the
+            // flea festival that ends it (see SharedSteps)
+            isAfterDialogue = true;
         } else {
             return false;
         }
@@ -734,7 +738,12 @@ internal partial class BossRoomCoop {
                 held.HoldStill(fsm.GameObject);
             }
 
-            Logger.Info($"Holding back the fight of '{GetPath(fsm)}' until every player finished its dialogue");
+            Logger.Info(
+                SharedStepOf(fsm) is { } step
+                    ? $"Holding back the step of '{GetPath(fsm)}' from '{state.Name}' by '{eventName}' into " +
+                      $"'{step.StateName}' until every player got there"
+                    : $"Holding back the fight of '{GetPath(fsm)}' until every player finished its dialogue"
+            );
 
             if (GetBossRoom(fsm) is { } bossRoom) {
                 BeginRoomWait(bossRoom, null, fsm, false);
@@ -824,8 +833,9 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Gets the transitions of an FSM with dialogue that go into a state that closes gates, which is where its fight
-    /// starts, or, for a creature that every game runs by itself, those out of its talk. FSMs of bosses that only the
-    /// scene host's game runs and of arenas, and FSMs without dialogue, have none.
+    /// starts, or, for a creature that every game runs by itself, those out of its talk, and the ways into a step of
+    /// the story that waits for every player (see SharedSteps). FSMs of bosses that only the scene host's game runs and
+    /// of arenas, and other FSMs without dialogue, have none.
     /// </summary>
     private HashSet<string> GetFightTransitions(Fsm fsm) {
         if (_fightTransitions.TryGetValue(fsm, out var transitions)) {
@@ -836,6 +846,24 @@ internal partial class BossRoomCoop {
         _fightTransitions[fsm] = transitions;
 
         var states = fsm.States ?? [];
+        if (SharedStepOf(fsm) is { } step) {
+            foreach (var state in states) {
+                foreach (var transition in state.Transitions ?? []) {
+                    if (transition.ToState == step.StateName) {
+                        transitions.Add(GetTransitionKey(state.Name, transition.EventName));
+                    }
+                }
+            }
+
+            foreach (var transition in fsm.GlobalTransitions ?? []) {
+                if (transition.ToState == step.StateName) {
+                    transitions.Add(GetTransitionKey("", transition.EventName));
+                }
+            }
+
+            return transitions;
+        }
+
         if (!states.Any(state => (state.Actions ?? []).Any(action => action is RunDialogueBase))) {
             return transitions;
         }
@@ -1143,7 +1171,11 @@ internal partial class BossRoomCoop {
             RestoreHero(held);
             held.LetGo(true);
             EndRoomWaitFor(fsm);
-            Logger.Info($"Every player finished the dialogue of '{GetPath(fsm)}', starting its fight");
+            Logger.Info(
+                SharedStepOf(fsm) is { } step
+                    ? $"Every player got to the step of '{GetPath(fsm)}' into '{step.StateName}', which goes on"
+                    : $"Every player finished the dialogue of '{GetPath(fsm)}', starting its fight"
+            );
             fsm.Event(held.EventName);
         }
 
