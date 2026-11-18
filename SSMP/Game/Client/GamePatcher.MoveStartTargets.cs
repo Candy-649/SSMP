@@ -336,6 +336,7 @@ internal partial class GamePatcher {
         AimLooks.Clear();
         IdleWatches.Clear();
         WoundAnswers.Clear();
+        MovesAtPlayers.Clear();
     }
 
     /// <summary>
@@ -348,6 +349,7 @@ internal partial class GamePatcher {
         AimLooks.Remove(instanceId);
         IdleWatches.Remove(instanceId);
         WoundAnswers.Remove(instanceId);
+        MovesAtPlayers.RemoveAll(move => move.Owner == instanceId);
     }
 
     /// <summary>
@@ -950,6 +952,79 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// The moves that creatures make at one player - a strike back at their blow, a catch of them - each with the
+    /// creature, the player, the state machine of the move and its states (see EntityFsmActions.MoveFrom). The creature
+    /// goes after that player until its state machine is out of those states, whatever would turn it meanwhile: the
+    /// wound of another player (see <see cref="AnswerWound"/>) or a step of the scene host's that goes after another
+    /// (see <see cref="TakeSceneHostsTarget"/>). It catches only whom it goes after, and the knight's counter at a blow
+    /// of the user caught them nowhere: the scene host's knight answered a blow of the friend at her halfway through,
+    /// its next steps took the user's knight after her too, and its blows touched the user many times and caught nobody
+    /// (USER 11-18 "反击好像也没有每次都抓到我"; the logs of both, 20:41:23 and 20:41:46 in the user's game).
+    /// </summary>
+    private static readonly List<MoveAtPlayer> MovesAtPlayers = [];
+
+    /// <summary>
+    /// A move that a creature makes at one player (see <see cref="MovesAtPlayers"/>).
+    /// </summary>
+    /// <param name="owner">The instance ID of the creature (see GetEnemyTargetOwner).</param>
+    /// <param name="player">The player: this game's, or the figure of another.</param>
+    /// <param name="fsm">The state machine of the move.</param>
+    /// <param name="states">The states of the move.</param>
+    private sealed class MoveAtPlayer(
+        int owner,
+        GameObject player,
+        HutongGames.PlayMaker.Fsm fsm,
+        HashSet<FsmState> states
+    ) {
+        public readonly int Owner = owner;
+        public readonly GameObject Player = player;
+        public readonly HutongGames.PlayMaker.Fsm Fsm = fsm;
+        public readonly HashSet<FsmState> States = states;
+    }
+
+    /// <summary>
+    /// Holds a creature to the player that it makes a move at, from the first state of the move until its state
+    /// machine is out of it (see <see cref="MovesAtPlayers"/>). The move is made as soon as it is held: nothing asks
+    /// whom it goes after before the state machine is in its first state.
+    /// </summary>
+    private static void HoldForMove(
+        GameObject owner,
+        GameObject player,
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmState first
+    ) {
+        var id = owner.GetInstanceID();
+        MovesAtPlayers.RemoveAll(move => move.Owner == id && move.Fsm == fsm);
+        MovesAtPlayers.Add(new MoveAtPlayer(id, player, fsm, EntityFsmActions.MoveFrom(fsm, first)));
+    }
+
+    /// <summary>
+    /// The player whom a creature makes a move at now (see <see cref="MovesAtPlayers"/>), or null. A move whose state
+    /// machine is out of it, or whose player is gone, is let go of here.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    private static GameObject? HeldForMove(GameObject owner) {
+        var id = owner.GetInstanceID();
+        GameObject? held = null;
+        for (var i = MovesAtPlayers.Count - 1; i >= 0; i--) {
+            var move = MovesAtPlayers[i];
+            if (move.Owner != id) {
+                continue;
+            }
+
+            if (move.Player == null || !move.Player.activeInHierarchy || move.Fsm.ActiveState is not { } at ||
+                !move.States.Contains(at)) {
+                MovesAtPlayers.RemoveAt(i);
+                continue;
+            }
+
+            held = move.Player;
+        }
+
+        return held;
+    }
+
+    /// <summary>
     /// Has a creature go after the player that a part of its own grabbed (see Entity.GoAfterGrabbedPlayer), held to
     /// them as after any turn (see <see cref="IsHeldByTime"/>) also when it went after them already: what it does with
     /// the catch then goes to the player it holds, rather than to whichever player stands nearest to it (see
@@ -958,13 +1033,25 @@ internal partial class GamePatcher {
     /// </summary>
     /// <param name="creature">The creature.</param>
     /// <param name="player">The player it grabbed.</param>
-    public static void GoAfterGrabbed(GameObject creature, GameObject player) {
+    /// <param name="fsm">For a creature that every game runs by itself, the state machine of the catch, by which it is
+    /// held to them until the catch is through (see <see cref="HoldForMove"/>); otherwise null.</param>
+    /// <param name="first">The first state of the catch, with <paramref name="fsm"/>.</param>
+    public static void GoAfterGrabbed(
+        GameObject creature,
+        GameObject player,
+        HutongGames.PlayMaker.Fsm? fsm = null,
+        FsmState? first = null
+    ) {
         var owner = GetEnemyTargetOwner(creature);
         if (owner == null) {
             return;
         }
 
         Logger.Info($"{owner.name} grabbed {DescribePlayer(player)} and goes after them through the catch");
+        if (fsm != null && first != null) {
+            HoldForMove(owner, player, fsm, first);
+        }
+
         if (GetApprovedEnemyTarget(owner) == player) {
             NoteTurn(owner.GetInstanceID(), null);
             return;
@@ -982,17 +1069,26 @@ internal partial class GamePatcher {
     /// Has a creature that every game runs by itself go after the player whose blow it blocked and strikes back at,
     /// held to them as after any turn (see <see cref="IsHeldByTime"/>): in the game of that player, which plays the
     /// strike back by itself, though it follows the scene host's otherwise, and in the scene host's, which follows it
-    /// (see CoopSave.OwnStrikeBacks).
+    /// (see CoopSave.OwnStrikeBacks), and in the game of the scene host's player whose blow it is. It is held to them
+    /// until the strike back is through (see <see cref="HoldForMove"/>).
     /// </summary>
     /// <param name="creature">The creature.</param>
     /// <param name="player">The player who struck: this game's, or the figure of another.</param>
-    public static void GoAfterStriker(GameObject creature, GameObject player) {
+    /// <param name="fsm">The state machine of the strike back.</param>
+    /// <param name="first">The first state of the strike back.</param>
+    public static void GoAfterStriker(
+        GameObject creature,
+        GameObject player,
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmState first
+    ) {
         var owner = GetEnemyTargetOwner(creature);
         if (owner == null) {
             return;
         }
 
         Logger.Info($"{owner.name} strikes back at the blow of {DescribePlayer(player)} and goes after them");
+        HoldForMove(owner, player, fsm, first);
         if (GetApprovedEnemyTarget(owner) == player) {
             NoteTurn(owner.GetInstanceID(), null);
             return;

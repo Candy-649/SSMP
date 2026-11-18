@@ -302,10 +302,14 @@ internal partial class CoopSave {
         }
 
         // Where this game decides whom it goes after, it goes after the player it caught through the catch (see
-        // GamePatcher.GoAfterGrabbed), which the step tells every game: the catch is that player's
-        if (!OwnCreatures.FollowsSceneHost(creature) && CatchesLocalPlayer(self, toState, creature) &&
-            HeroController.SilentInstance is { } hero) {
-            GamePatcher.GoAfterGrabbed(creature, hero.gameObject);
+        // GamePatcher.GoAfterGrabbed), and the player whose blow it strikes back at through the strike back (see
+        // CoopSave.OwnStrikeBacks), which the step tells every game: the move is that player's
+        if (!OwnCreatures.FollowsSceneHost(creature) && HeroController.SilentInstance is { } hero) {
+            if (CatchesLocalPlayer(self, toState, creature)) {
+                GamePatcher.GoAfterGrabbed(creature, hero.gameObject, self, toState);
+            } else if (StrikesBackAtLocalBlow(self, toState)) {
+                GamePatcher.GoAfterStriker(creature, hero.gameObject, self, toState);
+            }
         }
 
         // A part tells only the steps that the others wait for, which it took by where the players are, by a count or

@@ -248,12 +248,22 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Has a creature that every game runs by itself go after the player whom the scene host's goes after, as a step
-    /// of it says (see CoopSave.OnOwnCreature). Nothing else chooses for it here.
+    /// of it says (see CoopSave.OnOwnCreature). Nothing else chooses for it here, but a move at one player that it
+    /// makes here, after whom it goes until the move is through (see HoldForMove): a strike back at a blow of this
+    /// game's player, which the scene host's game follows, or a catch.
     /// </summary>
     /// <param name="creature">The creature.</param>
     /// <param name="player">The player: this game's, or the figure of another.</param>
     public static void TakeSceneHostsTarget(GameObject creature, GameObject player) {
         if (GetApprovedEnemyTarget(creature) == player) {
+            return;
+        }
+
+        if (GetEnemyTargetOwner(creature) is { } owner && HeldForMove(owner) is { } held && held != player) {
+            Logger.Info(
+                $"{owner.name} makes a move at {DescribePlayer(held)} here and goes after them until it is through, " +
+                $"not after {DescribePlayer(player)} as a step of the scene host's says"
+            );
             return;
         }
 

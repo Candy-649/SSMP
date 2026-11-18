@@ -69,7 +69,7 @@ internal partial class CoopSave {
         }
 
         var creature = machine.gameObject;
-        GamePatcher.GoAfterStriker(creature, hero.gameObject);
+        GamePatcher.GoAfterStriker(creature, hero.gameObject, fsm, toState);
         TellOwnStrikeBack(machine, toState.Name);
         var strikeBack = new OwnLeap(OwnCreatures.PlaceOf(creature), false, "strike back at the local player");
         strikeBack.Passed.Add(toState.Name);
@@ -152,7 +152,7 @@ internal partial class CoopSave {
         );
         PutAtSceneHostsStep(fsm, update);
         if (ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is { } figure && figure != null) {
-            GamePatcher.GoAfterStriker(creature, figure);
+            GamePatcher.GoAfterStriker(creature, figure, fsm, fsm.GetState(into));
         }
 
         fsm.SetState(into);

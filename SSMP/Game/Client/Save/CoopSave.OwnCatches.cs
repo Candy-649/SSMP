@@ -402,7 +402,7 @@ internal partial class CoopSave {
             return false;
         }
 
-        GamePatcher.GoAfterGrabbed(creature, hero.gameObject);
+        GamePatcher.GoAfterGrabbed(creature, hero.gameObject, machine.Fsm, toState);
         var leap = new OwnLeap(OwnCreatures.PlaceOf(creature), false, "catch of the local player") {
             Catch = Entity.Action.EntityFsmActions.MoveFrom(machine.Fsm, toState)
         };
@@ -665,7 +665,7 @@ internal partial class CoopSave {
         );
         PutAtSceneHostsStep(fsm, update);
         if (ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is { } figure && figure != null) {
-            GamePatcher.GoAfterGrabbed(creature, figure);
+            GamePatcher.GoAfterGrabbed(creature, figure, fsm, fsm.GetState(into));
         }
 
         fsm.Event(way.FsmEvent);
