@@ -461,9 +461,10 @@ internal partial class CoopSave {
     /// <summary>
     /// Has a creature that every game runs by itself go on from the latest step of the scene host's that came while it
     /// played a leap at this game's player by itself, a frame after it is through here, outside of the step of its
-    /// state machine (see <see cref="PlaysOwnLeap"/>). That step is taken as any step: one that this game took already,
-    /// at the same rolls, like the scene host's own landing, moves it only by as much as it stood off (USER 11-16 "扑完
-    /// 之后跟最新的动作"). The rest of the steps of the scene host's come after that one.
+    /// state machine (see <see cref="PlaysOwnLeap"/>). That step is taken as any step (USER 11-16 "扑完之后跟最新的动
+    /// 作"): one that this game took already, at the same rolls, like the scene host's own landing, leaves it where it
+    /// is, and it is put where the scene host's is at its next move (see OnOwnCreature). The rest of the steps of the
+    /// scene host's come after that one.
     /// </summary>
     private void UpdateOwnLeaps() {
         if (_ownLeaps.Count == 0) {

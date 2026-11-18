@@ -688,10 +688,18 @@ internal partial class CoopSave {
             // Where it stood as it took the step is its own: a creature is put where the scene host's is only as it
             // makes a move, which a step that the others wait for tells, and goes on from there by itself, as fast as
             // there, through its knockbacks, flights and landings (USER 11-18 "不如位置校准只在出招时做", "因为出招的时候
-            // 必定携带位置信息")
+            // 必定携带位置信息"). A member who has just come in is put where it is there, wherever their own is (review)
             var off = there - took.Place;
             off.z = 0f;
-            if (off.magnitude > OwnCreatureDrift) {
+            if (update.PartCount == OwnToldPart && MakesMoves(fsm)) {
+                Logger.Info(
+                    $"[Own creatures] '{place}' is in '{update.StateName}' as in {player.Username}'s game, which " +
+                    $"this member has just come into, {off.magnitude:F1} away from where it is there, and is moved " +
+                    "by that"
+                );
+                transform.position += off;
+                MoveOwnSteps(creature, off);
+            } else if (off.magnitude > OwnCreatureDrift) {
                 Logger.Info(
                     $"[Own creatures] '{place}' went to '{update.StateName}' as in {player.Username}'s game, " +
                     $"{off.magnitude:F1} away from where it did there, and goes on from where it is to its next move"
@@ -1012,7 +1020,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a state takes a way out of it by what it does itself: as its actions finish, as one of them sends it on
-    /// that way, or as one of them picks one of its ways at random.
+    /// that way, or as one of them picks one of its ways at random. Not as something touches it, which a trigger or a
+    /// collision tells: what touches it may be a player, whom each game has elsewhere (review: a falling rock that
+    /// broke on the scene host's player there fell on here).
     /// </summary>
     private static bool TakenByItself(FsmState state, FsmTransition transition) {
         if (transition.EventName == FsmEvent.Finished.Name) {
@@ -1020,7 +1030,9 @@ internal partial class CoopSave {
         }
 
         foreach (var action in state.Actions) {
-            if (!action.Enabled) {
+            var kind = action.GetType().Name;
+            if (!action.Enabled || kind.StartsWith("Trigger", StringComparison.Ordinal) ||
+                kind.StartsWith("Collision", StringComparison.Ordinal)) {
                 continue;
             }
 
