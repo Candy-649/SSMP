@@ -376,6 +376,12 @@ internal partial class GamePatcher {
         }
 
         var owner = GetEnemyTargetOwner(requester);
+
+        // A move at one player aims at them alone until it is through, whatever song or sign comes (see HoldForMove)
+        if (owner != null && HeldForMove(owner) is { } held) {
+            return held;
+        }
+
         var target = owner != null && TryGetSongTarget(owner.GetInstanceID(), out var songTarget)
             ? songTarget
             : GetApprovedEnemyTarget(requester);

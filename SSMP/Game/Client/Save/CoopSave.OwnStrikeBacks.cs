@@ -128,11 +128,20 @@ internal partial class CoopSave {
 
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
         var steps = _ownSteps.TryGetValue(fsm, out var kept) ? kept : [];
+        var figure = ThrownThings.FigureOf?.Invoke(update.Part, player.Id);
         if (steps.Any(step => step.State == into && step.Counts.SequenceEqual(update.Amounts))) {
             Logger.Info(
                 $"[Own creatures] '{place}' struck back at a blow of {player.Username} in their game, and struck " +
                 $"back here already, in '{fsm.ActiveStateName}' of '{fsm.Name}', where it goes on"
             );
+
+            // From the blocked blow, which came before the word: after them all the same, if it is in it still
+            // (review)
+            if (figure != null && Entity.Action.EntityFsmActions.MoveFrom(fsm, fsm.GetState(into))
+                    .Contains(fsm.ActiveState)) {
+                GamePatcher.GoAfterStriker(creature, figure, fsm, fsm.GetState(into));
+            }
+
             return;
         }
 
@@ -151,7 +160,7 @@ internal partial class CoopSave {
             $"'{update.StateName}', and goes from '{fsm.ActiveStateName}' into '{into}' of '{fsm.Name}' here too"
         );
         PutAtSceneHostsStep(fsm, update);
-        if (ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is { } figure && figure != null) {
+        if (figure != null) {
             GamePatcher.GoAfterStriker(creature, figure, fsm, fsm.GetState(into));
         }
 

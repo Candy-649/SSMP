@@ -164,8 +164,17 @@ internal partial class GamePatcher {
         }
 
         var owner = GetEnemyTargetOwner(requester);
-        return owner != null && EnemyApprovedTargets.TryGetValue(owner.GetInstanceID(), out var target) &&
-               target != null && target.activeInHierarchy
+        if (owner == null) {
+            return null;
+        }
+
+        // A move at one player goes after them until it is through (see HoldForMove)
+        if (HeldForMove(owner) is { } held) {
+            return held;
+        }
+
+        return EnemyApprovedTargets.TryGetValue(owner.GetInstanceID(), out var target) && target != null &&
+               target.activeInHierarchy
             ? target
             : null;
     }
@@ -547,6 +556,7 @@ internal partial class GamePatcher {
         }
 
         ForgetWoundAnswersBackTo(player);
+        MovesAtPlayers.RemoveAll(move => move.Player == player);
         List<int>? owners = null;
         foreach (var pair in EnemyApprovedTargets) {
             if (pair.Value == player) {

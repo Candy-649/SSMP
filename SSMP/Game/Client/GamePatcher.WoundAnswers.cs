@@ -21,10 +21,11 @@ namespace SSMP.Game.Client;
 /// (TurnAtMoveStart): what the wound takes it through until then - a flinch and the dodge after it, a flight off and
 /// the hovering that follows - goes by the player who dealt it.
 ///
-/// One that makes a move at one player - strikes back at their blow, catches them - takes the wound of another as it
-/// comes, and goes on after the one it makes the move at until the move is through (see HoldForMove): turned to the
-/// other halfway through, the knight's counter at a blow of the user caught nobody (USER 11-18 "反击好像也没有每次都抓
-/// 到我").
+/// One that makes a move at one player - strikes back at their blow, catches them - aims what it does at the one it
+/// makes the move at until the move is through, whoever wounds it meanwhile (see HoldForMove): turned to the other
+/// halfway through, the knight's counter at a blow of the user caught nobody (USER 11-18 "反击好像也没有每次都抓到我").
+/// The wound of another is answered here as any, and what the creature does from the state the wound takes it to out
+/// of the move, like the knight's stun, goes by the one who dealt it.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
@@ -83,15 +84,6 @@ internal partial class GamePatcher {
     internal static void AnswerWound(GameObject creature, GameObject striker, Action play) {
         var owner = GetEnemyTargetOwner(creature);
         if (owner == null || striker == null || _woundedNow != null) {
-            play();
-            return;
-        }
-
-        if (HeldForMove(owner) is { } held && held != striker) {
-            Logger.Info(
-                $"{owner.name} takes the wound of {DescribePlayer(striker)} in its move at {DescribePlayer(held)}, " +
-                "after whom it goes until the move is through"
-            );
             play();
             return;
         }

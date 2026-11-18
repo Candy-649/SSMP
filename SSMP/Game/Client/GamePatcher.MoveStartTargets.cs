@@ -362,6 +362,8 @@ internal partial class GamePatcher {
     /// <param name="orig">The original method.</param>
     /// <param name="self">The state.</param>
     private static void OnStateEnter(Action<FsmState> orig, FsmState self) {
+        FollowMoves(self);
+
         // Where a wound that is played takes an FSM of the creature (see AnswerWound)
         if (_woundedNow != null) {
             try {
@@ -954,12 +956,16 @@ internal partial class GamePatcher {
     /// <summary>
     /// The moves that creatures make at one player - a strike back at their blow, a catch of them - each with the
     /// creature, the player, the state machine of the move and its states (see EntityFsmActions.MoveFrom). The creature
-    /// goes after that player until its state machine is out of those states, whatever would turn it meanwhile: the
-    /// wound of another player (see <see cref="AnswerWound"/>) or a step of the scene host's that goes after another
-    /// (see <see cref="TakeSceneHostsTarget"/>). It catches only whom it goes after, and the knight's counter at a blow
-    /// of the user caught them nowhere: the scene host's knight answered a blow of the friend at her halfway through,
-    /// its next steps took the user's knight after her too, and its blows touched the user many times and caught nobody
-    /// (USER 11-18 "反击好像也没有每次都抓到我"; the logs of both, 20:41:23 and 20:41:46 in the user's game).
+    /// goes after that player until its state machine goes into a state outside those (see <see cref="FollowMoves"/>):
+    /// whoever asks whom it goes after meanwhile is told that player (see <see cref="GetApprovedEnemyTarget"/>,
+    /// GetFsmActionTarget), whatever would turn it, like the wound of another player (see <see cref="AnswerWound"/>),
+    /// and a step of the scene host's that goes after another is let be (see <see cref="TakeSceneHostsTarget"/>). A
+    /// wound that takes it out of the move is answered at the striker, as the move is through before what the state it
+    /// goes to does, like the knight's stun (review). It catches only whom it goes after, and the knight's counter
+    /// at a blow of the user caught them nowhere: the scene host's knight answered a blow of the friend at her
+    /// halfway through, its next steps took the user's knight after her too, and its blows touched the user many
+    /// times and caught nobody (USER 11-18 "反击好像也没有每次都抓到我"; the logs of both, 20:41:23 and 20:41:46
+    /// in the user's game).
     /// </summary>
     private static readonly List<MoveAtPlayer> MovesAtPlayers = [];
 
@@ -967,25 +973,28 @@ internal partial class GamePatcher {
     /// A move that a creature makes at one player (see <see cref="MovesAtPlayers"/>).
     /// </summary>
     /// <param name="owner">The instance ID of the creature (see GetEnemyTargetOwner).</param>
+    /// <param name="name">The name of the creature, for the log.</param>
     /// <param name="player">The player: this game's, or the figure of another.</param>
     /// <param name="fsm">The state machine of the move.</param>
     /// <param name="states">The states of the move.</param>
     private sealed class MoveAtPlayer(
         int owner,
+        string name,
         GameObject player,
         HutongGames.PlayMaker.Fsm fsm,
         HashSet<FsmState> states
     ) {
         public readonly int Owner = owner;
+        public readonly string Name = name;
         public readonly GameObject Player = player;
         public readonly HutongGames.PlayMaker.Fsm Fsm = fsm;
         public readonly HashSet<FsmState> States = states;
     }
 
     /// <summary>
-    /// Holds a creature to the player that it makes a move at, from the first state of the move until its state
-    /// machine is out of it (see <see cref="MovesAtPlayers"/>). The move is made as soon as it is held: nothing asks
-    /// whom it goes after before the state machine is in its first state.
+    /// Holds a creature to the player that it makes a move at, from the first state of the move, which its state
+    /// machine goes into next, or is in already, until it goes into a state outside the move (see
+    /// <see cref="MovesAtPlayers"/>).
     /// </summary>
     private static void HoldForMove(
         GameObject owner,
@@ -995,15 +1004,19 @@ internal partial class GamePatcher {
     ) {
         var id = owner.GetInstanceID();
         MovesAtPlayers.RemoveAll(move => move.Owner == id && move.Fsm == fsm);
-        MovesAtPlayers.Add(new MoveAtPlayer(id, player, fsm, EntityFsmActions.MoveFrom(fsm, first)));
+        MovesAtPlayers.Add(new MoveAtPlayer(id, owner.name, player, fsm, EntityFsmActions.MoveFrom(fsm, first)));
     }
 
     /// <summary>
-    /// The player whom a creature makes a move at now (see <see cref="MovesAtPlayers"/>), or null. A move whose state
-    /// machine is out of it, or whose player is gone, is let go of here.
+    /// The player whom a creature makes a move at now (see <see cref="MovesAtPlayers"/>), or null. A move whose player
+    /// has gone is let go of here.
     /// </summary>
     /// <param name="owner">The creature.</param>
     private static GameObject? HeldForMove(GameObject owner) {
+        if (MovesAtPlayers.Count == 0) {
+            return null;
+        }
+
         var id = owner.GetInstanceID();
         GameObject? held = null;
         for (var i = MovesAtPlayers.Count - 1; i >= 0; i--) {
@@ -1012,8 +1025,7 @@ internal partial class GamePatcher {
                 continue;
             }
 
-            if (move.Player == null || !move.Player.activeInHierarchy || move.Fsm.ActiveState is not { } at ||
-                !move.States.Contains(at)) {
+            if (move.Player == null || !move.Player.activeInHierarchy) {
                 MovesAtPlayers.RemoveAt(i);
                 continue;
             }
@@ -1022,6 +1034,32 @@ internal partial class GamePatcher {
         }
 
         return held;
+    }
+
+    /// <summary>
+    /// Follows the moves that creatures make at one player as a state machine goes into a state, before what the state
+    /// does (see <see cref="MovesAtPlayers"/>): into a state of the move, the creature goes on after the player; into
+    /// any other, the move is through.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static void FollowMoves(FsmState state) {
+        if (MovesAtPlayers.Count == 0 || state.Fsm is not { } fsm) {
+            return;
+        }
+
+        for (var i = MovesAtPlayers.Count - 1; i >= 0; i--) {
+            var move = MovesAtPlayers[i];
+            if (move.Fsm != fsm || move.States.Contains(state)) {
+                continue;
+            }
+
+            MovesAtPlayers.RemoveAt(i);
+            Logger.Info(
+                $"{move.Name} is through its move at " +
+                $"{(move.Player != null ? DescribePlayer(move.Player) : "a player who has gone")}, as '{fsm.Name}' " +
+                $"goes to '{state.Name}'"
+            );
+        }
     }
 
     /// <summary>
