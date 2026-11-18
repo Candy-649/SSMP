@@ -62,9 +62,15 @@ internal partial class CoopSave {
 
     /// <summary>
     /// How far a creature that every game runs by itself may have stood from where the scene host's stood as both took
-    /// the same step, before it is moved.
+    /// the same step, before the log tells it: it is moved only as it makes a move (see OnOwnCreature).
     /// </summary>
     private const float OwnCreatureDrift = 0.5f;
+
+    /// <summary>
+    /// What an update of a creature that every game runs by itself is when it tells a member who has just come in
+    /// which state it is in here (see TellOwnState), which their own takes as it comes, wherever it is.
+    /// </summary>
+    private const ushort OwnToldPart = 9;
 
     /// <summary>
     /// The most steps that a state machine takes through the states between on its way into a step of the scene host's
@@ -116,6 +122,12 @@ internal partial class CoopSave {
     /// by itself whose steps this game has looked at (see ChoosesByCount).
     /// </summary>
     private readonly Dictionary<Fsm, HashSet<string>> _countedValues = new();
+
+    /// <summary>
+    /// Whether each state machine of a creature that every game runs by itself whose steps this game has taken makes
+    /// moves of it (see MakesMoves).
+    /// </summary>
+    private readonly Dictionary<Fsm, bool> _makesMoves = new();
 
     /// <summary>
     /// The state machines of creatures that every game runs by itself that took a step here that a blow set off, of
@@ -508,6 +520,7 @@ internal partial class CoopSave {
             new OwnStep(fsm.ActiveStateName, counts, thing.transform.position, thing.transform.localScale.x)
         );
         update.TargetId = player.Id;
+        update.PartCount = OwnToldPart;
 
         // Their own has all its health, which the blows before they came took here
         if (health != null) {
@@ -672,15 +685,17 @@ internal partial class CoopSave {
                 return;
             }
 
+            // Where it stood as it took the step is its own: a creature is put where the scene host's is only as it
+            // makes a move, which a step that the others wait for tells, and goes on from there by itself, as fast as
+            // there, through its knockbacks, flights and landings (USER 11-18 "不如位置校准只在出招时做", "因为出招的时候
+            // 必定携带位置信息")
             var off = there - took.Place;
             off.z = 0f;
             if (off.magnitude > OwnCreatureDrift) {
                 Logger.Info(
                     $"[Own creatures] '{place}' went to '{update.StateName}' as in {player.Username}'s game, " +
-                    $"{off.magnitude:F1} away from where it did there, and is moved by that"
+                    $"{off.magnitude:F1} away from where it did there, and goes on from where it is to its next move"
                 );
-                transform.position += off;
-                MoveOwnSteps(creature, off);
             }
 
             // A member who has just come in: its walk goes on where the scene host's walks now, rather than from the
@@ -707,10 +722,28 @@ internal partial class CoopSave {
             return;
         }
 
+        // A step that it gets to by itself from where it is, a moment behind, as fast and as far as there, does not
+        // move it there before it does (USER 11-18 "不如位置校准只在出招时做"): put there as the step came, a stunned
+        // knight was put down where the scene host's had landed while it was still in the air here (the user's log,
+        // 20:42:05.971, 3.1 away). A member who has just come in is put where it is there, wherever their own is
+        if (update.PartCount != OwnToldPart && ReachesByItself(fsm, update.StateName)) {
+            Logger.Info(
+                $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+                $"game, which it gets to here by itself from '{fsm.ActiveStateName}'"
+            );
+            return;
+        }
+
+        // Put where the scene host's was as it makes a move; a state machine that makes no move of it leaves it where
+        // it is (see MakesMoves)
         var way = WayInto(fsm, update.StateName);
         var from = fsm.ActiveStateName;
+        var moves = MakesMoves(fsm);
         var away = Vector2.Distance(transform.position, there);
-        MoveOwnSteps(creature, there - transform.position);
+        if (moves) {
+            MoveOwnSteps(creature, there - transform.position);
+        }
+
         PutAtSceneHostsStep(fsm, update);
         OwnCreatures.SceneHostsStep = (fsm, update.StateName);
         try {
@@ -733,7 +766,7 @@ internal partial class CoopSave {
             : "straight";
         Logger.Info(
             $"[Own creatures] '{place}' goes from '{from}' to '{update.StateName}' {how} as in {player.Username}'s " +
-            $"game, where it was there, {away:F1} away"
+            (moves ? $"game, where it was there, {away:F1} away" : "game, where it is here")
         );
     }
 
@@ -741,24 +774,27 @@ internal partial class CoopSave {
     /// Puts a creature that every game runs by itself where the scene host's was as it took a step, turned the way it
     /// was turned there, going as fast, with the rolls and the song that it took the step with, with what the state
     /// that its state machine left worked with there, and with its walk where it was there (see GamePatcher.PutWalk).
+    /// A state machine that makes no move of it, like the count of the knight's stun, takes the step where the creature
+    /// is here (see <see cref="MakesMoves"/>).
     /// </summary>
-    private static void PutAtSceneHostsStep(Fsm fsm, CoopSaveUpdate update) {
+    private void PutAtSceneHostsStep(Fsm fsm, CoopSaveUpdate update) {
         var creature = fsm.GameObject;
         using var reader = new BinaryReader(new MemoryStream(update.Bytes));
         var worked = ToldValues.Read(reader);
-
-        // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts as
-        // it was there
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
-        GamePatcher.PutWalk(reader, creature);
-        var transform = creature.transform;
-        transform.position = new Vector3(update.Values[0], update.Values[1], transform.position.z);
-        var scale = transform.localScale;
-        scale.x = update.Values[2];
-        transform.localScale = scale;
-        transform.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
-        if (creature.TryGetComponent<Rigidbody2D>(out var body)) {
-            body.linearVelocity = new Vector2(update.Values[5], update.Values[6]);
+        if (MakesMoves(fsm)) {
+            // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts
+            // as it was there
+            GamePatcher.PutWalk(reader, creature);
+            var transform = creature.transform;
+            transform.position = new Vector3(update.Values[0], update.Values[1], transform.position.z);
+            var scale = transform.localScale;
+            scale.x = update.Values[2];
+            transform.localScale = scale;
+            transform.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
+            if (creature.TryGetComponent<Rigidbody2D>(out var body)) {
+                body.linearVelocity = new Vector2(update.Values[5], update.Values[6]);
+            }
         }
 
         SharedDice.SetRollCounts(creature, update.Amounts);
@@ -915,6 +951,93 @@ internal partial class CoopSave {
     private bool IsWaitedFor(Fsm fsm) {
         return fsm.ActiveState is { } from && (GoesByPlayers(from) || ChoosesByCount(from)) ||
                Fsm.EventData?.SentByFsm is { } sender && sender != fsm;
+    }
+
+    /// <summary>
+    /// Whether a state machine of a creature that every game runs by itself makes moves of it: one with a state that
+    /// goes by where the players are, whose steps tell where the creature is as it makes a move, which is where it is
+    /// put where the scene host's is (USER 11-18 "不如位置校准只在出招时做", "因为出招的时候必定携带位置信息"). One that makes
+    /// none, like the count of the knight's stun, took a step of the scene host's at each blow, which put the creature
+    /// where the scene host's was as it counted the blow there, a moment on in its move and before the knockback of a
+    /// blow of this game's player there (USER 11-18 "检查位置越频繁，就越是会因为正好客机在做反击或者正好客机攻击到怪而重置部
+    /// 分位移"; the user's log: 33 of the 67 puts of a unit or more were the count's).
+    /// </summary>
+    private bool MakesMoves(Fsm fsm) {
+        if (!_makesMoves.TryGetValue(fsm, out var makes)) {
+            makes = fsm.States.Any(GoesByPlayers);
+            _makesMoves[fsm] = makes;
+        }
+
+        return makes;
+    }
+
+    /// <summary>
+    /// Whether a state machine of a creature that every game runs by itself gets by itself from the state it is in to a
+    /// state that the scene host's went to: by ways that the states take by what they do themselves, as their actions
+    /// finish or as one of them sends them on, through no state whose way on the others wait for (see IsWaitedFor) and
+    /// into none that picks a part of the room. It is a moment behind, and goes the same way as fast.
+    /// </summary>
+    private bool ReachesByItself(Fsm fsm, string stateName) {
+        if (fsm.ActiveState is not { } from || _heldOwnSteps.ContainsKey(fsm)) {
+            return false;
+        }
+
+        var seen = new HashSet<FsmState> { from };
+        var next = new Queue<FsmState>();
+        next.Enqueue(from);
+        while (next.Count > 0) {
+            var state = next.Dequeue();
+            if (GoesByPlayers(state) || ChoosesByCount(state)) {
+                continue;
+            }
+
+            foreach (var transition in state.Transitions) {
+                if ((transition.ToFsmState ?? fsm.GetState(transition.ToState)) is not { } to || PicksAPart(to) ||
+                    !TakenByItself(state, transition)) {
+                    continue;
+                }
+
+                if (to.Name == stateName) {
+                    return true;
+                }
+
+                if (seen.Count < MaxWayInSteps && seen.Add(to)) {
+                    next.Enqueue(to);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a state takes a way out of it by what it does itself: as its actions finish, as one of them sends it on
+    /// that way, or as one of them picks one of its ways at random.
+    /// </summary>
+    private static bool TakenByItself(FsmState state, FsmTransition transition) {
+        if (transition.EventName == FsmEvent.Finished.Name) {
+            return true;
+        }
+
+        foreach (var action in state.Actions) {
+            if (!action.Enabled) {
+                continue;
+            }
+
+            if (action is HutongGames.PlayMaker.Actions.RandomEvent) {
+                return true;
+            }
+
+            foreach (var field in EventFieldsOf(action.GetType())) {
+                var value = field.GetValue(action);
+                if (value is FsmEvent sent && sent.Name == transition.EventName ||
+                    value is FsmEvent[] events && Array.Exists(events, each => each?.Name == transition.EventName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
