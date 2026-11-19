@@ -73,6 +73,12 @@ internal partial class CoopSave {
     private const ushort OwnToldPart = 9;
 
     /// <summary>
+    /// What an update of a creature that every game runs by itself is when it tells a step that a blow set off here as
+    /// the game took the blow, which every other game takes where its own creature is (see MovesAt).
+    /// </summary>
+    private const ushort OwnStruckPart = 10;
+
+    /// <summary>
     /// The most steps that a state machine takes through the states between on its way into a step of the scene host's
     /// (see WalkInto).
     /// </summary>
@@ -294,7 +300,8 @@ internal partial class CoopSave {
         // state machine takes from there by itself, come at another moment of its way than in the scene host's game,
         // after other rolls: the scene host's are found among them by their states (see TakeOwnStep)
         _heldOwnSteps.Remove(self);
-        if (CoopHits.IsMakingLocalStrike || CoopHits.IsReplayingPartnersStrike) {
+        var struck = CoopHits.IsMakingLocalStrike || CoopHits.IsReplayingPartnersStrike;
+        if (struck) {
             _ownWays.Add(self);
         }
 
@@ -326,14 +333,20 @@ internal partial class CoopSave {
 
         // A part tells only the steps that the others wait for, which it took by where the players are, by a count or
         // as it was told, or into a state that picks a part of the room: the rest of them the others take by
-        // themselves, and a part steps on many times in each move
+        // themselves, and a part steps on many times in each move. One that a blow set off is told as such (see
+        // MovesAt)
         if (IsSceneHost?.Invoke() == true && (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
             Logger.Info(
                 $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' goes from '{self.ActiveStateName}' to " +
-                $"'{toState.Name}' of '{self.Name}' after {step.Counts.Count / 2} kinds of rolls, as the members in " +
-                "the room are told"
+                $"'{toState.Name}' of '{self.Name}'" + (struck ? " at a blow" : "") +
+                $" after {step.Counts.Count / 2} kinds of rolls, as the members in the room are told"
             );
-            SendToRoomMembers(OwnCreatureUpdate(machine, step));
+            var update = OwnCreatureUpdate(machine, step);
+            if (struck) {
+                update.PartCount = OwnStruckPart;
+            }
+
+            SendToRoomMembers(update);
         }
 
         EnterOwnState(orig, self, toState);
@@ -743,10 +756,10 @@ internal partial class CoopSave {
         }
 
         // Put where the scene host's was as it makes a move; a state machine that makes no move of it leaves it where
-        // it is (see MakesMoves)
+        // it is, and so does a step that a blow set off there (see MovesAt)
         var way = WayInto(fsm, update.StateName);
         var from = fsm.ActiveStateName;
-        var moves = MakesMoves(fsm);
+        var moves = MovesAt(fsm, update);
         var away = Vector2.Distance(transform.position, there);
         if (moves) {
             MoveOwnSteps(creature, there - transform.position);
@@ -774,7 +787,9 @@ internal partial class CoopSave {
             : "straight";
         Logger.Info(
             $"[Own creatures] '{place}' goes from '{from}' to '{update.StateName}' {how} as in {player.Username}'s " +
-            (moves ? $"game, where it was there, {away:F1} away" : "game, where it is here")
+            (moves ? $"game, where it was there, {away:F1} away"
+                : update.PartCount == OwnStruckPart ? $"game at a blow there, where it is here, {away:F1} away"
+                : "game, where it is here")
         );
     }
 
@@ -783,14 +798,14 @@ internal partial class CoopSave {
     /// was turned there, going as fast, with the rolls and the song that it took the step with, with what the state
     /// that its state machine left worked with there, and with its walk where it was there (see GamePatcher.PutWalk).
     /// A state machine that makes no move of it, like the count of the knight's stun, takes the step where the creature
-    /// is here (see <see cref="MakesMoves"/>).
+    /// is here, and so does a step that a blow set off there (see <see cref="MovesAt"/>).
     /// </summary>
     private void PutAtSceneHostsStep(Fsm fsm, CoopSaveUpdate update) {
         var creature = fsm.GameObject;
         using var reader = new BinaryReader(new MemoryStream(update.Bytes));
         var worked = ToldValues.Read(reader);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
-        if (MakesMoves(fsm)) {
+        if (MovesAt(fsm, update)) {
             // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts
             // as it was there
             GamePatcher.PutWalk(reader, creature);
@@ -977,6 +992,19 @@ internal partial class CoopSave {
         }
 
         return makes;
+    }
+
+    /// <summary>
+    /// Whether a step of the scene host's puts a creature that every game runs by itself where the scene host's was as
+    /// it took it: a step of a state machine that makes its moves (see MakesMoves), which no blow set off there. The
+    /// game takes what a blow sets off at once, the stun that it counts too, as the knockback of the blow starts,
+    /// which moves the creature only over the next moment: where it was there as it took such a step is where it was
+    /// before the knockback, and every game takes the blow and its knockback by itself (USER 11-19 "击退本身已经不把怪拉
+    /// 回去了。晕倒凭什么在还没击退的时候就把位置发过来？": a slash of the user's set off the knight's jump and its stun there
+    /// before its knockback moved it, and the jump put it back 1.6 here, the user's log 20:41:34.606).
+    /// </summary>
+    private bool MovesAt(Fsm fsm, CoopSaveUpdate update) {
+        return MakesMoves(fsm) && update.PartCount != OwnStruckPart;
     }
 
     /// <summary>
