@@ -59,6 +59,13 @@ internal partial class CoopSave {
         new();
 
     /// <summary>
+    /// The other state machines of creatures that every game runs by itself that a catch of another player tells to do
+    /// something, with the states it tells them into and what is kept off this game's player in those (see
+    /// <see cref="KeepOutTold"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, (HashSet<FsmState> States, List<FsmStateAction> Muted)> _keptOutTold = new();
+
+    /// <summary>
     /// The state machines of creatures that every game runs by itself, each with the first state of a catch of each of
     /// its states that are of the move of a catch (see <see cref="CatchStateOf"/>).
     /// </summary>
@@ -201,6 +208,19 @@ internal partial class CoopSave {
     /// game's player (see <see cref="KeepOut"/>; review: put into the slash of that boss, they were cut by it).
     /// </summary>
     private void EnterOwnState(Action<Fsm, FsmState> orig, Fsm fsm, FsmState toState) {
+        if (_keptOutTold.TryGetValue(fsm, out var told) &&
+            (!told.States.Contains(toState) || GoesAfterLocalPlayer(fsm.GameObject))) {
+            foreach (var action in told.Muted) {
+                action.Enabled = true;
+            }
+
+            _keptOutTold.Remove(fsm);
+            Logger.Info(
+                $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' goes to '{toState.Name}' of '{fsm.Name}', " +
+                "out of what a catch of another player told it, with the local player let back in"
+            );
+        }
+
         if (_keptOut.TryGetValue(fsm, out var kept) &&
             (CatchesLocalPlayer(fsm, toState, fsm.GameObject) ||
              !kept.States.Contains(toState) && !KeepOutOfTheAftermath(fsm, toState, kept))) {
@@ -242,6 +262,53 @@ internal partial class CoopSave {
         Logger.Info(
             $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' goes into '{toState.Name}' of '{fsm.Name}', a " +
             $"catch of another player, with {muted.Count} of what it does to the player caught kept off the local " +
+            "player"
+        );
+
+        // What it tells its other state machines in the catch, which they go into here too, as it tells them here or
+        // as the scene host's step of theirs comes
+        foreach (var state in states) {
+            foreach (var action in state.Actions) {
+                if (!action.Enabled && !muted.Contains(action)) {
+                    continue;
+                }
+
+                foreach (var (other, into) in Entity.Action.EntityFsmActions.StatesToldBy(action)) {
+                    KeepOutTold(other, into);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Keeps off this game's player what a catch of another player tells another state machine of the creature to do
+    /// to the player caught, in the states of the move that it tells it into, until it goes out of them: the knight's
+    /// that puts the player it let go of back inside its arena, at where it has the player it goes after, put
+    /// Luminary where it had let the user go, 12 units off, as the scene host's step of it came (her log of 11-19,
+    /// 20:39:19.792; USER "还有我朋友有一次角色瞬移了"). Not into a catch of that state machine's own, which keeps itself
+    /// (see <see cref="KeepOut"/>).
+    /// </summary>
+    private void KeepOutTold(Fsm fsm, FsmState into) {
+        if (_keptOut.ContainsKey(fsm) || _keptOutTold.ContainsKey(fsm) || CatchStateOf(fsm, into) != null) {
+            return;
+        }
+
+        var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, into);
+        var muted = Entity.Action.EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(
+            action => states.Contains(action.State)
+        );
+        if (muted.Count == 0) {
+            return;
+        }
+
+        foreach (var action in muted) {
+            action.Enabled = false;
+        }
+
+        _keptOutTold[fsm] = (states, muted);
+        Logger.Info(
+            $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' may be told into '{into.Name}' of " +
+            $"'{fsm.Name}' by a catch of another player, with {muted.Count} of what it does there kept off the local " +
             "player"
         );
     }

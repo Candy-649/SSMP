@@ -945,28 +945,9 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="action">The action.</param>
     private static bool StartsSomethingOnThePlayer(FsmStateAction action) {
-        var (target, eventName) = action switch {
-            SendEventByName send => (send.eventTarget, send.sendEvent?.Value),
-            SendEventByNameV2 send => (send.eventTarget, send.sendEvent?.Value),
-            _ => (null, null)
-        };
-        var fsm = action.Fsm;
-        if (target == null || string.IsNullOrEmpty(eventName) || fsm?.GameObject is not { } owner ||
-            target.target is not (FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM) ||
-            fsm.GetOwnerDefaultTarget(target.gameObject) != owner) {
-            return false;
-        }
-
-        foreach (var other in owner.GetComponents<PlayMakerFSM>()) {
-            if (other.Fsm == fsm || target.target == FsmEventTarget.EventTarget.GameObjectFSM &&
-                other.FsmName != target.fsmName?.Value) {
-                continue;
-            }
-
-            foreach (var state in other.FsmStates) {
-                if (FindTransition(other.Fsm, state, eventName!) is { } to && DoesNothingButActOnThePlayer(to)) {
-                    return true;
-                }
+        foreach (var (_, to) in StatesToldBy(action)) {
+            if (DoesNothingButActOnThePlayer(to)) {
+                return true;
             }
         }
 
@@ -987,6 +968,38 @@ internal static partial class EntityFsmActions {
             }
 
             return acts;
+        }
+    }
+
+    /// <summary>
+    /// The states that an action tells the other FSMs of the creature's own object to go to, with those FSMs: one for
+    /// each state of theirs that the event it sends takes them on from.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    internal static IEnumerable<(HutongGames.PlayMaker.Fsm Fsm, FsmState State)> StatesToldBy(FsmStateAction action) {
+        var (target, eventName) = action switch {
+            SendEventByName send => (send.eventTarget, send.sendEvent?.Value),
+            SendEventByNameV2 send => (send.eventTarget, send.sendEvent?.Value),
+            _ => (null, null)
+        };
+        var fsm = action.Fsm;
+        if (target == null || string.IsNullOrEmpty(eventName) || fsm?.GameObject is not { } owner ||
+            target.target is not (FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM) ||
+            fsm.GetOwnerDefaultTarget(target.gameObject) != owner) {
+            yield break;
+        }
+
+        foreach (var other in owner.GetComponents<PlayMakerFSM>()) {
+            if (other.Fsm == fsm || target.target == FsmEventTarget.EventTarget.GameObjectFSM &&
+                other.FsmName != target.fsmName?.Value) {
+                continue;
+            }
+
+            foreach (var state in other.FsmStates) {
+                if (FindTransition(other.Fsm, state, eventName!) is { } to) {
+                    yield return (other.Fsm, to);
+                }
+            }
         }
     }
 
