@@ -155,8 +155,9 @@ internal static class PartsByClips {
         },
         new() { Path = "Tool Effects/Craft Flash", On = ["Sit Craft"], AtEnd = true },
 
-        // The flash of the taunt with the rings, at the frame of its clip that the game waits for
-        new() { Path = "Effects/Taunt Rings Flash", On = ["Taunt Rings"], AtTrigger = 0 },
+        // The flash of the taunt with the rings, at the frame of its clip that the game waits for, with the clash of
+        // the rings that the game plays then (USER 11-19 "同时会有一声环撞击的声音，那个声音没同步")
+        new() { Path = "Effects/Taunt Rings Flash", On = ["Taunt Rings"], AtTrigger = 0, SoundsOf = "Taunt Rings" },
 
         // The puff of a wall jump, and the burst and the bump of dashing through water
         new() { Path = "Effects/Wall Puff", On = ["Walljump", "Walljump Somersault"] },
@@ -421,6 +422,11 @@ internal static class PartsByClips {
         if (rule.If != null && !rule.If(playerObject)) {
             Logger.Info($"[Parts] Player {id} starts '{clipName}': '{rule.Path}' does not come out where it is");
             return;
+        }
+
+        // The sounds of the state that switches it on, which play whether or not it is out already
+        if (rule.SoundsOf != null) {
+            TauntVoice.PlaySoundsOf(playerObject, id, rule.SoundsOf);
         }
 
         var part = HeroChildEffects.GetCopy(playerObject, rule.Path, true);
@@ -692,6 +698,12 @@ internal static class PartsByClips {
         /// What is done each frame while the part is out, with the character and the part.
         /// </summary>
         public Action<GameObject, GameObject>? WhileOut;
+
+        /// <summary>
+        /// The state of the hero's taunts whose own sounds play at the character as the part comes out, for a part
+        /// that the game switches on in a state that plays them (see <see cref="TauntVoice.PlaySoundsOf"/>).
+        /// </summary>
+        public string? SoundsOf;
 
         /// <summary>
         /// Whether the part stays out until it is made to go, once read from the local hero's part.

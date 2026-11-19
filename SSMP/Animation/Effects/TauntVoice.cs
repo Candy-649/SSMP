@@ -9,12 +9,14 @@ namespace SSMP.Animation.Effects;
 
 /// <summary>
 /// The voice of the hero as it taunts. Only the animation of a taunt reached the other players, so they saw it without
-/// hearing it. Of all the hero's sounds this one is played on purpose: the hero's other sounds stay with the player
-/// whose hero it is, so that two heroes do not make twice the noise.
+/// hearing it. Of all the hero's sounds this one is played on purpose, and so is the clash of the rings of the taunt
+/// with the rings: the hero's other sounds stay with the player whose hero it is, so that two heroes do not make twice
+/// the noise.
 ///
 /// It goes by the clips of the character, like the parts of its moves (see <see cref="PartsByClips"/>), rather than by a
 /// word of its own: the game says it right as the taunt begins, in the voice of the beast crest for that crest, and the
-/// taunt with the rings says its own as it begins.
+/// taunt with the rings says its own as it begins, and clashes its rings as their flash comes out (see
+/// <see cref="PlaySoundsOf"/>).
 /// </summary>
 internal static class TauntVoice {
     /// <summary>
@@ -66,6 +68,33 @@ internal static class TauntVoice {
         }
 
         Logger.Info($"[Parts] Player {id} starts '{clipName}': says the voice of '{stateName}'");
+    }
+
+    /// <summary>
+    /// Plays the sounds of a state of the local hero's taunts at the character of another player, as the part that the
+    /// state switches on comes out of it (see PartsByClips): the clash of the rings with their flash. Not the voice
+    /// that the state may say besides, which <see cref="OnCharacterClip"/> said as the taunt began.
+    /// </summary>
+    /// <param name="playerObject">The character.</param>
+    /// <param name="id">The ID of the player, for the log.</param>
+    /// <param name="stateName">The name of the state.</param>
+    public static void PlaySoundsOf(GameObject playerObject, ushort id, string stateName) {
+        var fsm = HeroController.instance != null ? HeroController.instance.silkSpecialFSM : null;
+        if (fsm == null) {
+            return;
+        }
+
+        var state = fsm.GetStateOrNull(stateName);
+        if (state == null) {
+            Logger.Warn($"Unable to find taunt state '{stateName}' to play the sounds of another player's taunt");
+            return;
+        }
+
+        foreach (var sound in state.Actions.OfType<PlayAudioEvent>()) {
+            AudioUtil.PlayAudio(sound, playerObject);
+        }
+
+        Logger.Info($"[Parts] Player {id} gets to '{stateName}' of the taunt: plays its sounds");
     }
 
     /// <summary>
