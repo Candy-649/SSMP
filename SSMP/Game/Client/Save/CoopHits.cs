@@ -238,6 +238,21 @@ internal partial class CoopHits {
     public static bool IsReplayingPartnersStrike => _isReplaying;
 
     /// <summary>
+    /// The ID of the player whose hit or touch is being played here as it came, while
+    /// <see cref="IsReplayingPartnersStrike"/>.
+    /// </summary>
+    public static ushort ReplayedStriker { get; private set; }
+
+    /// <summary>
+    /// Whether this game takes, at the word of another game, a step of a creature that a blow of another player set off
+    /// there, or a strike back at such a blow: it plays as the creature's own, but for the moment that the game stands
+    /// still for, which is the feel of the blow, played by the game of the player who struck. The knight's parry of
+    /// the user's blow stood Luminary's game still too, who was not striking it (Luminary's log of 11-19,
+    /// 20:39:42.224; USER "我朋友背对着boss的刀光但是弹刀到了").
+    /// </summary>
+    public static bool TakesAnothersBlow { get; set; }
+
+    /// <summary>
     /// Whether the hit being replayed did not count on the thing that breaks in the partner's game, so it doesn't count
     /// here either (see <see cref="CoopHitUpdate.Uncounted"/>).
     /// </summary>
@@ -875,6 +890,7 @@ internal partial class CoopHits {
         var response = default(IHitResponder.HitResponse);
         bool answered;
         _isReplaying = true;
+        ReplayedStriker = update.PlayerId;
         _replayUncounted = update.Uncounted;
         try {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
@@ -1289,8 +1305,9 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Hook for <see cref="global::GameManager.FreezeMoment(FreezeMomentTypes, Action)"/>, which keeps a replayed hit
-    /// from pausing the game of the local player for a moment.
+    /// Hook for <see cref="global::GameManager.FreezeMoment(FreezeMomentTypes, Action)"/>, which keeps a replayed hit,
+    /// and what another player's blow set off (see <see cref="TakesAnothersBlow"/>), from pausing the game of the local
+    /// player for a moment.
     /// </summary>
     private void OnFreezeMoment(
         Action<global::GameManager, FreezeMomentTypes, Action?> orig,
@@ -1298,7 +1315,7 @@ internal partial class CoopHits {
         FreezeMomentTypes type,
         Action? onFinish
     ) {
-        if (_isReplaying) {
+        if (_isReplaying || TakesAnothersBlow) {
             onFinish?.Invoke();
             return;
         }
@@ -3038,6 +3055,7 @@ internal partial class CoopHits {
 
         var answered = false;
         _isReplaying = true;
+        ReplayedStriker = update.PlayerId;
         try {
             _gamePatcher.RunAsRemoteHit(() => {
                 foreach (var (eventName, dice) in events) {
@@ -4160,6 +4178,7 @@ internal partial class CoopHits {
 
         bool answered;
         _isReplaying = true;
+        ReplayedStriker = update.PlayerId;
         try {
             SetReplayedRanges(target, touch.Ranges);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(

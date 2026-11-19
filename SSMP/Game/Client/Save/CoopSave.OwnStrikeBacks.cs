@@ -164,6 +164,13 @@ internal partial class CoopSave {
             GamePatcher.GoAfterStriker(creature, figure, fsm, fsm.GetState(into));
         }
 
-        fsm.SetState(into);
+        // It plays here as the creature's own, but for the moment that the game stands still, which is the feel of the
+        // blow of the player struck back at (see CoopHits.TakesAnothersBlow)
+        CoopHits.TakesAnothersBlow = true;
+        try {
+            SetOwnState(fsm, into);
+        } finally {
+            CoopHits.TakesAnothersBlow = false;
+        }
     }
 }
