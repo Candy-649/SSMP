@@ -338,7 +338,7 @@ internal partial class CoopSave {
             }
 
             hero.StartAnimationControlToIdle();
-            fsm.SetState(ClothesGrabIdleState);
+            fsm.SetStateAsItRuns(ClothesGrabIdleState);
             if (_checkedMembers.Count > 0) {
                 SendClothesGrab(fsm, ClothesGrabNotReady);
             }

@@ -191,7 +191,7 @@ internal partial class CoopSave {
                 if (Stop != stop) {
                     // Turning around goes through the state that picks the way, which also lets the lift carry the hero
                     IsDown.Value = stop == 1;
-                    Fsm.SetState(LiftDirectionState);
+                    Fsm.SetStateAsItRuns(LiftDirectionState);
                 }
 
                 return true;
@@ -202,7 +202,7 @@ internal partial class CoopSave {
             }
 
             IsDown.Value = stop == 1;
-            Fsm.SetState(skippedDelay >= LiftBobSkip ? LiftDirectionState : LiftBobState);
+            Fsm.SetStateAsItRuns(skippedDelay >= LiftBobSkip ? LiftDirectionState : LiftBobState);
             return IsMoving;
         }
 
@@ -210,7 +210,7 @@ internal partial class CoopSave {
         public override void PlaceAt(int stop, float value) {
             var state = stop == 1 ? "Start Up" : "Start Down";
             if (Fsm.GetState(state) != null) {
-                Fsm.SetState(state);
+                Fsm.SetStateAsItRuns(state);
             }
         }
 
@@ -218,7 +218,7 @@ internal partial class CoopSave {
         public override void JoinRide(int stop, float value) {
             SetHeight(value);
             IsDown.Value = stop == 1;
-            Fsm.SetState(LiftDirectionState);
+            Fsm.SetStateAsItRuns(LiftDirectionState);
         }
 
 
@@ -553,7 +553,7 @@ internal partial class CoopSave {
 
             _liftReplaying = true;
             try {
-                story.Fsm.SetState(StoryLiftEnteredState);
+                story.Fsm.SetStateAsItRuns(StoryLiftEnteredState);
             } finally {
                 _liftReplaying = false;
             }

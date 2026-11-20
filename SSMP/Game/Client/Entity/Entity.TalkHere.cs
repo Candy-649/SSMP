@@ -563,7 +563,7 @@ internal partial class Entity {
         // Only the state the talk leads to is kept off this game's player, who did not talk: what it puts at the player
         // goes to the partner's figure. Beyond it - a fight the talk started - the creature is after both players again,
         // and keeping it off this one for the whole fight would leave them never aimed at.
-        PlayForPartner(hostFsm, true, () => hostFsm.Fsm.SetState(toState), [to], figure);
+        PlayForPartner(hostFsm, true, () => hostFsm.Fsm.SetStateAsItRuns(toState), [to], figure);
         Logger.Info(
             $"The partner's talk with entity {Id} took its '{hostFsm.FsmName}' from '{fromState}' to '{toState}'"
         );

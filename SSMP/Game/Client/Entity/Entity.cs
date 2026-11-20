@@ -2885,7 +2885,7 @@ internal partial class Entity {
             ActionRegistry.IsActionContinuous(a) || ActionRegistry.IsActionTransferSafeSetup(a)
         ).ToArray();
         try {
-            fsm.SetState(state.Name);
+            fsm.SetStateAsItRuns(state.Name);
         } catch (Exception e) {
             SSMP.Logging.Logger.Warn(
                 $"Could not go on in '{state.Name}' of the FSM '{fsm.FsmName}' of '{fsm.gameObject.name}': {e}"

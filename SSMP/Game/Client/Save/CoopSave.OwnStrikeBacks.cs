@@ -3,6 +3,7 @@ using System.Linq;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -170,7 +171,7 @@ internal partial class CoopSave {
         CoopHits.TakesAnothersBlow = true;
         SeeTargetAsTold(creature, update);
         try {
-            SetOwnState(fsm, into);
+            fsm.SetStateAsItRuns(into);
         } finally {
             CoopHits.TakesAnothersBlow = false;
             OwnCreatures.SeeTargetHere();

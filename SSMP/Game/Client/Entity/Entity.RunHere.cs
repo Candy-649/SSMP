@@ -10,6 +10,7 @@ using SSMP.Game.Client.Entity.Action;
 using SSMP.Game.Client.Entity.Component;
 using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using UnityEngine.Audio;
 using Logger = SSMP.Logging.Logger;
@@ -1068,7 +1069,7 @@ internal partial class Entity {
             BeginAftermath(after, $"followed the scene host to '{stateName}'");
             _aftermathEntry = to;
             try {
-                fsm.SetState(to.Name);
+                fsm.SetStateAsItRuns(to.Name);
             } finally {
                 _aftermathEntry = null;
             }
@@ -2383,7 +2384,7 @@ internal partial class Entity {
         StartSteppingRunHere(copyFsm);
 
         // Gone into the way the scene host's FSM went into it, doing what it does there
-        copyFsm.Fsm.SetState(fromName);
+        copyFsm.Fsm.SetStateAsItRuns(fromName);
         Logger.Info(
             $"The copy of entity {Id} ({Type}) plays the move from '{fromName}' of '{copyFsm.FsmName}' by itself"
         );
@@ -2636,7 +2637,7 @@ internal partial class Entity {
 
         // Done now, as the scene host's FSM did it on going in. It is not gone into again: the copy is told of the
         // death that the scene host's game sends as well (HealthManagerComponent), which would start it all over
-        copyFsm.Fsm.SetState(from.Name);
+        copyFsm.Fsm.SetStateAsItRuns(from.Name);
         _runHereCombo.Remove(from);
 
         Logger.Info($"The copy of entity {Id} runs '{copyFsm.FsmName}' by itself from '{from.Name}' for this player");
@@ -2722,7 +2723,7 @@ internal partial class Entity {
                 return;
             }
 
-            fsm.SetState(next.Name);
+            fsm.SetStateAsItRuns(next.Name);
         }
     }
 
@@ -3845,7 +3846,7 @@ internal partial class Entity {
         if (!lead.States.Contains(state) && AftermathOf(fsm, state, lead.From) != null) {
             EndLead(lead);
             KeepOffForTheAftermath(lead, state);
-            fsm.SetState(stateName);
+            fsm.SetStateAsItRuns(stateName);
             return;
         }
 
@@ -3855,7 +3856,7 @@ internal partial class Entity {
         // (USER 11-09 "抓人动画都在中间放就行", "乱改动画这块儿太容易出错了")
         lead.Allowed = state;
         try {
-            fsm.SetState(stateName);
+            fsm.SetStateAsItRuns(stateName);
         } finally {
             lead.Allowed = null;
         }
@@ -4077,7 +4078,7 @@ internal partial class Entity {
                     break;
                 }
 
-                fsm.SetState(way[next].Name);
+                fsm.SetStateAsItRuns(way[next].Name);
                 next++;
             }
         } finally {

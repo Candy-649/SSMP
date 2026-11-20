@@ -607,13 +607,7 @@ internal partial class CoopSave {
 
         // After the racer finished, finishing the laps would tell the racer that the hero came second. So the win is
         // started directly, and it sets for itself everything a lost race had set on the way.
-        FsmExecutionStack.PushFsm(fsm);
-        try {
-            fsm.SetState(RaceHeroWinState);
-            fsm.UpdateStateChanges();
-        } finally {
-            FsmExecutionStack.PopFsm();
-        }
+        fsm.SetStateAsItRuns(RaceHeroWinState);
 
         Logger.Info($"A member won the race, so it is won here too from '{held?.State ?? RaceRunnerEndState}'");
     }

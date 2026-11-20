@@ -87,7 +87,7 @@ internal class ChallengePromptComponent : EntityComponent {
             _promptFsm.RemoveFirstAction<Tk2dWatchAnimationEvents>("Challenge Audio");
             
             // Start the FSM from the state 'Challenge'
-            _promptFsm.SetState("Challenge");
+            _promptFsm.SetStateAsItRuns("Challenge");
         }
     }
 

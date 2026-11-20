@@ -5,6 +5,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -758,7 +759,7 @@ internal partial class CoopSave {
                 $"The part '{part.name}' goes back to '{stateName}' from '{fsm.ActiveState?.Name}' to take " +
                 $"'{eventName}' of the scene host, as the host's did"
             );
-            fsm.SetState(stateName);
+            fsm.SetStateAsItRuns(stateName);
             return true;
         }
 

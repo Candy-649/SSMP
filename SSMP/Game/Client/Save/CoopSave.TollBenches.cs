@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -334,13 +335,7 @@ internal partial class CoopSave {
         try {
             // As in an update of the FSM, the transitions that the state fires while it starts wait until it has
             // started
-            FsmExecutionStack.PushFsm(fsm);
-            try {
-                fsm.SetState(TollBenchFlipUpState);
-                fsm.UpdateStateChanges();
-            } finally {
-                FsmExecutionStack.PopFsm();
-            }
+            fsm.SetStateAsItRuns(TollBenchFlipUpState);
         } finally {
             _flippingPartnerTollBench = false;
         }
@@ -382,13 +377,7 @@ internal partial class CoopSave {
         }
 
         var fsm = bench.Fsm;
-        FsmExecutionStack.PushFsm(fsm);
-        try {
-            fsm.SetState(wait);
-            fsm.UpdateStateChanges();
-        } finally {
-            FsmExecutionStack.PopFsm();
-        }
+        fsm.SetStateAsItRuns(wait);
 
         bench.RestartPending = false;
         Logger.Info(

@@ -737,7 +737,7 @@ internal partial class CoopSave {
             var keptOff = kind.KeepOffThePlayer ? KeepTrapOffThePlayer(fsm) : 0;
             SharedDice.Throw(dice, () => {
                 if (kind.EventName.Length == 0) {
-                    fsm.SetState(kind.GoneOffStateName);
+                    fsm.SetStateAsItRuns(kind.GoneOffStateName);
                 } else {
                     fsm.SendEvent(kind.EventName);
                 }

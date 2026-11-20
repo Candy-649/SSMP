@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -182,10 +183,7 @@ internal partial class CoopSave {
         CoopSaveUpdate? word = null
     ) {
         // The event that led there is from no one, rather than from whatever sent one last
-        var eventData = Fsm.EventData;
-        Fsm.EventData = new FsmEventData();
-        FsmExecutionStack.PushFsm(fsm);
-        try {
+        fsm.DoAsItRuns(() => {
             var lastStarting = (_startingMachineRound, _startingMachineState);
             if (letThrough != null) {
                 (_startingMachineRound, _startingMachineState) = (fsm, letThrough);
@@ -203,12 +201,7 @@ internal partial class CoopSave {
             if (word != null) {
                 PutPartsWhereTheHostsAre(fsm, word);
             }
-
-            fsm.UpdateStateChanges();
-        } finally {
-            FsmExecutionStack.PopFsm();
-            Fsm.EventData = eventData;
-        }
+        });
     }
 
     /// <summary>

@@ -5,6 +5,7 @@ using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -739,7 +740,7 @@ internal partial class CoopSave {
         var lastStarting = _startingMachineRound;
         _startingMachineRound = fsm;
         try {
-            SharedDice.Throw(update.Amounts, start);
+            SharedDice.Throw(update.Amounts, () => fsm.DoAsItRuns(start));
         } finally {
             _startingMachineRound = lastStarting;
         }
@@ -958,7 +959,7 @@ internal partial class CoopSave {
             }
 
             try {
-                fsm.SetState(state.Name);
+                fsm.SetStateAsItRuns(state.Name);
             } finally {
                 _startingMachineRound = lastStarting;
             }

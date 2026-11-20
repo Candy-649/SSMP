@@ -448,7 +448,7 @@ internal partial class CoopHits {
                 }
 
                 if (walk.At == at) {
-                    PutIn(fsm, to);
+                    fsm.SetStateAsItRuns(to.Name);
                 }
             } catch (Exception e) {
                 Logger.Warn($"Could not take '{fsm.GameObjectName}' '{fsm.Name}' to '{to.Name}': {e.Message}");
@@ -458,25 +458,6 @@ internal partial class CoopHits {
             if (walk.At == at) {
                 return;
             }
-        }
-    }
-
-    /// <summary>
-    /// Puts a state machine in a state that no event of it takes it to, as running itself: what the state tells
-    /// itself then goes on once the state is through, rather than in the middle of it, as an event from no one.
-    /// </summary>
-    /// <param name="fsm">The state machine.</param>
-    /// <param name="state">The state.</param>
-    private static void PutIn(Fsm fsm, FsmState state) {
-        var eventData = Fsm.EventData;
-        Fsm.EventData = new FsmEventData();
-        FsmExecutionStack.PushFsm(fsm);
-        try {
-            fsm.SetState(state.Name);
-            fsm.UpdateStateChanges();
-        } finally {
-            FsmExecutionStack.PopFsm();
-            Fsm.EventData = eventData;
         }
     }
 

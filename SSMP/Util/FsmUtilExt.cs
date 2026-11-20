@@ -134,6 +134,51 @@ public static class FsmUtilExt {
             return true;
         }).ToArray();
     }
+
+    /// <summary>
+    /// Sets a state machine into a state the way its own switch sets it, as it runs (see PlayMaker's Fsm.DoTransition):
+    /// a way on that the state sends itself as it starts is taken once it has started, and what the state would have
+    /// done after that is left, as in the game; the event that led there is from no one, rather than from whatever sent
+    /// one last. Set with nothing of it running, a state that sent itself on as it started switched at once, in the
+    /// middle of its own start, which then went on over what the next state had set: the knight's choice of a slash of
+    /// wind went into its choice of one after a jump, then named the slash from the ground its next move again, slashed
+    /// from the ground where the scene host's jumped and was set into the jump from there (Luminary's log of 11-19,
+    /// 20:39:34.291 and 20:39:57.491; USER "它的boss在跳起来的时候经常定在空中").
+    /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="stateName">The name of the state.</param>
+    public static void SetStateAsItRuns(this HutongGames.PlayMaker.Fsm fsm, string stateName) {
+        fsm.DoAsItRuns(() => fsm.SetState(stateName));
+    }
+
+    /// <summary>
+    /// Sets the state machine of a component into a state the way its own switch sets it, as it runs (see
+    /// <see cref="SetStateAsItRuns(HutongGames.PlayMaker.Fsm, string)"/>).
+    /// </summary>
+    /// <param name="fsm">The component.</param>
+    /// <param name="stateName">The name of the state.</param>
+    public static void SetStateAsItRuns(this PlayMakerFSM fsm, string stateName) {
+        fsm.Fsm.SetStateAsItRuns(stateName);
+    }
+
+    /// <summary>
+    /// Does something to a state machine as it runs, and takes the way on that the state machine sent itself meanwhile
+    /// once that is done (see <see cref="SetStateAsItRuns(HutongGames.PlayMaker.Fsm, string)"/>).
+    /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="change">What is done to it.</param>
+    public static void DoAsItRuns(this HutongGames.PlayMaker.Fsm fsm, Action change) {
+        var eventData = HutongGames.PlayMaker.Fsm.EventData;
+        HutongGames.PlayMaker.Fsm.EventData = new FsmEventData();
+        FsmExecutionStack.PushFsm(fsm);
+        try {
+            change();
+            fsm.UpdateStateChanges();
+        } finally {
+            FsmExecutionStack.PopFsm();
+            HutongGames.PlayMaker.Fsm.EventData = eventData;
+        }
+    }
 }
 
 /// <summary>

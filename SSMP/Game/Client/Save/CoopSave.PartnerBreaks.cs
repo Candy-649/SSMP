@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
@@ -231,7 +232,7 @@ internal partial class CoopSave {
             _endedBreakWaits.Add(fsm);
             var counts = string.Join(", ", fsm.FsmVariables.IntVariables.Select(v => $"{v.Name}={v.Value}"));
             flag.Value = true;
-            fsm.SetState(broken.Name);
+            fsm.SetStateAsItRuns(broken.Name);
             Logger.Info(
                 $"[Breaks] '{ScenePath.Get(fsm.transform)}' ({fsm.FsmName}) stood here in '{state.Name}' with " +
                 $"{(counts.Length > 0 ? counts : "no counts")} when the partner broke it" +

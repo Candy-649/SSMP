@@ -202,7 +202,7 @@ internal partial class CoopSave {
             NoteStartPick(held.Key, held.Place, start, how);
             _releasingStartPick = fsm;
             try {
-                fsm.SetState(start);
+                fsm.SetStateAsItRuns(start);
             } finally {
                 _releasingStartPick = null;
             }

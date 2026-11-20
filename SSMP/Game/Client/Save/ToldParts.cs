@@ -7,6 +7,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -621,7 +622,7 @@ internal static class ToldParts {
                     $"The part '{part.name}' goes back to '{taker.StateName}' from '{fsm.ActiveState?.Name}' to " +
                     $"take '{eventName}' of the scene host's creature, as the host's did"
                 );
-                fsm.SetState(taker.StateName);
+                fsm.SetStateAsItRuns(taker.StateName);
             }
         }
     }

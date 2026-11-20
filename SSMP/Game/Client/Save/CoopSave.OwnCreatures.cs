@@ -7,6 +7,7 @@ using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -939,30 +940,11 @@ internal partial class CoopSave {
             }
 
             if (OwnCreatures.PlaysSceneHostsStep(fsm)) {
-                SetOwnState(fsm, update.StateName);
+                fsm.SetStateAsItRuns(update.StateName);
             }
         } finally {
             _wayInLoop = null;
             _wayInStep = null;
-        }
-    }
-
-    /// <summary>
-    /// Sets a state machine of a creature that every game runs by itself into a state the way its own switch sets it,
-    /// as it runs (see PlayMaker's Fsm.DoTransition): a way on that the state sends itself as it starts is taken once
-    /// it has started, and what the state would have done after that is left, as in the game. Set from here with
-    /// nothing of it running, the knight's choice of a slash of wind went at once into its choice of one after a jump,
-    /// and then on with the rest of its own start, which named the slash from the ground its next move again: it
-    /// slashed from the ground where the scene host's jumped, and was set into the jump from there (Luminary's log of
-    /// 11-19, 20:39:34.291 and 20:39:57.491; USER "它的boss在跳起来的时候经常定在空中").
-    /// </summary>
-    private static void SetOwnState(Fsm fsm, string stateName) {
-        FsmExecutionStack.PushFsm(fsm);
-        try {
-            fsm.SetState(stateName);
-            fsm.UpdateStateChanges();
-        } finally {
-            FsmExecutionStack.PopFsm();
         }
     }
 
@@ -1266,7 +1248,7 @@ internal partial class CoopSave {
                 $"[Own creatures] '{fsm.FsmComponent.gameObject.name}' takes '{pair.Value}' of '{fsm.Name}' again by " +
                 "itself, as this game runs the room now"
             );
-            SetOwnState(fsm, pair.Value);
+            fsm.SetStateAsItRuns(pair.Value);
         }
 
         _heldOwnSteps.Clear();

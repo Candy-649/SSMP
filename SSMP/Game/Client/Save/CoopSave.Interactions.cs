@@ -1165,13 +1165,7 @@ internal partial class CoopSave {
         }
 
         // As in an update of the FSM, the transitions that the state fires while it starts wait until it has started
-        FsmExecutionStack.PushFsm(fsm);
-        try {
-            fsm.SetState(start);
-            fsm.UpdateStateChanges();
-        } finally {
-            FsmExecutionStack.PopFsm();
-        }
+        fsm.SetStateAsItRuns(start);
     }
 
     /// <summary>

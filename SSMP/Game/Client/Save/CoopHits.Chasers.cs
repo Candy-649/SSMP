@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
@@ -227,7 +228,7 @@ internal partial class CoopHits {
         }
 
         mark.HeldStep = null;
-        fsm.SetState(step);
+        fsm.SetStateAsItRuns(step);
         Logger.Info(
             $"[Thrown] '{mark.Key}' goes into '{step}' after {DescribeChased(mark.Target)}, as the scene host's did"
         );
@@ -277,7 +278,7 @@ internal partial class CoopHits {
             _heldChasers.RemoveAt(i);
             if (held != null && FindChaser(mark!, out _, out var fsm)) {
                 mark!.HeldStep = null;
-                fsm.SetState(held);
+                fsm.SetStateAsItRuns(held);
                 Logger.Info($"[Thrown] '{key}' goes into '{held}' by itself, as this game runs the room now");
             }
         }

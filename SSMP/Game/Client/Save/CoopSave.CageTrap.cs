@@ -1,5 +1,6 @@
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -208,7 +209,7 @@ internal partial class CoopSave {
 
             Logger.Info($"{player.Username} sprang the cage with both players in it, so it goes off here as well");
             _cageSprungByPartner = fsm;
-            playMakerFsm.SetState(CageBaitTakeControlState);
+            playMakerFsm.SetStateAsItRuns(CageBaitTakeControlState);
             return;
         }
     }
