@@ -184,6 +184,16 @@ internal class TimedPart(string name) {
     public readonly string Name = name;
 
     /// <summary>
+    /// The part as what moved the local character, for the log (see Game.Client.MoveWatch).
+    /// </summary>
+    public string MoveCause => _moveCause ??= $"the mod's {Name}";
+
+    /// <summary>
+    /// Backing field for <see cref="MoveCause"/>.
+    /// </summary>
+    private string? _moveCause;
+
+    /// <summary>
     /// The time the part took in this frame, in ticks of <see cref="Stopwatch"/>.
     /// </summary>
     public long FrameTicks;

@@ -214,6 +214,17 @@ internal class PredictiveInterpolation : MonoBehaviour {
     private Vector3 _carried;
 
     private Transform _cachedTransform = null!;
+
+    /// <summary>
+    /// What watches how the object moves here, for the character of another player (see Game.Client.MoveWatch), or
+    /// null for a creature. Set as the player's character comes into the room.
+    /// </summary>
+    internal Game.Client.MoveWatch.FigureMoves? Moves;
+
+    /// <summary>
+    /// Whether the object was put straight where its positions have it since the last frame, for <see cref="Moves"/>.
+    /// </summary>
+    private bool _putStraight;
     private uint _lastServerSequenceId;
     private bool _predictionDisabled;
     private bool _isInitialized;
@@ -236,6 +247,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _isInitialized = false;
         _hasNewServerData = false;
         _carried = Vector3.zero;
+        Moves = null;
         // Reset sequence tracking so a recycled container doesn't discard the
         // new player's initial packets just because their sequence IDs happen
         // to be lower than the previous player's last seen value.
@@ -321,6 +333,9 @@ internal class PredictiveInterpolation : MonoBehaviour {
         );
 
         _cachedTransform.position = applied;
+        Moves?.Frame(applied, _lastServerPosition, _logicalPosition - _lastServerPosition, _visualOffset, _carried,
+            _putStraight);
+        _putStraight = false;
     }
 
     /// <summary>
@@ -776,6 +791,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _visualOffset = Vector3.zero;
         _visualOffsetVelocity = Vector3.zero;
         _cachedTransform.position = position + _carried;
+        _putStraight = true;
         return true;
     }
 
@@ -799,6 +815,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _lastUpdateTime = Time.time;
 
         _cachedTransform.position = position + _carried;
+        _putStraight = true;
     }
 
     /// <summary>

@@ -657,6 +657,10 @@ internal class PlayerManager : IPlayerManager {
 
         SetPlayerObjectBoolScale(playerObject, scale);
 
+        // How the character moves here goes in the log where nobody steers it (see MoveWatch), set before it comes on,
+        // as going off forgets it
+        playerContainer.GetComponent<PredictiveInterpolation>().Moves = new MoveWatch.FigureMoves(playerData.Username);
+
         // Set container and children active
         playerContainer.SetActive(true);
         playerContainer.SetActiveChildren(true);

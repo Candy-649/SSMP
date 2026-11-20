@@ -378,6 +378,9 @@ public static class EventHooks {
             OnHeroControllerDie
         );
 
+        // The calls in which the character may be moved, for what moved it (see MoveWatch)
+        Game.Client.MoveWatch.Initialize();
+
         _heroControllerUseLavaBellHook = new Hook(
             typeof(HeroController).GetMethod(nameof(HeroController.UseLavaBell), BindingFlags),
             OnUseLavaBell
@@ -556,7 +559,15 @@ public static class EventHooks {
     }
 
     private static void OnHeroControllerUpdate(Action<HeroController> orig, HeroController self) {
-        orig(self);
+        // Where the character is as each frame begins, and what moves it from there: its own code here, and each part
+        // of the mod's work below (see MoveWatch)
+        Game.Client.MoveWatch.FrameStart(self);
+        var own = Game.Client.MoveWatch.Begin();
+        try {
+            orig(self);
+        } finally {
+            Game.Client.MoveWatch.End(own, Game.Client.MoveWatch.HeroUpdate);
+        }
 
         // One at a time, because this is the heartbeat of the whole mod. Nearly everything that ever has to let a
         // player go again hangs off this event - the end of a wait for the other player, the end of a line of
@@ -567,6 +578,7 @@ public static class EventHooks {
         var last = Stopwatch.GetTimestamp();
         foreach (var (listener, part) in _heroControllerUpdateListeners) {
             FrameWatch.Running = part.Name;
+            var call = Game.Client.MoveWatch.Begin();
             try {
                 ((Action<HeroController>) listener)(self);
             } catch (Exception e) {
@@ -575,6 +587,8 @@ public static class EventHooks {
                     Logger.Error($"'{what}' threw on a frame, and the rest of the mod went on without it:\n{e}");
                 }
             }
+
+            Game.Client.MoveWatch.End(call, part.MoveCause);
 
             var now = Stopwatch.GetTimestamp();
             part.FrameTicks += now - last;
