@@ -21,7 +21,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// talk does in a game of one, and the scene host's game is told, whose creature goes on by the same way if it is
 /// still where that one was (see <see cref="TellOwnTalk"/>, <see cref="TakeOwnTalk"/>): every other game takes it from
 /// there as a step of the scene host's, and the game puts its player into the talk as it does for a talk that a
-/// character starts by itself. A creature that goes into a talk, by a step of its own or of the scene host's, plays it
+/// character starts by itself. A word that comes while this game's player is on the way into the same talk is left
+/// to their own word as they get there (see <see cref="OnTheWayIntoTalk"/>). A creature that goes into a talk, by a
+/// step of its own or of the scene host's, plays it
 /// here to its end, each line as this game's player reads it, while the steps of the scene host's that come meanwhile
 /// wait, as for a leap at this game's player (see CoopSave.OwnCatches). It is over as it leaves the state that ended
 /// its dialogue with no more of the talk to come, as a talk with a copy is (see Entity.EndsTalk). That step waits in
@@ -195,7 +197,8 @@ internal partial class CoopSave {
     /// every game runs by itself (see <see cref="TellOwnTalk"/>): its creature here goes on by the same event if it is
     /// still in the state that that one went from, which puts this game's player into the talk too, and every other
     /// game takes it from here as a step of the scene host's. One that went on since, as this game's player started a
-    /// talk with it as well, keeps to its own way.
+    /// talk with it as well, keeps to its own way, and so does one that this game's player is on the way into the talk
+    /// with (see <see cref="OnTheWayIntoTalk"/>).
     /// </summary>
     private void TakeOwnTalk(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
         var place = update.ObjectPath;
@@ -217,10 +220,39 @@ internal partial class CoopSave {
             return;
         }
 
+        if (OnTheWayIntoTalk(fsm) is { } npc) {
+            Logger.Info(
+                $"[Own creatures] {player.Username} started a talk with '{place}' in their game, while this game's " +
+                $"player is on the way into it through '{npc.name}' here, which takes it on as they get there"
+            );
+            return;
+        }
+
         Logger.Info(
             $"[Own creatures] {player.Username} started a talk with '{place}' in their game, and it goes on from " +
             $"'{update.StateName}' of '{fsm.Name}' by '{eventName}' here too"
         );
         fsm.Event(eventName);
+    }
+
+    /// <summary>
+    /// The character through which this game's player is on the way into a talk with a creature that every game runs
+    /// by itself, if they are: the game walks them to their place, holding them, and the character tells the creature
+    /// the talk once they get there (NPCControlBase.MovePlayer, PlayMakerNPC.OnStartDialogue). A word of another
+    /// game's talk that took the creature into it meanwhile left the character nothing to tell, which the game takes
+    /// for a talk that nothing heard: it gave the player back while the talk ran, and the button that turns its lines
+    /// made them jump (USER 11-20 "对话开始时有概率不被游戏锁住": both players pressed to talk to the knight within a
+    /// moment, and the one whose walk ended later read the talk free, in each of the four times that it happened).
+    /// </summary>
+    /// <param name="fsm">The state machine of the creature.</param>
+    private static PlayMakerNPC? OnTheWayIntoTalk(Fsm fsm) {
+        if (InteractManager.BlockingInteractable is not PlayMakerNPC { IsRunningDialogue: false } npc) {
+            return null;
+        }
+
+        var told = npc.CustomEventTarget != null
+            ? npc.CustomEventTarget
+            : DialogueFsmField?.GetValue(npc) as PlayMakerFSM;
+        return told != null && told.Fsm == fsm ? npc : null;
     }
 }

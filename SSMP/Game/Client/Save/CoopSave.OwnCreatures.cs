@@ -721,6 +721,18 @@ internal partial class CoopSave {
             return;
         }
 
+        // A step into a talk that this game's player is on the way into here: their own word takes the creature into
+        // it as they get there, as for a talk that they start (see OnTheWayIntoTalk)
+        if (fsm.GetState(update.StateName) is { } talkState && Entity.Entity.RunsTalk(talkState) &&
+            OnTheWayIntoTalk(fsm) is { } npc) {
+            Logger.Info(
+                $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+                $"game, while this game's player is on the way into its talk through '{npc.name}' here, which " +
+                "takes it there as they get there"
+            );
+            return;
+        }
+
         // A step of a part while its creature here plays a move by itself: the part goes on as the creature tells it
         // here, and from the latest of these once the creature is through (see TakePartStepsAfter)
         if (OwnCreatures.IsPart(creature) && OwnCreatures.Owning(creature) is { } owner && InOwnLeap(owner)) {
