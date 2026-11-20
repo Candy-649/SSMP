@@ -385,7 +385,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for the death of a creature, which tells the members in the room that a creature that every game runs by
-    /// itself died here, unless it died as another game told.
+    /// itself died here, and where, unless it died as another game told.
     /// </summary>
     private void OnOwnCreatureDie(
         Action<HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool> orig,
@@ -400,6 +400,11 @@ internal partial class CoopSave {
         bool disallowDropFlying
     ) {
         var tells = !_dyingAsTold && !self.isDead && OwnCreatures.Has(self.gameObject);
+        // Where it is and how it is turned as the blow kills it, where every other game has it die too
+        var transform = self.transform;
+        var where = transform.position;
+        var facing = transform.localScale.x;
+        var turned = transform.eulerAngles.z;
         orig(
             self, attackDirection, attackType, nailElements, source, ignoreEvasion, corpseFlingMultiplier,
             overrideSpecialDeath, disallowDropFlying
@@ -425,13 +430,17 @@ internal partial class CoopSave {
 
         var creature = self.gameObject;
         var place = OwnCreatures.PlaceOf(creature);
-        Logger.Info($"[Own creatures] '{place}' died here, as the members in the room are told");
+        Logger.Info(
+            $"[Own creatures] '{place}' died here at ({where.x:F1}, {where.y:F1}), as the members in the room are told"
+        );
         SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.OwnCreature,
             Scene = creature.scene.name,
             ObjectPath = place,
             PartCount = 2,
-            Values = attackDirection is { } direction ? [direction] : []
+            Values = attackDirection is { } direction
+                ? [where.x, where.y, facing, turned, direction]
+                : [where.x, where.y, facing, turned]
         });
     }
 
@@ -631,12 +640,26 @@ internal partial class CoopSave {
                 return;
             }
 
-            Logger.Info($"[Own creatures] '{place}' died in {player.Username}'s game and dies here too");
+            // Where it died there, turned as it was there: what its death leaves, like the boss that falls, talks and
+            // leaps away after the fight, comes out where it did there, and not where this game had it in a move that
+            // went on otherwise (USER 11-20 "感觉有位置不一致，比如说boss死的位置不一致": the knight that Luminary's
+            // pins killed in her game, before it came at her, died in the user's game in its dash at her)
+            var dying = creature.transform;
+            var diedAt = new Vector3(update.Values[0], update.Values[1], dying.position.z);
+            Logger.Info(
+                $"[Own creatures] '{place}' died in {player.Username}'s game and dies here too, where it did there, " +
+                $"{Vector2.Distance(dying.position, diedAt):F1} away"
+            );
+            dying.position = diedAt;
+            var scale = dying.localScale;
+            scale.x = update.Values[2];
+            dying.localScale = scale;
+            dying.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
             OwnCreatures.AwardJournalKill(health);
             _dyingAsTold = true;
             try {
                 health.Die(
-                    update.Values.Count > 0 ? update.Values[0] : null, AttackTypes.Generic, NailElements.None, null,
+                    update.Values.Count > 4 ? update.Values[4] : null, AttackTypes.Generic, NailElements.None, null,
                     true, 1f, false, false
                 );
             } finally {
