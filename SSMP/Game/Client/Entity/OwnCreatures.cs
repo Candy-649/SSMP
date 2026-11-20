@@ -124,6 +124,62 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// For a creature that died as another game told, where that game had the player that it went after, beside where
+    /// it died (see <see cref="SeeTargetAtDeath"/>).
+    /// </summary>
+    private static readonly Dictionary<GameObject, Vector3> DeathLooks = new();
+
+    /// <summary>
+    /// The stand-in of <see cref="DeathLooks"/>, made once.
+    /// </summary>
+    private static GameObject? _deathThere;
+
+    /// <summary>
+    /// Has the first look at the player of the death of a creature that died as another game told, its own or a
+    /// part's, look where that game had the player beside it (see GamePatcher.EnemyTargeting), as a step that another
+    /// game took looks as it starts (see <see cref="TargetThere"/>), but whenever that look comes: the knight's body
+    /// waits a frame, then turns to the player that the knight went after and falls away from them. Each game has the
+    /// players a little elsewhere, and where one stood by the creature, it fell the other way in the other game (USER
+    /// 11-20 "可是我们两边boss向相反的方向弹出去了", "应该和击退那次是差不多的问题").
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="place">Where that game had the player.</param>
+    public static void SeeTargetAtDeath(GameObject creature, Vector3 place) {
+        DeathLooks[creature] = place;
+    }
+
+    /// <summary>
+    /// The stand-in where the death of the creature that an object is, or is a part of, looks at the player first, if
+    /// it died as another game told and has not looked yet (see <see cref="SeeTargetAtDeath"/>).
+    /// </summary>
+    /// <param name="looker">The object that looks.</param>
+    public static GameObject? DeathLookOf(GameObject looker) {
+        if (DeathLooks.Count == 0 || Owning(looker) is not { } creature ||
+            !DeathLooks.TryGetValue(creature, out var place)) {
+            return null;
+        }
+
+        if (_deathThere == null) {
+            _deathThere = new GameObject("Where another game had the player at a death");
+            UnityEngine.Object.DontDestroyOnLoad(_deathThere);
+        }
+
+        _deathThere.transform.position = place;
+        return _deathThere;
+    }
+
+    /// <summary>
+    /// Has the death of the creature that an object is, or is a part of, look at the player where they are, once it has
+    /// looked where the game that told of it had them (see <see cref="SeeTargetAtDeath"/>).
+    /// </summary>
+    /// <param name="looker">The object that looked.</param>
+    public static void LookedAtDeath(GameObject looker) {
+        if (Owning(looker) is { } creature) {
+            DeathLooks.Remove(creature);
+        }
+    }
+
+    /// <summary>
     /// The state machine of a creature that every game runs by itself that a talk of the local player tells its event
     /// now, with the event, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
     /// </summary>
@@ -305,6 +361,7 @@ internal static class OwnCreatures {
         Creatures.Clear();
         Parts.Clear();
         Dead.Clear();
+        DeathLooks.Clear();
         OwnThreads.Clear();
     }
 }

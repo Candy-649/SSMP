@@ -400,11 +400,14 @@ internal partial class CoopSave {
         bool disallowDropFlying
     ) {
         var tells = !_dyingAsTold && !self.isDead && OwnCreatures.Has(self.gameObject);
-        // Where it is and how it is turned as the blow kills it, where every other game has it die too
+        // Where it is and how it is turned as the blow kills it, where every other game has it die too, and where the
+        // player that it goes after is beside it, at whom its death looks there too
         var transform = self.transform;
         var where = transform.position;
         var facing = transform.localScale.x;
         var turned = transform.eulerAngles.z;
+        var target = tells ? GamePatcher.TargetOf(self.gameObject) : null;
+        var beside = target != null ? target.transform.position - where : Vector3.zero;
         orig(
             self, attackDirection, attackType, nailElements, source, ignoreEvasion, corpseFlingMultiplier,
             overrideSpecialDeath, disallowDropFlying
@@ -431,16 +434,18 @@ internal partial class CoopSave {
         var creature = self.gameObject;
         var place = OwnCreatures.PlaceOf(creature);
         Logger.Info(
-            $"[Own creatures] '{place}' died here at ({where.x:F1}, {where.y:F1}), as the members in the room are told"
+            $"[Own creatures] '{place}' died here at ({where.x:F1}, {where.y:F1}), as the members in the room are " +
+            "told" + (target != null ? $", the player it goes after {beside.x:F1}, {beside.y:F1} from it" : "")
         );
         SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.OwnCreature,
             Scene = creature.scene.name,
             ObjectPath = place,
             PartCount = 2,
+            Part = ThrownThings.CodeOf?.Invoke(target) ?? ThrownThings.NoPlayer,
             Values = attackDirection is { } direction
-                ? [where.x, where.y, facing, turned, direction]
-                : [where.x, where.y, facing, turned]
+                ? [where.x, where.y, facing, turned, beside.x, beside.y, direction]
+                : [where.x, where.y, facing, turned, beside.x, beside.y]
         });
     }
 
@@ -646,20 +651,30 @@ internal partial class CoopSave {
             // pins killed in her game, before it came at her, died in the user's game in its dash at her)
             var dying = creature.transform;
             var diedAt = new Vector3(update.Values[0], update.Values[1], dying.position.z);
+            var lookedAt = update.Part != ThrownThings.NoPlayer;
             Logger.Info(
                 $"[Own creatures] '{place}' died in {player.Username}'s game and dies here too, where it did there, " +
-                $"{Vector2.Distance(dying.position, diedAt):F1} away"
+                $"{Vector2.Distance(dying.position, diedAt):F1} away" + (lookedAt
+                    ? $", the player it goes after {update.Values[4]:F1}, {update.Values[5]:F1} from it there"
+                    : "")
             );
             dying.position = diedAt;
             var scale = dying.localScale;
             scale.x = update.Values[2];
             dying.localScale = scale;
             dying.rotation = Quaternion.Euler(0f, 0f, update.Values[3]);
+
+            // Its death looks at the player that it went after where that game had them beside it, and falls the way
+            // it fell there
+            if (lookedAt) {
+                OwnCreatures.SeeTargetAtDeath(creature, diedAt + new Vector3(update.Values[4], update.Values[5], 0f));
+            }
+
             OwnCreatures.AwardJournalKill(health);
             _dyingAsTold = true;
             try {
                 health.Die(
-                    update.Values.Count > 4 ? update.Values[4] : null, AttackTypes.Generic, NailElements.None, null,
+                    update.Values.Count > 6 ? update.Values[6] : null, AttackTypes.Generic, NailElements.None, null,
                     true, 1f, false, false
                 );
             } finally {

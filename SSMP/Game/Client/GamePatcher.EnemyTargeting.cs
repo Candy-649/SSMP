@@ -886,7 +886,23 @@ internal partial class GamePatcher {
             );
         }
 
+        // So does the first look at the player of a death that another game told of (see
+        // Entity.OwnCreatures.SeeTargetAtDeath)
+        var atDeath = LooksAtDeath(self);
+        if (atDeath != null) {
+            RetargetFsmActionGameObjectFields(
+                self, atDeath, ActionRegistry.TargetedWherePlayerActionTypes.Contains(self.GetType().Name)
+            );
+            if (!PointsAt(self, atDeath)) {
+                atDeath = null;
+            }
+        }
+
         orig(self);
+        if (atDeath != null) {
+            Entity.OwnCreatures.LookedAtDeath(self.Fsm.GameObject);
+        }
+
         ForceApprovedTargetOnFsmAction(self);
 
         if (self is GetPosition getPosition) {
@@ -907,6 +923,42 @@ internal partial class GamePatcher {
                action is not SetGameObject && LooksOnce(action) && GetFsmActionTarget(there.Creature) != null
             ? there.There
             : null;
+    }
+
+    /// <summary>
+    /// The stand-in for the player that the death of a creature that every game runs by itself looks at first, where
+    /// the game that told of the death had them (see Entity.OwnCreatures.SeeTargetAtDeath), for an action of the
+    /// creature or of a part of it that looks once at where the player is, while it goes after one.
+    /// </summary>
+    /// <param name="action">The action, which starts now.</param>
+    private static GameObject? LooksAtDeath(FsmStateAction action) {
+        return action.Fsm?.GameObject is { } looker && Entity.OwnCreatures.DeathLookOf(looker) is { } there &&
+               action is not SetGameObject && LooksOnce(action) && GetFsmActionTarget(looker) != null
+            ? there
+            : null;
+    }
+
+    /// <summary>
+    /// Whether an action looks at a thing, by a field of its own or an owner-or-this-one pair that holds it.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="thing">The thing.</param>
+    private static bool PointsAt(FsmStateAction action, GameObject thing) {
+        foreach (var field in GetFsmGameObjectFields(action.GetType())) {
+            if (field.GetValue(action) is FsmGameObject current && current.Value == thing) {
+                return true;
+            }
+        }
+
+        foreach (var field in GetFsmOwnerDefaultFields(action.GetType())) {
+            if (field.GetValue(action) is FsmOwnerDefault {
+                    OwnerOption: OwnerDefaultOption.SpecifyGameObject, GameObject: { } current
+                } && current.Value == thing) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
