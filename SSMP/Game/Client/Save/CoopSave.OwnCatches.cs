@@ -736,7 +736,14 @@ internal partial class CoopSave {
             GamePatcher.GoAfterGrabbed(creature, figure, fsm, fsm.GetState(into));
         }
 
-        fsm.Event(way.FsmEvent);
+        // It turns to the player it caught where their game had them (see SeeTargetAsTold), as every other game then
+        // does from here
+        SeeTargetAsTold(creature, update);
+        try {
+            fsm.Event(way.FsmEvent);
+        } finally {
+            OwnCreatures.SeeTargetHere();
+        }
     }
 
     /// <summary>

@@ -877,12 +877,55 @@ internal partial class GamePatcher {
     /// <param name="self">The FSM action instance.</param>
     private static void OnTargetedFsmActionEnter(Action<FsmStateAction> orig, FsmStateAction self) {
         ForceApprovedTargetOnFsmAction(self);
+
+        // Where a creature that every game runs by itself starts a step that another game took, a look at where the
+        // player that it goes after is looks where that game had them, and at the player again once it has looked
+        if (LooksThere(self) is { } there) {
+            RetargetFsmActionGameObjectFields(
+                self, there, ActionRegistry.TargetedWherePlayerActionTypes.Contains(self.GetType().Name)
+            );
+        }
+
         orig(self);
         ForceApprovedTargetOnFsmAction(self);
 
         if (self is GetPosition getPosition) {
             ReadCameraOfWhoIsAimedAt(getPosition);
         }
+    }
+
+    /// <summary>
+    /// The stand-in for the player that a creature goes after, where another game had them as it took the step that
+    /// the creature starts here now (see Entity.OwnCreatures.TargetThere), for an action of that start which looks once
+    /// at where the player is: its turn to them, a distance, an aim. Not for one that goes on looking, which looks at
+    /// the player where they are from the next frame on, nor for one that keeps the player in a variable, which is
+    /// about whom it goes after.
+    /// </summary>
+    /// <param name="action">The action, which starts now.</param>
+    private static GameObject? LooksThere(FsmStateAction action) {
+        return Entity.OwnCreatures.TargetThere is { } there && action.Fsm?.GameObject == there.Creature &&
+               action is not SetGameObject && LooksOnce(action) && GetFsmActionTarget(there.Creature) != null
+            ? there.There
+            : null;
+    }
+
+    /// <summary>
+    /// The field of each type of action by which it goes on every frame, or null for a type without one.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo?> EveryFrameFields = new();
+
+    /// <summary>
+    /// Whether an action does what it does only as it starts: one that may go on every frame and does not.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    private static bool LooksOnce(FsmStateAction action) {
+        var type = action.GetType();
+        if (!EveryFrameFields.TryGetValue(type, out var field)) {
+            field = type.GetField("everyFrame", InstancePublicFlags | InstanceNonPublicFlags | BindingFlags.IgnoreCase);
+            EveryFrameFields[type] = field;
+        }
+
+        return field?.GetValue(action) is false;
     }
 
     /// <summary>

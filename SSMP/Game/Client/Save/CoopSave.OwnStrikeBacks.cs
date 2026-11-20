@@ -165,12 +165,15 @@ internal partial class CoopSave {
         }
 
         // It plays here as the creature's own, but for the moment that the game stands still, which is the feel of the
-        // blow of the player struck back at (see CoopHits.TakesAnothersBlow)
+        // blow of the player struck back at (see CoopHits.TakesAnothersBlow), and turns to that player where their game
+        // had them (see SeeTargetAsTold), as every other game then does from here
         CoopHits.TakesAnothersBlow = true;
+        SeeTargetAsTold(creature, update);
         try {
             SetOwnState(fsm, into);
         } finally {
             CoopHits.TakesAnothersBlow = false;
+            OwnCreatures.SeeTargetHere();
         }
     }
 }

@@ -84,6 +84,46 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// A creature that takes a step that another game took, with a stand-in for the player that it goes after, put
+    /// where that game had them beside it as it took the step (see CoopSave.OwnCreatures). As the step starts, the
+    /// creature's looks at where that player is, its turn to them, a distance, an aim, look at the stand-in (see
+    /// GamePatcher.EnemyTargeting): a judgment by where the players are is the scene host's game's, and each game has
+    /// the players a little elsewhere. Set into its stun, the knight turned to the player that it went after and
+    /// sprang off backwards; where Luminary's game had the user on its other side, it sprang off the other way
+    /// (Luminary's log of 11-19, 20:39:14.575; USER "确定这个瘫痪的函数没有什么我们没能接管的看玩家位置的变量？").
+    /// </summary>
+    public static (GameObject Creature, GameObject There)? TargetThere { get; private set; }
+
+    /// <summary>
+    /// The stand-in of <see cref="TargetThere"/>, made once.
+    /// </summary>
+    private static GameObject? _targetThere;
+
+    /// <summary>
+    /// Has a creature look at a place for the player that it goes after, as it starts a step that another game took
+    /// (see <see cref="TargetThere"/>), until <see cref="SeeTargetHere"/>.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="place">Where that game had the player.</param>
+    public static void SeeTargetThere(GameObject creature, Vector3 place) {
+        if (_targetThere == null) {
+            _targetThere = new GameObject("Where another game had the player");
+            UnityEngine.Object.DontDestroyOnLoad(_targetThere);
+        }
+
+        _targetThere.transform.position = place;
+        TargetThere = (creature, _targetThere);
+    }
+
+    /// <summary>
+    /// Has the creature that looked at a place for the player that it goes after look at that player again (see
+    /// <see cref="SeeTargetThere"/>).
+    /// </summary>
+    public static void SeeTargetHere() {
+        TargetThere = null;
+    }
+
+    /// <summary>
     /// The state machine of a creature that every game runs by itself that a talk of the local player tells its event
     /// now, with the event, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
     /// </summary>

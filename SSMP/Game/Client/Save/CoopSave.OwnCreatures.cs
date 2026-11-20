@@ -92,6 +92,18 @@ internal partial class CoopSave {
     private const ushort OwnHostStruckPart = 11;
 
     /// <summary>
+    /// Where in the values of an update of a creature that every game runs by itself the place of the player that it
+    /// goes after is, beside it, as the game that took the step had them: x, then y (see SeeTargetAsTold).
+    /// </summary>
+    private const int OwnBesideValue = 8;
+
+    /// <summary>
+    /// Where in the values of an update of a creature that every game runs by itself its health is, which a member who
+    /// has just come into the room is told with it (see TellOwnState).
+    /// </summary>
+    private const int OwnHealthValue = 10;
+
+    /// <summary>
     /// The most steps that a state machine takes through the states between on its way into a step of the scene host's
     /// (see WalkInto).
     /// </summary>
@@ -443,13 +455,22 @@ internal partial class CoopSave {
     /// what the state that it leaves worked with and where its walk is (see GamePatcher.WriteWalk), which a game that
     /// waits for the step takes it with: a boss reckons the speed of its jump from where the player it goes after
     /// stands, which each game has a little elsewhere, and jumped as far as its own game had it, to be moved where the
-    /// scene host's landed as it landed (USER 11-15, of that fight, "只有一步闪了一下，其他时候都很丝滑").
+    /// scene host's landed as it landed (USER 11-15, of that fight, "只有一步闪了一下，其他时候都很丝滑"). So does where the
+    /// player that it goes after was beside it, which the start of the step turns to and measures by in every game
+    /// (see SeeTargetAsTold).
     /// </summary>
     private static CoopSaveUpdate OwnCreatureUpdate(PlayMakerFSM machine, OwnStep step) {
         var transform = machine.transform;
         var speed = machine.TryGetComponent<Rigidbody2D>(out var body) ? body.linearVelocity : Vector2.zero;
         var fall = body != null ? body.gravityScale : 0f;
         var fsm = machine.Fsm;
+
+        // Where the player that it goes after is beside it, as this game has them, or as the game whose step it takes
+        // had them (see OwnCreatures.TargetThere)
+        var target = OwnCreatures.TargetThere is { } there && there.Creature == machine.gameObject
+            ? there.There
+            : GamePatcher.TargetOf(machine.gameObject);
+        var beside = target != null ? target.transform.position - step.Place : Vector3.zero;
 
         // The first step of a state machine leaves no state
         var worked = fsm.ActiveState is { } state
@@ -475,7 +496,7 @@ internal partial class CoopSave {
             Part = ThrownThings.CodeOf?.Invoke(GamePatcher.TargetOf(machine.gameObject)) ?? ThrownThings.NoPlayer,
             Values = [
                 step.Place.x, step.Place.y, transform.localScale.x, transform.eulerAngles.z,
-                SharedDice.SongOf(machine.gameObject), speed.x, speed.y, fall
+                SharedDice.SongOf(machine.gameObject), speed.x, speed.y, fall, beside.x, beside.y
             ],
             Bytes = stream.ToArray()
         };
@@ -680,13 +701,14 @@ internal partial class CoopSave {
         }
 
         // The health that it has there, for a member who has just come in
-        if (update.Values.Count > 8 && hasHealth) {
-            if (health.hp != (int) update.Values[8]) {
+        if (update.Values.Count > OwnHealthValue && hasHealth) {
+            var healthThere = (int) update.Values[OwnHealthValue];
+            if (health.hp != healthThere) {
                 Logger.Info(
-                    $"[Own creatures] '{place}' has {(int) update.Values[8]} health as in {player.Username}'s game, " +
+                    $"[Own creatures] '{place}' has {healthThere} health as in {player.Username}'s game, " +
                     $"rather than {health.hp}"
                 );
-                health.hp = (int) update.Values[8];
+                health.hp = healthThere;
             }
 
             OwnThreads.TookHealth(creature);
@@ -740,7 +762,7 @@ internal partial class CoopSave {
             // A member who has just come in: its walk goes on where the scene host's walks now, rather than from the
             // fresh start that the room gave it as it came in, which took it to the same step within a few frames
             // (review)
-            if (newest && update.Values.Count > 8) {
+            if (newest && update.Values.Count > OwnHealthValue) {
                 using var reader = new BinaryReader(new MemoryStream(update.Bytes));
                 ToldValues.Read(reader);
                 GamePatcher.PutWalk(reader, creature);
@@ -789,6 +811,9 @@ internal partial class CoopSave {
 
         PutAtSceneHostsStep(fsm, update);
         OwnCreatures.SceneHostsStep = (fsm, update.StateName);
+
+        // Where it turns to the player that it goes after and how far it has them is the scene host's game's too
+        SeeTargetAsTold(creature, update);
         CoopHits.TakesAnothersBlow = update.PartCount == OwnHostStruckPart ||
                                      update.PartCount == OwnStruckPart && !IsLocalPlayersBlow(player, update);
         try {
@@ -805,6 +830,7 @@ internal partial class CoopSave {
             OwnCreatures.SceneHostsStep = null;
             _wayInStep = null;
             CoopHits.TakesAnothersBlow = false;
+            OwnCreatures.SeeTargetHere();
         }
 
         var how = way != null ? $"by '{way.Name}'"
@@ -815,7 +841,7 @@ internal partial class CoopSave {
             (moves ? $"game{(update.PartCount == OwnHostStruckPart ? " at a blow there" : "")}, where it was there, " +
                      $"{away:F1} away"
                 : update.PartCount == OwnStruckPart ? $"game at a blow there, where it is here, {away:F1} away"
-                : "game, where it is here")
+                : "game, where it is here") + BesideAsTold(update)
         );
     }
 
@@ -828,6 +854,32 @@ internal partial class CoopSave {
     private static bool IsLocalPlayersBlow(ClientPlayerData sceneHost, CoopSaveUpdate update) {
         return HeroController.SilentInstance is { } hero &&
                ThrownThings.FigureOf?.Invoke((ushort) update.Key, sceneHost.Id) == hero.gameObject;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself, as it starts a step that another game took, look at the player
+    /// that it goes after where that game had them beside it (see OwnCreatures.TargetThere): beside where it is here,
+    /// whether it was put where it was there or, at a blow here, not.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="step">The step.</param>
+    private static void SeeTargetAsTold(GameObject creature, CoopSaveUpdate step) {
+        if (step.Part != ThrownThings.NoPlayer) {
+            var beside = new Vector3(step.Values[OwnBesideValue], step.Values[OwnBesideValue + 1], 0f);
+            OwnCreatures.SeeTargetThere(creature, creature.transform.position + beside);
+        }
+    }
+
+    /// <summary>
+    /// Where a step that another game took says that the player that its creature goes after was beside it, for the
+    /// log, or nothing for one that went after no one.
+    /// </summary>
+    /// <param name="step">The step.</param>
+    private static string BesideAsTold(CoopSaveUpdate step) {
+        return step.Part == ThrownThings.NoPlayer
+            ? ""
+            : $", the player it goes after {step.Values[OwnBesideValue]:F1}, " +
+              $"{step.Values[OwnBesideValue + 1]:F1} from it there";
     }
 
     /// <summary>
