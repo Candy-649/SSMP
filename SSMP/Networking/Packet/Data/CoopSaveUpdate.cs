@@ -905,11 +905,9 @@ internal enum CoopSaveUpdateKind : byte {
     /// CoopSave.OwnCreatures): <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name it,
     /// and <see cref="CoopSaveUpdate.PartCount"/> is 1 if it is dead there, as told to a member who comes in, 2 if it
     /// died there just now, with the direction of the blow that killed it in <see cref="CoopSaveUpdate.Values"/> if it
-    /// had one, 3 for what the third act does to it there (see OwnThreads), 4 if a part of its own caught the player
-    /// of the sender's game, told as a step of the state it caught them from (see CoopSave.OwnCatches), or 5 if the
-    /// player of the sender's game started a talk with it, with the state that it went from in
-    /// <see cref="CoopSaveUpdate.StateName"/> and the event that took it on in <see cref="CoopSaveUpdate.Names"/> (see
-    /// CoopSave.OwnTalks). Otherwise <see cref="CoopSaveUpdate.FsmName"/> names its state machine,
+    /// had one, 3 for what the third act does to it there (see OwnThreads), or 4 if a part of its own caught the
+    /// player of the sender's game, told as a step of the state it caught them from (see CoopSave.OwnCatches).
+    /// Otherwise <see cref="CoopSaveUpdate.FsmName"/> names its state machine,
     /// <see cref="CoopSaveUpdate.StateName"/> the state that it went to, <see cref="CoopSaveUpdate.Amounts"/> how many
     /// times its actions had rolled before (SharedDice.RollCounts), <see cref="CoopSaveUpdate.Values"/> where it was,
     /// as x and y, the x of its scale, how far it was turned, which song it was at (SharedDice.SongOf) and how fast it

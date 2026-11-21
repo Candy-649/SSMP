@@ -692,9 +692,10 @@ internal partial class BossRoomCoop {
                 return false;
             }
 
-            // A creature that every game runs by itself comes there after its talk wherever it is: the steps of the
-            // scene host's take it there in the game of a player who came in on the talk, which showed them none of it
-            isAfterDialogue = _dialogueFsms.Contains(fsm) || GetInfo(fsm).IsOwn;
+            // A creature that every game runs by itself comes there after the talk of this game's player with it, or
+            // on the way into its fight from the scene host's in the game of a player who came in after it started,
+            // which runs none of the talk and holds nothing (see CoopSave.OwnTalks)
+            isAfterDialogue = _dialogueFsms.Contains(fsm);
         } else if (sender != null && _dialogueFsms.Contains(sender) && GetBossRoom(fsm) is { } room &&
                    IsEventStart(room, fsm, state, eventName)) {
             isAfterDialogue = true;

@@ -761,6 +761,8 @@ internal partial class CoopSave {
         _playerWayValues.Clear();
         _countedValues.Clear();
         _makesMoves.Clear();
+        _fightsOn.Clear();
+        _beforeTalkEnd.Clear();
         _picks.Clear();
         _ownWays.Clear();
         _emptiedTold.Clear();

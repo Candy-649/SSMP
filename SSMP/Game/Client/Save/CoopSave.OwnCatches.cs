@@ -373,16 +373,15 @@ internal partial class CoopSave {
             TellOwnCatch(machine);
         }
 
-        // A talk that the local player starts is this game's to play, and the scene host's game is told of it (see
-        // CoopSave.OwnTalks)
-        if (leap is not { Through: false } && OwnCreatures.LocalTalk is { } talk && talk.Fsm == fsm) {
-            StartsLocalTalk(machine, toState, talk.Event);
+        // A talk that the local player starts before the fight is this game's to play (see CoopSave.OwnTalks)
+        if (BeforeFight(fsm) && leap is not { Through: false } && OwnCreatures.LocalTalk == fsm) {
+            StartsLocalTalk(machine, toState);
             return true;
         }
 
         if (leap == null) {
             return StartsOwnRoomCatch(machine, toState) || StartsOwnStrikeBack(machine, toState) ||
-                   StartsOwnLeap(machine, toState) || StartsOwnTalk(machine, toState) || ToldInOwnLeap(fsm, creature);
+                   StartsOwnLeap(machine, toState) || ToldInOwnLeap(fsm, creature);
         }
 
         if (leap.Through) {
@@ -393,7 +392,6 @@ internal partial class CoopSave {
         // by where the players are
         if (leap.Talk ? !Entity.Entity.EndsTalk(fsm, toState)
             : leap.Catch?.Contains(toState) ?? !GoesByPlayers(toState)) {
-            leap.Passed.Add(toState.Name);
             return true;
         }
 
@@ -511,9 +509,11 @@ internal partial class CoopSave {
             return false;
         }
 
-        // A talk that is through here waits for the scene host's to come as far (see CoopSave.OwnTalks)
+        // A talk that is through here waits for the scene host's step out of it, as every one before that is let go
+        // of (see CoopSave.OwnTalks)
         if (leap is { Talk: true, Through: true }) {
-            return WaitsForSceneHostsTalk(player, fsm, leap, update);
+            EndsOwnTalkWait(player, fsm, leap, update);
+            return false;
         }
 
         leap.Latest = update;
@@ -539,8 +539,10 @@ internal partial class CoopSave {
         }
 
         foreach (var pair in _ownLeaps.ToList()) {
+            // A talk that is through waits for the scene host's step out of it, if none came while it went on (see
+            // CoopSave.OwnTalks)
             var leap = pair.Value;
-            if (!leap.Through || leap.Talk && !TalkGoesOn(pair.Key, leap)) {
+            if (!leap.Through || leap is { Talk: true, Latest: null }) {
                 continue;
             }
 
@@ -821,11 +823,6 @@ internal partial class CoopSave {
         /// What it is, for the log.
         /// </summary>
         public string What => what ?? (Talk ? "talk" : "leap at the local player");
-
-        /// <summary>
-        /// The states that the creature went to here by itself in it, but for the one it is through at.
-        /// </summary>
-        public readonly HashSet<string> Passed = [];
 
         /// <summary>
         /// Whether the creature here is through the leap.

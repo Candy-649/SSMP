@@ -73,7 +73,6 @@ internal partial class CoopSave {
         GamePatcher.GoAfterStriker(creature, hero.gameObject, fsm, toState);
         TellOwnStrikeBack(machine, toState.Name);
         var strikeBack = new OwnLeap(OwnCreatures.PlaceOf(creature), false, "strike back at the local player");
-        strikeBack.Passed.Add(toState.Name);
         _ownLeaps[fsm] = strikeBack;
         Logger.Info(
             $"[Own creatures] '{strikeBack.Place}' blocked a blow of the local player and strikes back in " +

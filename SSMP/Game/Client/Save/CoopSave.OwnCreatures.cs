@@ -263,20 +263,19 @@ internal partial class CoopSave {
             _heldOwnSteps.Remove(self);
             _ownWays.Remove(self);
 
-            // The step itself may be a leap at this game's player or a talk, which this game plays from there; a state
-            // on the way into it is neither, and does what it does as it is entered but for a line of a talk or a
-            // prompt, which would take this game's player into a talk that the way leaves at once (review: a member
-            // who came in after the talk went through it on the way, and played every step after it by itself)
+            // The step itself may be a leap at this game's player, which this game plays from there, and never a
+            // talk, which each game's player has with the creature by themselves (see CoopSave.OwnTalks). A state on
+            // the way into it does what it does as it is entered, but on the way into the creature's fight, which may
+            // go through its talk, for a line of the talk or a prompt, which would take this game's player into a talk
+            // that the way leaves at once (review: a member who came in after the talk went through it on the way, and
+            // played every step after it by itself)
             if (isTheStep) {
-                if (!StartsOwnLeap(machine, toState)) {
-                    StartsOwnTalk(machine, toState);
-                }
-
+                StartsOwnLeap(machine, toState);
                 EnterOwnState(orig, self, toState);
                 return;
             }
 
-            var muted = Entity.Entity.RunsTalk(toState) ? MuteTalk(toState) : null;
+            var muted = _wayIntoFight && Entity.Entity.RunsTalk(toState) ? MuteTalk(toState) : null;
             try {
                 EnterOwnState(orig, self, toState);
             } finally {
@@ -690,12 +689,6 @@ internal partial class CoopSave {
             return;
         }
 
-        // The player of that game started a talk with it, which that game plays by itself
-        if (update.PartCount == OwnTalkPart) {
-            TakeOwnTalk(player, creature, update);
-            return;
-        }
-
         // It struck back at a blow of the player of that game that it blocked there, which that game plays by itself
         if (update.PartCount == OwnStrikeBackPart) {
             TakeOwnStrikeBack(player, creature, update);
@@ -714,22 +707,11 @@ internal partial class CoopSave {
             return;
         }
 
-        // A step of the scene host's while this game plays a leap at its own player or a talk by itself (see
-        // CoopSave.OwnCatches, CoopSave.OwnTalks)
+        // A step of the scene host's in or before the end of a talk, before the fight here, which the creature here
+        // goes through by itself as this game's player talks to it, or one while this game plays a leap at its own
+        // player or a talk by itself (see CoopSave.OwnTalks, CoopSave.OwnCatches)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
-        if (KeepsForOwnLeap(player, fsm, update)) {
-            return;
-        }
-
-        // A step into a talk that this game's player is on the way into here: their own word takes the creature into
-        // it as they get there, as for a talk that they start (see OnTheWayIntoTalk)
-        if (fsm.GetState(update.StateName) is { } talkState && Entity.Entity.RunsTalk(talkState) &&
-            OnTheWayIntoTalk(fsm) is { } npc) {
-            Logger.Info(
-                $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
-                $"game, while this game's player is on the way into its talk through '{npc.name}' here, which " +
-                "takes it there as they get there"
-            );
+        if (LetsGoOfSceneHostsTalk(player, fsm, update) || KeepsForOwnLeap(player, fsm, update)) {
             return;
         }
 
@@ -744,6 +726,10 @@ internal partial class CoopSave {
             );
             return;
         }
+
+        // The step is taken, and the fight of the creature is on here: a way into it from the talk here runs none of
+        // the talk, and nothing of a talk is looked at for it after (see CoopSave.OwnTalks)
+        var intoFight = _fightsOn.Add(fsm);
 
         // Whom it goes after there, which nothing here chooses for it
         if (update.Part != ThrownThings.NoPlayer && ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is
@@ -867,6 +853,7 @@ internal partial class CoopSave {
         SeeTargetAsTold(creature, update);
         CoopHits.TakesAnothersBlow = update.PartCount == OwnHostStruckPart ||
                                      update.PartCount == OwnStruckPart && !IsLocalPlayersBlow(player, update);
+        _wayIntoFight = intoFight;
         try {
             if (way != null) {
                 // Put again as the scene host's was as it gets to the step, as on a way through the states between (see
@@ -880,6 +867,7 @@ internal partial class CoopSave {
         } finally {
             OwnCreatures.SceneHostsStep = null;
             _wayInStep = null;
+            _wayIntoFight = false;
             CoopHits.TakesAnothersBlow = false;
             OwnCreatures.SeeTargetHere();
         }

@@ -198,7 +198,7 @@ internal partial class Entity {
         }
 
         if (own != null) {
-            OwnCreatures.LocalTalk = (own.Fsm, eventName);
+            OwnCreatures.LocalTalk = own.Fsm;
             try {
                 return orig(self, eventName);
             } finally {

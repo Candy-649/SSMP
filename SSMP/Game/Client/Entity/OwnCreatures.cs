@@ -181,9 +181,9 @@ internal static class OwnCreatures {
 
     /// <summary>
     /// The state machine of a creature that every game runs by itself that a talk of the local player tells its event
-    /// now, with the event, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
+    /// now, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
     /// </summary>
-    public static (HutongGames.PlayMaker.Fsm Fsm, string Event)? LocalTalk { get; set; }
+    public static HutongGames.PlayMaker.Fsm? LocalTalk { get; set; }
 
     /// <summary>
     /// Whether a state machine of a creature that every game runs by itself plays a catch of another player in a
