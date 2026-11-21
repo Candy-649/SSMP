@@ -176,6 +176,19 @@ internal partial class CoopSave {
     private readonly HashSet<Fsm> _ownWays = new();
 
     /// <summary>
+    /// The steps of the scene host's, with whose game they came from, that a state machine of a creature that every
+    /// game runs by itself gets to here by itself from where it is, the first first, as long as it has not got to them
+    /// (see <see cref="KeepOwnStep"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, List<(ClientPlayerData Player, CoopSaveUpdate Step)>> _keptOwnSteps = new();
+
+    /// <summary>
+    /// Whether this game takes the steps of the scene host's that a state machine kept (see
+    /// <see cref="TakeKeptSteps"/>).
+    /// </summary>
+    private bool _takingKeptSteps;
+
+    /// <summary>
     /// While a state machine goes through the states between into a step of the scene host's (see WalkInto): the
     /// states of the part of it that the step goes round in, the step, and the states that it went through.
     /// </summary>
@@ -355,6 +368,9 @@ internal partial class CoopSave {
             steps.RemoveAt(0);
         }
 
+        // A step of the scene host's that it was to get to by itself, which it gets to now (see KeepOwnStep)
+        ReachKeptStep(self, toState.Name);
+
         // Where this game decides whom it goes after, it goes after the player it caught through the catch (see
         // GamePatcher.GoAfterGrabbed), and the player whose blow it strikes back at through the strike back (see
         // CoopSave.OwnStrikeBacks), which the step tells every game: the move is that player's
@@ -394,7 +410,10 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for the death of a creature, which tells the members in the room that a creature that every game runs by
-    /// itself died here, and where, unless it died as another game told.
+    /// itself died here, and where, unless it died as another game told, or by a blow of another player that is played
+    /// here as it came: that player's game took the blow too, and plays the death of it or tells it. The map seller,
+    /// beaten in the scene host's game, where she fell and came back by herself, was told dead there by a member's game
+    /// that took the blow late after a stall of the network, and fell once more (the user's log of 11-21, 21:41:49).
     /// </summary>
     private void OnOwnCreatureDie(
         Action<HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool> orig,
@@ -408,7 +427,8 @@ internal partial class CoopSave {
         bool overrideSpecialDeath,
         bool disallowDropFlying
     ) {
-        var tells = !_dyingAsTold && !self.isDead && OwnCreatures.Has(self.gameObject);
+        var tells = !_dyingAsTold && !self.isDead && OwnCreatures.Has(self.gameObject) &&
+                    !CoopHits.IsReplayingPartnersStrike;
         // Where it is and how it is turned as the blow kills it, where every other game has it die too, and where the
         // player that it goes after is beside it, at whom its death looks there too
         var transform = self.transform;
@@ -841,14 +861,20 @@ internal partial class CoopSave {
         // A step that it gets to by itself from where it is, a moment behind, as fast and as far as there, does not
         // move it there before it does (USER 11-18 "不如位置校准只在出招时做"): put there as the step came, a stunned
         // knight was put down where the scene host's had landed while it was still in the air here (the user's log,
-        // 20:42:05.971, 3.1 away). A member who has just come in is put where it is there, wherever their own is
-        if (update.PartCount != OwnToldPart && ReachesByItself(fsm, update.StateName)) {
+        // 20:42:05.971, 3.1 away). A member who has just come in is put where it is there, wherever their own is. The
+        // step is kept until it gets there (see KeepOwnStep)
+        if (update.PartCount != OwnToldPart && !_takingKeptSteps && ReachesByItself(fsm, update.StateName)) {
             Logger.Info(
                 $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
                 $"game, which it gets to here by itself from '{fsm.ActiveStateName}'"
             );
+            KeepOwnStep(fsm, player, update);
             return;
         }
+
+        // The steps of the scene host's before this one that it was to get to by itself, and has not: taken first, as
+        // they came (see TakeKeptSteps)
+        TakeKeptSteps(fsm);
 
         // Put where the scene host's was as it makes a move; a state machine that makes no move of it leaves it where
         // it is, and so does a step that a blow of another player than the scene host's set off there (see MovesAt).
@@ -1326,19 +1352,90 @@ internal partial class CoopSave {
     /// <summary>
     /// The event by which a state machine goes from the state it is in to the given state, the way the game has it:
     /// straight, or through a state that does its part and finishes into it, like the step that stops a crab's walk
-    /// before its song. Null when no way out of its state, nor out of every state, leads there.
+    /// before its song. A way straight there goes first: the map seller's throw back finishes into her leaving, which
+    /// her look at the player she goes after takes her to straight, and a game that went through it threw a ring that
+    /// the scene host's never did (the user's log of 11-21). Null when no way out of its state, nor out of every state,
+    /// leads there.
     /// </summary>
     private static FsmEvent? WayInto(Fsm fsm, string target) {
         // A way out that leads nowhere, which the game's state machines have, is no way there
-        foreach (var transition in fsm.ActiveState.Transitions.Concat(fsm.GlobalTransitions)) {
-            if (fsm.GetState(transition.ToState) is { } next && (next.Name == target ||
-                    next.Transitions is [var only] && only.EventName == FsmEvent.Finished.Name &&
-                    only.ToState == target)) {
+        var ways = fsm.ActiveState.Transitions.Concat(fsm.GlobalTransitions).ToList();
+        foreach (var transition in ways) {
+            if (transition.ToState == target && fsm.GetState(target) != null) {
+                return transition.FsmEvent;
+            }
+        }
+
+        foreach (var transition in ways) {
+            if (fsm.GetState(transition.ToState) is { Transitions: [var only] } &&
+                only.EventName == FsmEvent.Finished.Name && only.ToState == target) {
                 return transition.FsmEvent;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Keeps a step of the scene host's that a state machine gets to here by itself from where it is, until it does
+    /// (see <see cref="ReachKeptStep"/>), to be taken as it came before a later step that it does not get to by itself
+    /// (see <see cref="TakeKeptSteps"/>).
+    /// </summary>
+    private void KeepOwnStep(Fsm fsm, ClientPlayerData player, CoopSaveUpdate update) {
+        if (!_keptOwnSteps.TryGetValue(fsm, out var kept)) {
+            kept = [];
+            _keptOwnSteps[fsm] = kept;
+        }
+
+        kept.Add((player, update));
+    }
+
+    /// <summary>
+    /// A state machine got by itself to the state of a step of the scene host's that it kept, which goes, with those
+    /// before it.
+    /// </summary>
+    private void ReachKeptStep(Fsm fsm, string stateName) {
+        if (!_keptOwnSteps.TryGetValue(fsm, out var kept)) {
+            return;
+        }
+
+        var index = kept.FindIndex(each => each.Step.StateName == stateName);
+        if (index < 0) {
+            return;
+        }
+
+        kept.RemoveRange(0, index + 1);
+        if (kept.Count == 0) {
+            _keptOwnSteps.Remove(fsm);
+        }
+    }
+
+    /// <summary>
+    /// Takes the steps of the scene host's that a state machine kept, as it was to get to them by itself and has not
+    /// (see <see cref="KeepOwnStep"/>), one after another as they came, before a step that it does not get to by
+    /// itself. Many come at once after a stall of the network, and the state machine, a moment behind, was set
+    /// straight to the later one where it goes round in a part of it with that one (see WalkInto), past the states
+    /// that it was to go through by itself: the map seller went past the one where she sets herself to go home, and
+    /// waited for good for a step of her fight in a game whose fight was over (the user's log of 11-21, 21:42:03).
+    /// </summary>
+    private void TakeKeptSteps(Fsm fsm) {
+        if (!_keptOwnSteps.Remove(fsm, out var kept)) {
+            return;
+        }
+
+        Logger.Info(
+            $"[Own creatures] '{fsm.GameObject.name}' takes {kept.Count} step(s) of '{fsm.Name}' of the scene host's " +
+            "that it was to get to by itself, as they came: " +
+            string.Join(", ", kept.Select(each => $"'{each.Step.StateName}'"))
+        );
+        _takingKeptSteps = true;
+        try {
+            foreach (var (player, step) in kept) {
+                OnOwnCreature(player, step);
+            }
+        } finally {
+            _takingKeptSteps = false;
+        }
     }
 
     /// <summary>
