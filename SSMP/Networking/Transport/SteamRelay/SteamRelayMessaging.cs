@@ -421,7 +421,8 @@ internal static class SteamRelayMessaging {
     /// side sends nothing for a while (UpdateManager.RenewalHoldMs), or else by this side's next send once that while
     /// is over. Steam tells the other side of the close as a failure when
     /// something was still on its way over the session, which the server does not take as the player leaving
-    /// (SteamRelayTransportServer.OnSessionFailed).
+    /// (SteamRelayTransportServer.OnSessionFailed). It is closed for carrying nothing for a while, or for losing much
+    /// of what comes over it while things still arrive (UpdateManager.RenewStalledLink, RenewLossyLink).
     ///
     /// On 10-15 nothing from the host reached the joining player for 30 s while what the joining player sent reached
     /// the host throughout, and Steam called the session connected the whole time, counting dozens of end-to-end
@@ -452,8 +453,8 @@ internal static class SteamRelayMessaging {
         }
 
         Logger.Info(
-            $"Steam relay: closed the session with {who} ({steamId}), which carried nothing although Steam called it " +
-            $"connected, so that the next send opens a new one ({stood})"
+            $"Steam relay: closed the session with {who} ({steamId}), which Steam called connected, so that the next " +
+            $"send opens a new one ({stood})"
         );
         return true;
     }

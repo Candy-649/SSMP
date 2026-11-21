@@ -53,9 +53,20 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// How long, in milliseconds, nothing has arrived since the transport's link was last opened anew before it is
-    /// opened anew again.
+    /// opened anew again, and how long after it was opened anew for its loss before that is judged again (see
+    /// <see cref="RenewLossyLink"/>).
     /// </summary>
     private const int RenewLinkInterval = 8000;
+
+    /// <summary>
+    /// The share of what the other side sent over the last few seconds that did not arrive (<see cref="LossShare"/>),
+    /// over which the transport's link is opened anew at once (see <see cref="RenewLossyLink"/>). USER 11-21
+    /// "丢包本身就是一段时间的状态了（总是比网络炸了来得更晚，所以丢包超过50%就好直接断线重连了": that evening a third of
+    /// what the joining player's game sent reached the host's for minutes on end, over the relays that Steam took
+    /// after the link was opened anew twice, and what had to go over it waited longer and longer; nothing stopped
+    /// arriving for as long as opening it anew for that waits (<see cref="RenewLinkAfter"/>).
+    /// </summary>
+    private const float RenewLinkLoss = 0.5f;
 
     /// <summary>
     /// How long, in milliseconds, a link has to have counted as connected before it is opened anew for carrying
@@ -130,7 +141,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// Asks the transport to close a link that counts as connected so that the next send opens a new one, or null for
-    /// a transport that cannot (see <see cref="ISessionStateTransport.RenewStalledSession"/>).
+    /// a transport that cannot (see <see cref="ISessionStateTransport.RenewSession"/>).
     /// </summary>
     private Func<bool>? _transportRenewSession;
 
@@ -567,6 +578,14 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private const double LossStretchSeconds = 0.5;
 
     /// <summary>
+    /// The shortest stretch without anything arriving, in seconds, that is a gap in the link rather than packets lost
+    /// one by one, whose numbers are not judged for opening the link anew for its loss (see
+    /// <see cref="_lossJudgedFrom"/>): the other side sends 20 to 60 times a second, and nothing for this long comes of
+    /// the link being opened anew, or of one that carries nothing, which <see cref="RenewStalledLink"/> is for.
+    /// </summary>
+    private const double LossGapSeconds = 1.0;
+
+    /// <summary>
     /// How many packets the other side sent in each stretch of time, by their numbers, and how many of them arrived
     /// (see <see cref="CountArrival"/>), the stretch that goes on now at <see cref="_lossStretch"/>.
     /// </summary>
@@ -590,6 +609,15 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <inheritdoc cref="_lossNewest" />
     private bool _lossCounting;
+
+    /// <summary>
+    /// From when, in UTC ticks, the share of what did not arrive is judged for opening the link anew (see
+    /// <see cref="RenewLossyLink"/>): once a full count of the last few seconds was made after updates started, and
+    /// after things arrived again after a gap (<see cref="LossGapSeconds"/>), whose numbers went in as lost with the
+    /// first packet after it, and <see cref="RenewLinkInterval"/> after this side opened the link anew for its loss,
+    /// which the count of the old link would say again. Guarded by <see cref="Lock"/>.
+    /// </summary>
+    private long _lossJudgedFrom;
 
     /// <summary>
     /// Whether this update manager is actually updating and sending packets.
@@ -643,7 +671,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
-            _transportRenewSession = value is ISessionStateTransport renewed ? renewed.RenewStalledSession : null;
+            _transportRenewSession = value is ISessionStateTransport renewed ? renewed.RenewSession : null;
             _transportSessionConnected = value is ISessionStateTransport connected
                 ? () => connected.SessionConnected
                 : null;
@@ -668,7 +696,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
-            _transportRenewSession = value is ISessionStateTransport renewed ? renewed.RenewStalledSession : null;
+            _transportRenewSession = value is ISessionStateTransport renewed ? renewed.RenewSession : null;
             _transportSessionConnected = value is ISessionStateTransport connected
                 ? () => connected.SessionConnected
                 : null;
@@ -752,6 +780,9 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         _lastReceiveTime = DateTime.UtcNow;
         _accepted = false;
         _heldUpSince = 0;
+        lock (Lock) {
+            _lossJudgedFrom = _lastReceiveTime.AddSeconds(LossStretches * LossStretchSeconds).Ticks;
+        }
 
         _cancellationTokenSource = new CancellationTokenSource();
         // Above the game's own threads, as the threads that receive are: a send to Steam's relay holds Steam's lock
@@ -812,7 +843,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         var gap = (now - _lastReceiveTime).TotalSeconds;
         _lastReceiveTime = now;
         _timeoutGraceTold = false;
-        CountArrival(packet.Sequence, now);
+        CountArrival(packet.Sequence, now, gap);
         if (gap >= ReceiveGapTold) {
             Logger.Info($"Packets arrive again after {gap:F1}s in which none did");
             try {
@@ -1571,9 +1602,18 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// </summary>
     /// <param name="sequence">The number of the packet.</param>
     /// <param name="now">When it arrived.</param>
-    private void CountArrival(ushort sequence, DateTime now) {
+    /// <param name="gap">How long nothing had arrived before it, in seconds.</param>
+    private void CountArrival(ushort sequence, DateTime now, double gap) {
         lock (Lock) {
             MoveLossStretches(now);
+
+            // The numbers skipped in a gap go in as lost with this packet, which a full count lets go of
+            if (gap >= LossGapSeconds) {
+                _lossJudgedFrom = System.Math.Max(
+                    _lossJudgedFrom,
+                    now.AddSeconds(LossStretches * LossStretchSeconds).Ticks
+                );
+            }
 
             if (!_lossCounting) {
                 _lossCounting = true;
@@ -1789,6 +1829,8 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                     TellStall(lastReceive, quietFor);
                 }
 
+                RenewLossyLink(quietFor);
+
                 // Send Packet, unless this side waits for the other side's new link: what is set meanwhile goes in the
                 // first packet after, and no number is skipped that the other side would count as lost
                 if (!HeldAfterRenewal()) {
@@ -1954,29 +1996,80 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             return;
         }
 
-        bool renewed;
-        try {
-            renewed = _transportRenewSession();
-        } catch (Exception e) {
-            Logger.Warn($"Could not open the link anew: {e.Message}");
-            renewed = false;
-        }
-
-        if (!renewed) {
+        if (!RenewLink()) {
             return;
         }
 
         _renewedAtQuiet = (int) quietFor;
         _renewals++;
-        _heldUntil = DateTime.UtcNow.Ticks + RenewalHoldMs * TimeSpan.TicksPerMillisecond;
         Logger.Info(
             $"Nothing has arrived for {quietFor / 1000:F1}s although the link counted as connected, so it was opened " +
             $"anew (time {_renewals} in this quiet stretch), and nothing is sent until the other side's new link " +
             $"counts as connected, for at most {RenewalHoldMs / 1000}s; this is taken as a disconnect only after " +
             $"{QuietLinkKept / 1000}s"
         );
+    }
 
+    /// <summary>
+    /// Has the transport open its link to the other side anew at once when more than <see cref="RenewLinkLoss"/> of
+    /// what the other side sent over the last few seconds did not arrive, while things still arrive over it, the same
+    /// way as one over which nothing arrives (<see cref="RenewStalledLink"/>). Each side judges what reaches it, so a
+    /// link that loses what goes one way only is opened anew by the side that it goes to.
+    /// </summary>
+    /// <param name="quietFor">How long nothing has arrived, in milliseconds.</param>
+    private void RenewLossyLink(double quietFor) {
+        // While nothing arrives, the other side may be opening the link anew, which a second time from here would
+        // close again before anything came over it
+        if (quietFor >= LossGapSeconds * 1000) {
+            return;
+        }
+
+        float loss;
+        lock (Lock) {
+            if (DateTime.UtcNow.Ticks < _lossJudgedFrom) {
+                return;
+            }
+
+            loss = LossShare;
+        }
+
+        if (loss <= RenewLinkLoss || !RenewLink()) {
+            return;
+        }
+
+        lock (Lock) {
+            _lossJudgedFrom = DateTime.UtcNow.AddMilliseconds(RenewLinkInterval).Ticks;
+        }
+
+        Logger.Info(
+            $"{loss * 100:F0}% of what the other side sent over the last {LossStretches * LossStretchSeconds:F0}s " +
+            "did not arrive, so the link was opened anew, and nothing is sent until the other side's new link counts " +
+            $"as connected, for at most {RenewalHoldMs / 1000}s"
+        );
+    }
+
+    /// <summary>
+    /// Has the transport open its link to the other side anew (<see cref="ISessionStateTransport.RenewSession"/>),
+    /// after which this side sends nothing for a while (<see cref="RenewalHoldMs"/>), and what it sent with reliable
+    /// data that the other side has not taken in goes again (<see cref="SendAgainAfterRenewal"/>).
+    /// </summary>
+    /// <returns>Whether it was opened anew.</returns>
+    private bool RenewLink() {
+        bool renewed;
+        try {
+            renewed = _transportRenewSession?.Invoke() == true;
+        } catch (Exception e) {
+            Logger.Warn($"Could not open the link anew: {e.Message}");
+            renewed = false;
+        }
+
+        if (!renewed) {
+            return false;
+        }
+
+        _heldUntil = DateTime.UtcNow.Ticks + RenewalHoldMs * TimeSpan.TicksPerMillisecond;
         SendAgainAfterRenewal();
+        return true;
     }
 
     /// <summary>

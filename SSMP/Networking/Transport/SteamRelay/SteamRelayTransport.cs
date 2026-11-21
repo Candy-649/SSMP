@@ -58,7 +58,7 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         _isConnected && !_isLoopback && SteamRelayMessaging.SessionConnected(_remoteSteamId);
 
     /// <inheritdoc />
-    public bool RenewStalledSession() =>
+    public bool RenewSession() =>
         _isConnected && !_isLoopback && SteamRelayMessaging.RenewSession(_remoteSteamId, "the host");
 
     /// <inheritdoc />

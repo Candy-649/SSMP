@@ -60,7 +60,7 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
     public bool SessionConnected => SteamRelayMessaging.SessionConnected(SteamId);
 
     /// <inheritdoc />
-    public bool RenewStalledSession() => SteamRelayMessaging.RenewSession(SteamId, "a player");
+    public bool RenewSession() => SteamRelayMessaging.RenewSession(SteamId, "a player");
 
     /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
