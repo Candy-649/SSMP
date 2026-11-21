@@ -636,7 +636,7 @@ internal class ClientManager : IClientManager {
         _commandManager.RegisterCommand(new CopyCommand(_coopSave));
         _commandManager.RegisterCommand(new DeleteCommand(_coopSave));
 
-        // TEMPORARY debug commands for fighting the second sentinel again, to be taken out again once they are tried
+        // TEMPORARY debug commands for trying the fight with the silk boss, to be taken out again once they are tried
         for (var command = 0; command <= 1; command++) {
             _commandManager.RegisterCommand(new DebugFightCommand(_bossRoomCoop, command));
         }
