@@ -766,6 +766,8 @@ internal partial class CoopSave {
         _picks.Clear();
         _ownWays.Clear();
         _keptOwnSteps.Clear();
+        _waysThrough.Clear();
+        _awaitedBlows.Clear();
         _emptiedTold.Clear();
         _emptiedWords.Clear();
         _keptOut.Clear();

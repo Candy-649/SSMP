@@ -28,7 +28,9 @@ namespace SSMP.Game.Client.Entity.Action;
 // and sends it with the run. Both games draw everything the action rolls from that seed, so the two throw the same
 // things the same way, named alike (ThrownThings), in the same rhythm: the copy moves the action's clock on by the
 // frames of the game that runs the creature, since three of the kinds lose what is left over at each throw and so
-// throw more often or less often with frames of another length.
+// throw more often or less often with frames of another length. A machine of the room that rolls under a name, which
+// every game runs by itself, rolls each run from the name instead, and names what it throws in a round of the scene
+// host's after the round.
 internal static partial class EntityFsmActions {
     /// <summary>
     /// The kinds of actions that throw or spawn things on a clock while their state lasts.
@@ -172,6 +174,7 @@ internal static partial class EntityFsmActions {
             TellIfEntered(self);
         }
 
+        GiveNamedRun(self);
         var last = _timedAction;
         _timedAction = self;
         try {
@@ -205,6 +208,24 @@ internal static partial class EntityFsmActions {
                 _timedEnterFailed = true;
                 Logger.Error($"Could not tell that {action.GetType().Name} was entered:\n{e}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Gives an action of an object of the room that rolls under a name a run of its own for each visit of its state,
+    /// as it first updates in it, which rolls from the name, the same in every game (see SharedDice.NextSeedByName).
+    /// Each game threw the rocks that the fields of the boss at the end of the second act let fall with its own dice,
+    /// and they came down up to 30 units apart in the two games (the user's log of 11-21, 21:51:23 to 21:51:34). A
+    /// run that came from the game that runs a creature, or that goes to the others, stays as it is.
+    /// </summary>
+    private static void GiveNamedRun(FsmStateAction action) {
+        var visit = action.State.RealStartTime;
+        if (TimedRuns.TryGetValue(action, out var run) && (!run.ByName || run.Visit.Equals(visit))) {
+            return;
+        }
+
+        if (SharedDice.NextSeedByName(action) is { } seed) {
+            SetTimedRun(action, new TimedRun(seed, null, false) { ByName = true, Visit = visit });
         }
     }
 
@@ -264,6 +285,13 @@ internal static partial class EntityFsmActions {
         GameObject spawned;
         if (action != null && TimedRuns.TryGetValue(action, out var run) && run.Names is { } names) {
             using (ThrownThings.ExpectSeries(names, prefab)) {
+                spawned = prefab.Spawn(position, rotation);
+            }
+        } else if (action != null && ThrownThings.RoundOf?.Invoke(action.Fsm) is { } round &&
+                   ThrownThings.CanBeThrown(prefab)) {
+            // What a machine of the room throws in a round of the scene host's is named after the round in every game
+            // alike, on a clock as at once (CoopHits.ExpectThrown), and rolls by its name
+            using (ThrownThings.ExpectRoundThrow(round, prefab)) {
                 spawned = prefab.Spawn(position, rotation);
             }
         } else {
@@ -575,6 +603,16 @@ internal static partial class EntityFsmActions {
         /// How long a frame of the game that runs the creature was as the state began.
         /// </summary>
         public float Step { get; init; }
+
+        /// <summary>
+        /// Whether the run rolls from the name of its object, for one visit of its state (see GiveNamedRun).
+        /// </summary>
+        public bool ByName { get; init; }
+
+        /// <summary>
+        /// When the visit of the state that a run by name is for began (see GiveNamedRun).
+        /// </summary>
+        public float Visit { get; init; }
 
         /// <summary>
         /// The dice that a seed gives, without touching the game's own.

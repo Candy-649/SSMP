@@ -53,10 +53,17 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// How long, in milliseconds, nothing has arrived since the transport's link was last opened anew before it is
-    /// opened anew again, and how long after it was opened anew for its loss before that is judged again (see
-    /// <see cref="RenewLossyLink"/>).
+    /// opened anew again, and at the least how long after it was opened anew for its loss before that is judged again
+    /// (see <see cref="RenewLossyLink"/>).
     /// </summary>
     private const int RenewLinkInterval = 8000;
+
+    /// <summary>
+    /// How many times in a row the wait before the loss of the link is judged again doubles, as it was opened anew for
+    /// its loss and the loss stayed over <see cref="RenewLinkLoss"/> (see <see cref="RenewLossyLink"/>): from
+    /// <see cref="RenewLinkInterval"/> to eight times that.
+    /// </summary>
+    private const int LossRenewalDoublings = 3;
 
     /// <summary>
     /// The share of what the other side sent over the last few seconds that did not arrive (<see cref="LossShare"/>),
@@ -194,6 +201,13 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// side's new link is made, which this side takes (USER 11-08 "steam尝试直连是正常的").
     /// </summary>
     protected abstract int RenewalHoldMs { get; }
+
+    /// <summary>
+    /// How long, in milliseconds, more than <see cref="RenewLinkLoss"/> of what the other side sends has to be lost
+    /// before this side opens the link anew for it (see <see cref="RenewLossyLink"/>): none on the host, and a moment
+    /// in a joining game, so that where as much is lost both ways, the host's game opens it first.
+    /// </summary>
+    protected abstract int LossRenewalWaitMs { get; }
 
     /// <summary>
     /// Whether <see cref="LinkStalled"/> was raised in this quiet stretch.
@@ -614,10 +628,23 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// From when, in UTC ticks, the share of what did not arrive is judged for opening the link anew (see
     /// <see cref="RenewLossyLink"/>): once a full count of the last few seconds was made after updates started, and
     /// after things arrived again after a gap (<see cref="LossGapSeconds"/>), whose numbers went in as lost with the
-    /// first packet after it, and <see cref="RenewLinkInterval"/> after this side opened the link anew for its loss,
-    /// which the count of the old link would say again. Guarded by <see cref="Lock"/>.
+    /// first packet after it, and <see cref="RenewLinkInterval"/> or more after this side opened the link anew for
+    /// its loss (see <see cref="LossRenewalDoublings"/>), which the count of the old link would say again. Guarded by
+    /// <see cref="Lock"/>.
     /// </summary>
     private long _lossJudgedFrom;
+
+    /// <summary>
+    /// Since when, in UTC ticks, more than <see cref="RenewLinkLoss"/> of what the other side sends has been lost, or 0
+    /// (see <see cref="LossRenewalWaitMs"/>). Only the send loop reads and writes it.
+    /// </summary>
+    private long _lossOverSince;
+
+    /// <summary>
+    /// How many times in a row the link was opened anew for its loss with the loss over <see cref="RenewLinkLoss"/>
+    /// again at the next full count (see <see cref="LossRenewalDoublings"/>). Only the send loop reads and writes it.
+    /// </summary>
+    private int _lossRenewalsInARow;
 
     /// <summary>
     /// Whether this update manager is actually updating and sending packets.
@@ -2011,40 +2038,58 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
-    /// Has the transport open its link to the other side anew at once when more than <see cref="RenewLinkLoss"/> of
-    /// what the other side sent over the last few seconds did not arrive, while things still arrive over it, the same
-    /// way as one over which nothing arrives (<see cref="RenewStalledLink"/>). Each side judges what reaches it, so a
-    /// link that loses what goes one way only is opened anew by the side that it goes to.
+    /// Has the transport open its link to the other side anew when more than <see cref="RenewLinkLoss"/> of what the
+    /// other side sent over the last few seconds did not arrive, while things still arrive over it, the same way as one
+    /// over which nothing arrives (<see cref="RenewStalledLink"/>): at once in the host's game, and once that has gone
+    /// on for <see cref="LossRenewalWaitMs"/> in a joining game. Each side judges what reaches it, so a link that loses
+    /// what goes one way only is opened anew by the side that it goes to, and one that loses as much both ways by the
+    /// host's game, whose close the joining game hears first: two that opened it anew at once would each wait for the
+    /// other's new link and send nothing until the host's wait was over (review). Each time that the loss is over the
+    /// share again at the next full count, the wait for that count doubles, up to <see cref="LossRenewalDoublings"/>
+    /// times: what a player's own network loses goes on over every new link (review).
     /// </summary>
     /// <param name="quietFor">How long nothing has arrived, in milliseconds.</param>
     private void RenewLossyLink(double quietFor) {
         // While nothing arrives, the other side may be opening the link anew, which a second time from here would
         // close again before anything came over it
-        if (quietFor >= LossGapSeconds * 1000) {
-            return;
+        float? judged = null;
+        if (quietFor < LossGapSeconds * 1000) {
+            lock (Lock) {
+                if (DateTime.UtcNow.Ticks >= _lossJudgedFrom) {
+                    judged = LossShare;
+                }
+            }
         }
 
-        float loss;
-        lock (Lock) {
-            if (DateTime.UtcNow.Ticks < _lossJudgedFrom) {
-                return;
+        if (judged is not { } loss || loss <= RenewLinkLoss) {
+            _lossOverSince = 0;
+            if (judged != null) {
+                _lossRenewalsInARow = 0;
             }
 
-            loss = LossShare;
-        }
-
-        if (loss <= RenewLinkLoss || !RenewLink()) {
             return;
         }
 
+        var now = DateTime.UtcNow.Ticks;
+        if (_lossOverSince == 0) {
+            _lossOverSince = now;
+        }
+
+        if (now - _lossOverSince < LossRenewalWaitMs * TimeSpan.TicksPerMillisecond || !RenewLink()) {
+            return;
+        }
+
+        _lossOverSince = 0;
+        var wait = RenewLinkInterval << System.Math.Min(_lossRenewalsInARow, LossRenewalDoublings);
+        _lossRenewalsInARow++;
         lock (Lock) {
-            _lossJudgedFrom = DateTime.UtcNow.AddMilliseconds(RenewLinkInterval).Ticks;
+            _lossJudgedFrom = DateTime.UtcNow.AddMilliseconds(wait).Ticks;
         }
 
         Logger.Info(
             $"{loss * 100:F0}% of what the other side sent over the last {LossStretches * LossStretchSeconds:F0}s " +
             "did not arrive, so the link was opened anew, and nothing is sent until the other side's new link counts " +
-            $"as connected, for at most {RenewalHoldMs / 1000}s"
+            $"as connected, for at most {RenewalHoldMs / 1000}s; its loss is judged again in {wait / 1000}s"
         );
     }
 

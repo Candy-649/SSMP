@@ -1136,6 +1136,31 @@ internal static partial class SharedDice {
     }
 
     /// <summary>
+    /// The seed of a run of an action of an object of the room that rolls under a name, an action that rolls on a clock
+    /// for as long as its state lasts rather than as it starts (EntityFsmActions.TimedSpawns): from the name and how
+    /// many runs of the action came before, the same in every game, each run counted as a roll of the action. Null for
+    /// an object that rolls with the game's own dice, and for a creature that every game runs by itself: its steps are
+    /// found by how many times its actions rolled (CoopSave.TakeOwnStep), which a run that one game left out, as its
+    /// state was left before it updated, would put off.
+    /// </summary>
+    public static int? NextSeedByName(FsmStateAction action) {
+        if (NamedRollers.Count == 0 || action.Fsm?.FsmComponent is not { } fsm || fsm == null) {
+            return null;
+        }
+
+        var thing = fsm.gameObject;
+        if (!NamedRollers.TryGetValue(thing, out var named) ||
+            Entity.OwnCreatures.Count > 0 && Entity.OwnCreatures.RollsUnderPlace(thing)) {
+            return null;
+        }
+
+        var roller = Identify(action, fsm);
+        named.Times.TryGetValue(roller, out var times);
+        named.Times[roller] = times + 1;
+        return SeedFor(named.Name, named.Table, roller, times, thing);
+    }
+
+    /// <summary>
     /// Takes the state of <see cref="Random"/> as numbers.
     /// </summary>
     private static int[] TakeState() {

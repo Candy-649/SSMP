@@ -20,6 +20,9 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     protected override int RenewalHoldMs => 8000;
 
     /// <inheritdoc />
+    protected override int LossRenewalWaitMs => 1000;
+
+    /// <inheritdoc />
     public override void ResendReliableData(ServerUpdatePacket lostPacket) {
         // Transports with built-in reliability (e.g., the Steam relay) don't need app-level resending
         if (!RequiresReliability) {
