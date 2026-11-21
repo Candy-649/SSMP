@@ -404,8 +404,12 @@ internal partial class BossRoomCoop {
             ShareDialogue(dialogue);
         }
 
+        // But for the fight of a creature that every game runs by itself that started here, which went by already:
+        // the newcomer held its word for the next one, which then went on for them as they were through their talk,
+        // while the others still read (see BeginsNextFight; review)
         foreach (var pair in _fightReadiness) {
-            if (pair.Value.Local && pair.Key.GameObject != null) {
+            if (pair.Value.Local && pair.Key.GameObject != null &&
+                !(_startedFights.Contains(pair.Key) && GetInfo(pair.Key).IsOwn)) {
                 Send(BossRoomUpdateKind.Ready, pair.Key, "", "", "");
             }
         }

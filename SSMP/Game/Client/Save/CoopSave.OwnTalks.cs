@@ -130,15 +130,17 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether a creature that every game runs by itself, in a game that follows the scene host's, goes to a step of
     /// the scene host's before its fight here into a state where it waits for a player to talk to it (see
-    /// Entity.WaitsForTalk), as it is neither in such a state nor in a talk here: the way there runs no line of a
-    /// talk, and its fight is not on for it. The map seller comes into her room at the call of the pole that a player
-    /// strikes, which came before a member who came in after it: her talk would never start for them, as she never got
-    /// to it here.
+    /// Entity.WaitsForTalk), as it is neither in a talk here nor in such a state, and gets to none by itself (see
+    /// <see cref="ComesToTalkByItself"/>): the way there runs no line of a talk, and its fight is not on for it. The
+    /// map seller comes into her room at the call of the pole that a player strikes, which came before a member who
+    /// came in after it: her talk would never start for them, as she never got to it here. Her song, as a player plays
+    /// the needolin, ends into where she waits by itself, and is played to its end here (review: the scene host's end
+    /// of the song cut it).
     /// </summary>
     private bool GoesToTalkAsThere(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
         if (!BeforeFight(fsm) || _ownLeaps.ContainsKey(fsm) || fsm.ActiveState is not { } here ||
-            Entity.Entity.WaitsForTalk(here) || fsm.GetState(update.StateName) is not { } there ||
-            !Entity.Entity.WaitsForTalk(there)) {
+            fsm.GetState(update.StateName) is not { } there || !Entity.Entity.WaitsForTalk(there) ||
+            ComesToTalkByItself(fsm)) {
             return false;
         }
 
@@ -147,6 +149,36 @@ internal partial class CoopSave {
             $"{player.Username}'s game, where it waits to be talked to, and goes there from '{here.Name}' here"
         );
         return true;
+    }
+
+    /// <summary>
+    /// Whether a state machine is in a state where its creature waits for a player to talk to it (see
+    /// Entity.WaitsForTalk), or gets to one by itself from there: by ways that the states take by what they do
+    /// themselves (see TakenByItself).
+    /// </summary>
+    private static bool ComesToTalkByItself(Fsm fsm) {
+        if (fsm.ActiveState is not { } from) {
+            return false;
+        }
+
+        var seen = new HashSet<FsmState> { from };
+        var next = new Queue<FsmState>();
+        next.Enqueue(from);
+        while (next.Count > 0) {
+            var state = next.Dequeue();
+            if (Entity.Entity.WaitsForTalk(state)) {
+                return true;
+            }
+
+            foreach (var transition in state.Transitions) {
+                if ((transition.ToFsmState ?? fsm.GetState(transition.ToState)) is { } to &&
+                    TakenByItself(state, transition) && seen.Count < MaxWayInSteps && seen.Add(to)) {
+                    next.Enqueue(to);
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
