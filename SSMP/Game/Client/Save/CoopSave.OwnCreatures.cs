@@ -203,6 +203,14 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, float> _awaitedBlows = new();
 
     /// <summary>
+    /// The newest step of the scene host's of each state machine in <see cref="_awaitedBlows"/> that was let go of as
+    /// from before the blow there, with whose game it came from: taken as the wait for the answer runs out with no
+    /// answer, as the scene host's creature, in which the blow set nothing off there, went on meanwhile, and a state
+    /// machine here waited for the step after it (review of 45dad32).
+    /// </summary>
+    private readonly Dictionary<Fsm, (ClientPlayerData Player, CoopSaveUpdate Step)> _stepsBeforeBlow = new();
+
+    /// <summary>
     /// How long, in seconds, the steps of the scene host's of a state machine that a blow of this game's player set off
     /// on a way of its own are taken for steps from before the blow there, at the most (see
     /// <see cref="AwaitsLocalBlow"/>): the scene host's game has the blow a round trip later, and answers it with a
@@ -345,6 +353,7 @@ internal partial class CoopSave {
             );
             _heldOwnSteps.Remove(self);
             _ownWays.Remove(self);
+            ReachKeptStep(self, toState.Name);
             PutAtSceneHostsStep(self, through);
             StartsOwnLeap(machine, toState);
             EnterOwnState(orig, self, toState);
@@ -375,7 +384,6 @@ internal partial class CoopSave {
             (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike || picks)) {
             MachineSwitchToStateField?.SetValue(self, null);
             _ownWays.Remove(self);
-            _awaitedBlows.Remove(self);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
                 _heldOwnSteps[self] = self.ActiveStateName;
                 Logger.Info(
@@ -398,8 +406,11 @@ internal partial class CoopSave {
 
         // A blow of this game's player sets it off on a way of its own here a round trip before the scene host's game
         // has the blow: the steps that that game took before go by (see AwaitsLocalBlow), and so do the steps of the
-        // scene host's that it kept to get to by itself (review of a0d1558)
-        if (CoopHits.IsMakingLocalStrike && OwnCreatures.FollowsSceneHost(creature)) {
+        // scene host's that it kept to get to by itself (review of a0d1558). Only where that game tells its answer,
+        // which a part tells only of the steps that the others wait for or that pick (see below): one that a part takes
+        // by itself, like a tink, waits for no answer (review of 45dad32)
+        if (CoopHits.IsMakingLocalStrike && OwnCreatures.FollowsSceneHost(creature) &&
+            (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
             _awaitedBlows[self] = Time.unscaledTime + LocalBlowAnswerWait;
             _keptOwnSteps.Remove(self);
         }
@@ -800,6 +811,15 @@ internal partial class CoopSave {
         // which it goes to as well when it is neither there nor in a talk here, or one while this game plays a leap at
         // its own player or a talk by itself (see CoopSave.OwnTalks, CoopSave.OwnCatches)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
+
+        // The answer of the scene host's game to a blow of this game's player that set it off on a way of its own here:
+        // what that game takes from then on comes after the blow there (see AwaitsLocalBlow), whatever takes this one
+        // (review of 45dad32: one that came in a leap was kept for its end, and the wait went on)
+        if (update.PartCount == OwnStruckPart && IsLocalPlayersBlow(player, update)) {
+            _awaitedBlows.Remove(fsm);
+            _stepsBeforeBlow.Remove(fsm);
+        }
+
         var toTalk = GoesToTalkAsThere(player, fsm, update);
         if (!toTalk && (LetsGoOfSceneHostsTalk(player, fsm, update) || KeepsForOwnLeap(player, fsm, update))) {
             return;
@@ -809,6 +829,7 @@ internal partial class CoopSave {
         // here, and from the latest of these once the creature is through (see TakePartStepsAfter)
         if (OwnCreatures.IsPart(creature) && OwnCreatures.Owning(creature) is { } owner && InOwnLeap(owner)) {
             _partStepsInLeap[fsm] = (player, update);
+            _waysThrough.Remove(fsm);
             Logger.Info(
                 $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
                 "game, while its creature plays a move here by itself, and goes on as the creature tells it here " +
@@ -817,16 +838,11 @@ internal partial class CoopSave {
             return;
         }
 
-        // The answer of the scene host's game to a blow of this game's player that set it off on a way of its own here:
-        // what that game takes from then on comes after the blow there (see AwaitsLocalBlow)
-        if (update.PartCount == OwnStruckPart && IsLocalPlayersBlow(player, update)) {
-            _awaitedBlows.Remove(fsm);
-        }
-
         // One that the scene host's game took before it had a blow of this game's player that set it off on a way of
         // its own here is let go of (see AwaitsLocalBlow), and leaves the steps that it took here as they are, among
         // which the answer finds the one that the blow set off
         if (update.PartCount != OwnToldPart && AwaitsLocalBlow(fsm) && !HasOwnStep(fsm, update)) {
+            _stepsBeforeBlow[fsm] = (player, update);
             Logger.Info(
                 $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
                 "game before that game had the blow of this game's player that set it off on a way of its own here, " +
@@ -1471,8 +1487,9 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether a step of the scene host's of a state machine comes from before a blow of this game's player that set it
     /// off on a way of its own here (see _awaitedBlows): until the scene host's game answers the blow with a step that
-    /// it set off there, or the state machine here next waits for a step of the scene host's, or for
-    /// <see cref="LocalBlowAnswerWait"/> where neither comes. Such a step is let go of, as what the blow set off here
+    /// it set off there, or for <see cref="LocalBlowAnswerWait"/> where none comes, after which the newest of them is
+    /// taken (see <see cref="UpdateAwaitedBlows"/>), or a later one as it comes. Such a step is let go of, as what the
+    /// blow set off here
     /// is this game's to play (USER 11-17 "本地化就是为了让自己的怪是活的"): the boss at the end of the second act, killed
     /// by the user's blow here, rose and roared once more, moved 14 units, and two of its blades set off to strike, by
     /// steps of its fight that Luminary's game took in the 0.36 s before it had the blow (the user's log of 11-21,
@@ -1488,7 +1505,37 @@ internal partial class CoopSave {
         }
 
         _awaitedBlows.Remove(fsm);
+        _stepsBeforeBlow.Remove(fsm);
         return false;
+    }
+
+    /// <summary>
+    /// Has each state machine whose wait for the answer to a blow of this game's player ran out with no answer take the
+    /// newest step of the scene host's that was let go of meanwhile (see <see cref="_stepsBeforeBlow"/>).
+    /// </summary>
+    private void UpdateAwaitedBlows() {
+        if (_awaitedBlows.Count == 0) {
+            return;
+        }
+
+        var now = Time.unscaledTime;
+        foreach (var pair in _awaitedBlows.ToList()) {
+            if (now < pair.Value) {
+                continue;
+            }
+
+            _awaitedBlows.Remove(pair.Key);
+            if (!_stepsBeforeBlow.Remove(pair.Key, out var newest)) {
+                continue;
+            }
+
+            Logger.Info(
+                $"[Own creatures] '{newest.Step.ObjectPath}' had no answer of {newest.Player.Username}'s game to the " +
+                $"blow of this game's player in {LocalBlowAnswerWait:F0}s, and takes the newest step of " +
+                $"'{pair.Key.Name}' that it let go of meanwhile, '{newest.Step.StateName}'"
+            );
+            OnOwnCreature(newest.Player, newest.Step);
+        }
     }
 
     /// <summary>

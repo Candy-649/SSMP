@@ -811,6 +811,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _lossJudgedFrom = _lastReceiveTime.AddSeconds(LossStretches * LossStretchSeconds).Ticks;
         }
 
+        // A new connection over the same manager starts its loss over (review of 45dad32)
+        _lossOverSince = 0;
+        _lossRenewalsInARow = 0;
+
         _cancellationTokenSource = new CancellationTokenSource();
         // Above the game's own threads, as the threads that receive are: a send to Steam's relay holds Steam's lock
         // while it runs, and on a busy machine the game's threads kept this one from finishing it for 5 to 62 ms. Past

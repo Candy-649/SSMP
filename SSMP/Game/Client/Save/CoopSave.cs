@@ -541,6 +541,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // A state machine set off here by a blow of this game's player, which the scene host's game did not answer
+        try {
+            UpdateAwaitedBlows();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also once the partner is gone, so that a creature through a leap at the local player goes on from the latest
         // step of the scene host's
         try {
@@ -768,6 +775,7 @@ internal partial class CoopSave {
         _keptOwnSteps.Clear();
         _waysThrough.Clear();
         _awaitedBlows.Clear();
+        _stepsBeforeBlow.Clear();
         _emptiedTold.Clear();
         _emptiedWords.Clear();
         _keptOut.Clear();
