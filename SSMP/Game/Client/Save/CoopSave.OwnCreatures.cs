@@ -99,10 +99,17 @@ internal partial class CoopSave {
     private const int OwnBesideValue = 8;
 
     /// <summary>
+    /// Where in the values of an update of a creature that every game runs by itself that tells a member who has just
+    /// come into the room which state it is in here (see TellOwnState) whether it is shown here is: 1, or 0 for out of
+    /// sight.
+    /// </summary>
+    private const int OwnShownValue = 10;
+
+    /// <summary>
     /// Where in the values of an update of a creature that every game runs by itself its health is, which a member who
     /// has just come into the room is told with it (see TellOwnState).
     /// </summary>
-    private const int OwnHealthValue = 10;
+    private const int OwnHealthValue = 11;
 
     /// <summary>
     /// The most steps that a state machine takes through the states between on its way into a step of the scene host's
@@ -577,7 +584,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells a member who has come into the room which state a state machine of a creature that every game runs by
-    /// itself, or of a part of one, is in here, and the creature's health.
+    /// itself, or of a part of one, is in here, whether it is shown here, and the creature's health.
     /// </summary>
     private void TellOwnState(ClientPlayerData player, PlayMakerFSM machine, HealthManager? health) {
         var fsm = machine.Fsm;
@@ -591,6 +598,10 @@ internal partial class CoopSave {
         update.TargetId = player.Id;
         update.PartCount = OwnToldPart;
 
+        // Whether it is shown here, as the states that show it and hide it made it (see OnOwnCreature)
+        var shown = thing.TryGetComponent<Renderer>(out var look) && look.enabled;
+        update.Values.Add(shown ? 1f : 0f);
+
         // Their own has all its health, which the blows before they came took here
         if (health != null) {
             update.Values.Add(health.hp);
@@ -598,7 +609,8 @@ internal partial class CoopSave {
 
         Logger.Info(
             $"[Own creatures] {player.Username} is told that '{OwnCreatures.PlaceOf(thing)}' is in " +
-            $"'{fsm.ActiveStateName}' of '{fsm.Name}' here" + (health != null ? $", with {health.hp} health" : "")
+            $"'{fsm.ActiveStateName}' of '{fsm.Name}' here" + (look != null && !shown ? ", out of sight" : "") +
+            (health != null ? $", with {health.hp} health" : "")
         );
         Send(update);
     }
@@ -876,6 +888,19 @@ internal partial class CoopSave {
             _waySkipsTalk = false;
             CoopHits.TakesAnothersBlow = false;
             OwnCreatures.SeeTargetHere();
+        }
+
+        // A member who has just come in: shown or out of sight as it is there, as the states that show it and hide it
+        // made it there, which the way here leaves out in the part of its state machine that the step goes round in
+        // (see WalkInto). The map seller, whom a member came in on in a spar, stayed out of sight for them until she
+        // next came back from a leap (review of 3d2f970)
+        if (update.PartCount == OwnToldPart && creature.TryGetComponent<Renderer>(out var look) &&
+            look.enabled != (update.Values[OwnShownValue] > 0f)) {
+            look.enabled = !look.enabled;
+            Logger.Info(
+                $"[Own creatures] '{place}' is {(look.enabled ? "shown" : "out of sight")} as in {player.Username}'s " +
+                "game, which this member has just come into"
+            );
         }
 
         var how = way != null ? $"by '{way.Name}'"
