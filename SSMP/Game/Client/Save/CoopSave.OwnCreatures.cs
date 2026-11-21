@@ -266,16 +266,16 @@ internal partial class CoopSave {
             // The step itself may be a leap at this game's player, which this game plays from there, and never a
             // talk, which each game's player has with the creature by themselves (see CoopSave.OwnTalks). A state on
             // the way into it does what it does as it is entered, but on the way into the creature's fight, which may
-            // go through its talk, for a line of the talk or a prompt, which would take this game's player into a talk
-            // that the way leaves at once (review: a member who came in after the talk went through it on the way, and
-            // played every step after it by itself)
+            // go through its talk, and to where it waits to be talked to, for a line of the talk or a prompt, which
+            // would take this game's player into a talk that the way leaves at once (review: a member who came in
+            // after the talk went through it on the way, and played every step after it by itself)
             if (isTheStep) {
                 StartsOwnLeap(machine, toState);
                 EnterOwnState(orig, self, toState);
                 return;
             }
 
-            var muted = _wayIntoFight && Entity.Entity.RunsTalk(toState) ? MuteTalk(toState) : null;
+            var muted = _waySkipsTalk && Entity.Entity.RunsTalk(toState) ? MuteTalk(toState) : null;
             try {
                 EnterOwnState(orig, self, toState);
             } finally {
@@ -295,8 +295,10 @@ internal partial class CoopSave {
         // is, after which the scene host's game tells which part it picked (see CoopSave.OwnPicks). The switch that the
         // game was to make is let go of, as the game tries it again at once until it is made. A leap at this game's
         // player is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which
-        // it waits for the scene host's to come as far (see CoopSave.OwnTalks). So is what a strike of this game's
-        // player sets off as it is made, as in a game of one: a wound, a block or a tink, and what they tell the other
+        // it waits for the scene host's to come as far, and so is a step before the fight into a state whose steps of
+        // the scene host's this game lets go of, which nothing comes to wait for (see CoopSave.OwnTalks). So is what a
+        // strike of this game's player sets off as it is made, as in a game of one: a wound, a block or a tink, and
+        // what they tell the other
         // state machines of the creature at once, though not where a state that it went into chooses its way on by
         // where the players are or by a count, which stays the scene host's. The scene host's game is told of the
         // strike as it was taken here, and its creature answers it as the game does, which every other game takes as a
@@ -307,6 +309,7 @@ internal partial class CoopSave {
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
         var picks = PicksAPart(toState);
         if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
+            !GoesByItselfBeforeFight(self, toState) &&
             (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike || picks)) {
             MachineSwitchToStateField?.SetValue(self, null);
             _ownWays.Remove(self);
@@ -708,10 +711,12 @@ internal partial class CoopSave {
         }
 
         // A step of the scene host's in or before the end of a talk, before the fight here, which the creature here
-        // goes through by itself as this game's player talks to it, or one while this game plays a leap at its own
-        // player or a talk by itself (see CoopSave.OwnTalks, CoopSave.OwnCatches)
+        // goes through by itself as this game's player talks to it, but for one to where it waits to be talked to,
+        // which it goes to as well when it is neither there nor in a talk here, or one while this game plays a leap at
+        // its own player or a talk by itself (see CoopSave.OwnTalks, CoopSave.OwnCatches)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
-        if (LetsGoOfSceneHostsTalk(player, fsm, update) || KeepsForOwnLeap(player, fsm, update)) {
+        var toTalk = GoesToTalkAsThere(player, fsm, update);
+        if (!toTalk && (LetsGoOfSceneHostsTalk(player, fsm, update) || KeepsForOwnLeap(player, fsm, update))) {
             return;
         }
 
@@ -727,9 +732,10 @@ internal partial class CoopSave {
             return;
         }
 
-        // The step is taken, and the fight of the creature is on here: a way into it from the talk here runs none of
-        // the talk, and nothing of a talk is looked at for it after (see CoopSave.OwnTalks)
-        var intoFight = _fightsOn.Add(fsm);
+        // The step is taken, and the fight of the creature is on here, but for one to where it waits to be talked to:
+        // a way into it from the talk here runs none of the talk, and nothing of a talk is looked at for it after (see
+        // CoopSave.OwnTalks)
+        var intoFight = !toTalk && _fightsOn.Add(fsm);
 
         // Whom it goes after there, which nothing here chooses for it
         if (update.Part != ThrownThings.NoPlayer && ThrownThings.FigureOf?.Invoke(update.Part, player.Id) is
@@ -853,7 +859,7 @@ internal partial class CoopSave {
         SeeTargetAsTold(creature, update);
         CoopHits.TakesAnothersBlow = update.PartCount == OwnHostStruckPart ||
                                      update.PartCount == OwnStruckPart && !IsLocalPlayersBlow(player, update);
-        _wayIntoFight = intoFight;
+        _waySkipsTalk = intoFight || toTalk;
         try {
             if (way != null) {
                 // Put again as the scene host's was as it gets to the step, as on a way through the states between (see
@@ -867,7 +873,7 @@ internal partial class CoopSave {
         } finally {
             OwnCreatures.SceneHostsStep = null;
             _wayInStep = null;
-            _wayIntoFight = false;
+            _waySkipsTalk = false;
             CoopHits.TakesAnothersBlow = false;
             OwnCreatures.SeeTargetHere();
         }

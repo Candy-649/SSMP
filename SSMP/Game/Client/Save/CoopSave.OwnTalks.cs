@@ -38,6 +38,13 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// lines alone: the boss room shares none of them (BossRoomCoop.OnStartDialogue). The copy of the knight that the room
 /// had before played the talk of the player who woke it in their game, and the talk that the scene host's game started
 /// a moment later took the box from it (USER 11-16 "为啥我这里没有对话框").
+///
+/// The talk of the map seller comes again after each of her spars, in a state machine of hers that is no part of her
+/// fight, so that every state of it lies before the end of a talk: none of its steps waits for one of the scene
+/// host's (see <see cref="GoesByItselfBeforeFight"/>), as none is taken, and it gets to where she waits to be talked to
+/// by the words of her fight and of the room in each game, or by the scene host's step there where it never got there
+/// here (see <see cref="GoesToTalkAsThere"/>). Each spar after a talk waits for every player again
+/// (BossRoomCoop.BeginsNextFight), and a no to her offer leads to no fight (BossRoomCoop.GetFightTransitions).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -48,10 +55,11 @@ internal partial class CoopSave {
     private readonly HashSet<Fsm> _fightsOn = new();
 
     /// <summary>
-    /// Whether a way into a step of the scene host's takes a creature that every game runs by itself into its fight
-    /// here, the one way that may go through its talk, of which it runs no line (see OnOwnCreatureStep).
+    /// Whether a way into a step of the scene host's runs no line of a talk of a creature that every game runs by
+    /// itself: the way into its fight here, which may go through its talk, and the way to where it waits to be talked
+    /// to (see OnOwnCreatureStep, <see cref="GoesToTalkAsThere"/>).
     /// </summary>
-    private bool _wayIntoFight;
+    private bool _waySkipsTalk;
 
     /// <summary>
     /// The states that lie in or before the end of a talk, for each state machine of a creature that every game runs by
@@ -109,6 +117,39 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether a step of a state machine of a creature that every game runs by itself, in a game that follows the
+    /// scene host's, is taken by itself before the fight here: one into a state whose steps of the scene host's this
+    /// game lets go of (see <see cref="LetsGoOfSceneHostsTalk"/>), as none comes to wait for. Every state of the state
+    /// machine of the map seller's talk lies so, and it would wait for good at the call of the room that brings her in,
+    /// at the words of her fight that send her away and back, and at the end of her talk.
+    /// </summary>
+    private bool GoesByItselfBeforeFight(Fsm fsm, FsmState toState) {
+        return BeforeFight(fsm) && LiesBeforeTalkEnd(fsm, toState.Name);
+    }
+
+    /// <summary>
+    /// Whether a creature that every game runs by itself, in a game that follows the scene host's, goes to a step of
+    /// the scene host's before its fight here into a state where it waits for a player to talk to it (see
+    /// Entity.WaitsForTalk), as it is neither in such a state nor in a talk here: the way there runs no line of a
+    /// talk, and its fight is not on for it. The map seller comes into her room at the call of the pole that a player
+    /// strikes, which came before a member who came in after it: her talk would never start for them, as she never got
+    /// to it here.
+    /// </summary>
+    private bool GoesToTalkAsThere(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
+        if (!BeforeFight(fsm) || _ownLeaps.ContainsKey(fsm) || fsm.ActiveState is not { } here ||
+            Entity.Entity.WaitsForTalk(here) || fsm.GetState(update.StateName) is not { } there ||
+            !Entity.Entity.WaitsForTalk(there)) {
+            return false;
+        }
+
+        Logger.Info(
+            $"[Own creatures] '{update.ObjectPath}' went to '{update.StateName}' of '{fsm.Name}' in " +
+            $"{player.Username}'s game, where it waits to be talked to, and goes there from '{here.Name}' here"
+        );
+        return true;
+    }
+
+    /// <summary>
     /// Has a creature that every game runs by itself, in a game that follows the scene host's, that waits at the end of
     /// a talk that it played here by itself go on from a step of the scene host's beyond the talk, which is taken as
     /// any step.
@@ -124,7 +165,9 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether a state of a state machine lies in or before the end of a talk: a way from it leads to a state that ends
     /// its dialogue with a way out of it into no more of the talk (see Entity.EndsTalk), like the sleep of the knight,
-    /// the bow of a noise that woke it and every state of its talk. The knight has the one talk, before its fight.
+    /// the bow of a noise that woke it and every state of its talk. The knight has the one talk, before its fight; the
+    /// map seller's comes again after her spar, so every state of the state machine of her talk lies before the end of
+    /// one.
     /// </summary>
     private bool LiesBeforeTalkEnd(Fsm fsm, string stateName) {
         if (!_beforeTalkEnd.TryGetValue(fsm, out var before)) {

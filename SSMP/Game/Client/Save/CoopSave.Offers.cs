@@ -11,9 +11,9 @@ namespace SSMP.Game.Client.Save;
 /// both say yes at their own prompt: each talks to the creature in their own game (a talk with a copy runs there, see
 /// Entity.TalkHere), and a no from either of them, or no answer in time, is a no for both.
 ///
-/// A prompt is one of these when it belongs to a creature of the room (a registered entity), whatever it asks: the
-/// census of the game's prompts (10-10) found exactly the four fight offers and the asking for help, which is checked
-/// before this.
+/// A prompt is one of these when it belongs to a creature of the room (a registered entity, or one that every game
+/// runs by itself), whatever it asks: the census of the game's prompts (10-10) found exactly the four fight offers and
+/// the asking for help, which is checked before this.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -35,13 +35,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The creature of the room that a prompt belongs to - the room's own object, the copy of it, or a part of either -
-    /// or null for any other prompt.
+    /// The name of the creature of the room that a prompt belongs to, the same in every game, or null for any other
+    /// prompt: the entity of the room's own object, of the copy of it or of a part of either, or the place of one that
+    /// every game runs by itself, like the map seller who offers a spar (see OwnCreatures).
     /// </summary>
-    private static Entity.Entity? GetOfferCreature(YesNoAction action) {
-        return action is DialogueYesNo or DialogueYesNoV2 && action.Fsm?.GameObject is { } owner
-            ? Entity.Entity.FindByPart(owner)
-            : null;
+    private static string? GetOfferCreature(YesNoAction action) {
+        if (action is not (DialogueYesNo or DialogueYesNoV2) || action.Fsm?.GameObject is not { } owner) {
+            return null;
+        }
+
+        if (Entity.OwnCreatures.Owning(owner) is { } own) {
+            return Entity.OwnCreatures.PlaceOf(own);
+        }
+
+        return Entity.Entity.FindByPart(owner) is { } entity ? entity.Id.ToString() : null;
     }
 
     /// <summary>
@@ -57,8 +64,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// What to ask the partner about a creature's prompt. It names the creature by its entity, which is the same in
-    /// both games, and what it asks.
+    /// What to ask the partner about a creature's prompt. It names the creature as every game does (see
+    /// <see cref="GetOfferCreature"/>), and what it asks.
     /// </summary>
     private static CoopSaveUpdate? CreateOfferConfirm(YesNoAction action, ref string what) {
         if (GetOfferCreature(action) is not { } creature) {
@@ -66,9 +73,9 @@ internal partial class CoopSave {
         }
 
         var question = GetOfferQuestion(action);
-        what = $"a prompt of entity {creature.Id} ({creature.Type}, {question})";
+        what = $"a prompt of '{creature}' ({question})";
         var update = CreateConfirm(WishConfirmOffer);
-        update.WishNames.Add(creature.Id + "\n" + question);
+        update.WishNames.Add(creature + "\n" + question);
         return update;
     }
 

@@ -48,7 +48,8 @@ internal partial class Entity {
 
     /// <summary>
     /// How many states that each go on to the next by themselves are looked through for more of a talk, after a state
-    /// that ended its dialogue (see <see cref="MoreTalkFollows"/>).
+    /// that ended its dialogue (see <see cref="MoreTalkFollows"/>), or for the way back to where its character waits to
+    /// be talked to (see <see cref="ComesBackToTalk"/>).
     /// </summary>
     private const int TalkLookAhead = 8;
 
@@ -388,9 +389,34 @@ internal partial class Entity {
     /// the next once they are done (see <see cref="TalkLookAhead"/>).
     /// </summary>
     internal static bool MoreTalkFollows(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
+        return GoesOnInto(fsm, from, RunsTalk);
+    }
+
+    /// <summary>
+    /// Whether a state machine comes back from a state by itself to where its character waits for a player to talk to
+    /// it (see <see cref="WaitsForTalk"/>), within a few states that each go on to the next once they are done (see
+    /// <see cref="TalkLookAhead"/>), like the map seller after a no to her spar, who stands up and waits again.
+    /// </summary>
+    internal static bool ComesBackToTalk(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
+        return GoesOnInto(fsm, from, WaitsForTalk);
+    }
+
+    /// <summary>
+    /// Whether a state of a talking character waits for a player to talk to it: a way out of it goes by the word that
+    /// the character tells its FSM as a player starts a talk with it (see <see cref="OnNpcSendEvent"/>).
+    /// </summary>
+    internal static bool WaitsForTalk(FsmState state) {
+        return Array.Exists(state.Transitions, transition => transition.EventName == "INTERACT");
+    }
+
+    /// <summary>
+    /// Whether a state, or one of the few after it that each go on to the next once they are done (see
+    /// <see cref="TalkLookAhead"/>), is one that a test holds for.
+    /// </summary>
+    private static bool GoesOnInto(HutongGames.PlayMaker.Fsm fsm, FsmState from, Predicate<FsmState> test) {
         var state = from;
         for (var i = 0; i < TalkLookAhead && state != null; i++) {
-            if (RunsTalk(state)) {
+            if (test(state)) {
                 return true;
             }
 

@@ -253,6 +253,23 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Has a talk of the local player with a creature that every game runs by itself, whose fight started already in
+    /// the room, hold back the fight that comes after it until every player is through their own talk, as the first one
+    /// was: the map seller asks again after her spar, whoever won it (see CoopSave.OwnTalks). A fight that started is
+    /// never held back again, so the next spar would begin as each player was through their talk, while the others
+    /// still read.
+    /// </summary>
+    private void BeginsNextFight(Fsm fsm) {
+        if (!_startedFights.Contains(fsm) || !GetInfo(fsm).IsOwn) {
+            return;
+        }
+
+        _startedFights.Remove(fsm);
+        _fightReadiness.Remove(fsm);
+        Logger.Info($"A new talk with '{GetPath(fsm)}' after its fight: the next one waits for every player again");
+    }
+
+    /// <summary>
     /// Shares dialogue that a boss of the scene host starts with the other players in the scene.
     /// </summary>
     private void OnStartDialogue(Action startDialogue, RunDialogueBase action) {
@@ -267,6 +284,7 @@ internal partial class BossRoomCoop {
         var state = action.State;
         if (fsm != null) {
             _dialogueFsms.Add(fsm);
+            BeginsNextFight(fsm);
         }
 
         if (_startDialogueDepth > 0 || fsm == null || state == null) {
@@ -873,7 +891,10 @@ internal partial class BossRoomCoop {
         // what comes after its talk, like its fight, starts by a way out of a state that ends its dialogue that leads
         // to no more of the talk (see Entity.EndsTalk). Taken for a boss that only the scene host's game runs, it went
         // into its fight there as the scene host's player was through the talk, while the others still read (USER
-        // 11-17 "为啥房主读完就开打，不应该都读完才开打吗", "所有对话框都各看各的，只在关键节点等对方看完/决策")
+        // 11-17 "为啥房主读完就开打，不应该都读完才开打吗", "所有对话框都各看各的，只在关键节点等对方看完/决策"). A way back
+        // to where the creature waits to be talked to again leads to nothing that comes after the talk, like the map
+        // seller's after a no to her spar, which would hold her stand until every player was through a talk, though
+        // nobody fights (see Entity.ComesBackToTalk)
         var info = GetInfo(fsm);
         if (info.IsOwn) {
             foreach (var state in states) {
@@ -883,7 +904,7 @@ internal partial class BossRoomCoop {
 
                 foreach (var transition in state.Transitions) {
                     if ((transition.ToFsmState ?? fsm.GetState(transition.ToState)) is { } to &&
-                        !Entity.Entity.MoreTalkFollows(fsm, to)) {
+                        !Entity.Entity.MoreTalkFollows(fsm, to) && !Entity.Entity.ComesBackToTalk(fsm, to)) {
                         transitions.Add(GetTransitionKey(state.Name, transition.EventName));
                     }
                 }

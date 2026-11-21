@@ -1773,6 +1773,7 @@
   {
     "base_object_name": "Mapper Spar NPC",
     "type": "MapperSparNPC",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
