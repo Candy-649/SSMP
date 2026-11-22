@@ -1002,8 +1002,13 @@ internal partial class CoopSave {
             // Where it stood as it took the step is its own: a creature is put where the scene host's is only as it
             // makes a move, which a step that the others wait for tells, and goes on from there by itself, as fast as
             // there, through its knockbacks, flights and landings (USER 11-18 "不如位置校准只在出招时做", "因为出招的时候
-            // 必定携带位置信息"). A member who has just come in is put where it is there, wherever their own is (review)
-            var off = there - took.Place;
+            // 必定携带位置信息"). A member who has just come in is put where it is there, wherever their own is (review),
+            // by where it is here now, as the word tells where it is there now: it took the step before the state
+            // moved it. The silk boss, which its sleep puts down below the room, was put as far again down and to the
+            // left, 21.4, and rose there as its fight began once that game ran the room (the user's log of 11-22,
+            // 20:44:54.061; USER "我是说我们后来又打了一次丝母，点开战之后丝母在左下角出现"), and a member who came in
+            // on it after was put twice as far (42.8, Luminary's log, 20:47:06.595)
+            var off = there - (update.PartCount == OwnToldPart ? transform.position : took.Place);
             off.z = 0f;
             if (update.PartCount == OwnToldPart && MakesMoves(fsm)) {
                 Logger.Info(
