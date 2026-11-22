@@ -73,6 +73,13 @@ internal class CoopHitUpdate : IPacketData {
     public bool FromSceneHost { get; set; }
 
     /// <summary>
+    /// For a hit, a touch or the events of a tink that a strike of the sender's player made on an object of the room:
+    /// the number of the strike in the sender's game, which the scene host's game names back with what a creature that
+    /// every game runs by itself did at it there (see CoopSave.TellStrikeDone). 0 for anything else.
+    /// </summary>
+    public uint Strike { get; set; }
+
+    /// <summary>
     /// The hit itself, or the direction and magnitude of the knockback of an enemy, which only the games of the
     /// players read.
     /// </summary>
@@ -95,6 +102,7 @@ internal class CoopHitUpdate : IPacketData {
             Uncounted = Uncounted,
             Blocked = Blocked,
             FromSceneHost = FromSceneHost,
+            Strike = Strike,
             Hit = Hit
         };
     }
@@ -112,6 +120,7 @@ internal class CoopHitUpdate : IPacketData {
         packet.Write(Uncounted);
         packet.Write(Blocked);
         packet.Write(FromSceneHost);
+        packet.Write(Strike);
         packet.Write((ushort) Hit.Length);
         packet.Write(Hit);
     }
@@ -129,6 +138,7 @@ internal class CoopHitUpdate : IPacketData {
         Uncounted = packet.ReadBool();
         Blocked = packet.ReadBool();
         FromSceneHost = packet.ReadBool();
+        Strike = packet.ReadUInt();
         Hit = packet.ReadBytes(packet.ReadUShort());
     }
 }

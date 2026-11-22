@@ -115,7 +115,10 @@ internal class CoopSaveUpdate : IPacketData {
     /// For changes of the world, changes of the wish log, interactions and deliveries that broke for the sender, the
     /// check that the sender was in, in the upper half, and a count that grows with every such update of the sender, in
     /// the lower half. The network can deliver an update that it sent again after a newer one, which this tells apart.
-    /// For a toll bench, a count that grows with every such update of the sender, for the same reason.
+    /// For a toll bench, a count that grows with every such update of the sender, for the same reason. For a step of a
+    /// creature that every game runs by itself that a blow of another player set off, and for the word that the scene
+    /// host's game is through with such a blow, the number of the blow in the game of the player who struck (see
+    /// CoopHitUpdate.Strike).
     /// </summary>
     public ulong Sequence { get; set; }
 

@@ -244,6 +244,12 @@ internal partial class CoopHits {
     public static ushort ReplayedStriker { get; private set; }
 
     /// <summary>
+    /// The number of the strike in the game of the player who struck whose hit or touch is being played here as it
+    /// came, while <see cref="IsReplayingPartnersStrike"/> (see <see cref="CoopHitUpdate.Strike"/>).
+    /// </summary>
+    public static uint ReplayedStrikeNumber { get; private set; }
+
+    /// <summary>
     /// Whether this game takes, at the word of another game, a step of a creature that a blow of another player set off
     /// there, or a strike back at such a blow: it plays as the creature's own, but for the moment that the game stands
     /// still for, which is the feel of the blow, played by the game of the player who struck. The knight's parry of
@@ -254,9 +260,10 @@ internal partial class CoopHits {
 
     /// <summary>
     /// What this game does once it is through with replaying a blow or touch of another player on an object of the
-    /// room, whatever it set off here, with the object and that player (see CoopSave.TellStrikeDone).
+    /// room, whatever it set off here, with the object, that player and the number of the strike in their game (see
+    /// CoopSave.TellStrikeDone).
     /// </summary>
-    public static Action<GameObject, ushort>? ReplayedStrike { get; set; }
+    public static Action<GameObject, ushort, uint>? ReplayedStrike { get; set; }
 
     /// <summary>
     /// Whether the hit being replayed did not count on the thing that breaks in the partner's game, so it doesn't count
@@ -303,8 +310,20 @@ internal partial class CoopHits {
     public static bool IsMakingLocalStrike => _localStrikeDepth > 0;
 
     /// <summary>
+    /// The number of the strike of the local player that is being made, while <see cref="IsMakingLocalStrike"/>: each
+    /// has its own, which goes with what it sends the others (see <see cref="CoopHitUpdate.Strike"/>). One made within
+    /// another has its own too, and the other's is the number again once it is through.
+    /// </summary>
+    public static uint LocalStrikeNumber { get; private set; }
+
+    /// <summary>
+    /// The number of the last strike of the local player that was made (see <see cref="LocalStrikeNumber"/>).
+    /// </summary>
+    private static uint _lastLocalStrike;
+
+    /// <summary>
     /// Marks a hit or touch of the local player's attack as being made while it lasts (see
-    /// <see cref="IsMakingLocalStrike"/>).
+    /// <see cref="IsMakingLocalStrike"/>), under a number of its own (see <see cref="LocalStrikeNumber"/>).
     /// </summary>
     private readonly struct LocalStrike : IDisposable {
         /// <summary>
@@ -312,16 +331,24 @@ internal partial class CoopHits {
         /// </summary>
         private readonly bool _marks;
 
+        /// <summary>
+        /// The number of the strike that this one is made within, or 0 for none.
+        /// </summary>
+        private readonly uint _within;
+
         public LocalStrike(bool marks) {
             _marks = marks;
+            _within = LocalStrikeNumber;
             if (marks) {
                 _localStrikeDepth++;
+                LocalStrikeNumber = ++_lastLocalStrike;
             }
         }
 
         public void Dispose() {
             if (_marks) {
                 _localStrikeDepth--;
+                LocalStrikeNumber = _within;
             }
         }
     }
@@ -897,6 +924,7 @@ internal partial class CoopHits {
         bool answered;
         _isReplaying = true;
         ReplayedStriker = update.PlayerId;
+        ReplayedStrikeNumber = update.Strike;
         _replayUncounted = update.Uncounted;
         try {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
@@ -934,7 +962,7 @@ internal partial class CoopHits {
             RelayBlock(update);
         }
 
-        ReplayedStrike?.Invoke(component.gameObject, update.PlayerId);
+        ReplayedStrike?.Invoke(component.gameObject, update.PlayerId, update.Strike);
     }
 
     /// <summary>
@@ -1468,6 +1496,7 @@ internal partial class CoopHits {
                                  response.response == IHitResponder.Response.Invincible;
                 update.FromSceneHost = update.Blocked && OwnCreatures.RunsHere(component.gameObject);
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
+                update.Strike = LocalStrikeNumber;
                 SendToRoomMembers(update);
                 NoteTraffic(
                     update.Scene, update.Path,
@@ -1917,6 +1946,7 @@ internal partial class CoopHits {
             TurnThrownBack(turned, before);
         } else if (update != null && _netClient.IsConnected) {
             update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
+            update.Strike = LocalStrikeNumber;
             SendToRoomMembers(update);
             NoteTraffic(
                 update.Scene, update.Path,
@@ -2754,6 +2784,7 @@ internal partial class CoopHits {
             if (_toldRoom.Count == 0) {
                 TurnThrownBack(turned, before);
             } else if (CreateEventsUpdate(told, _toldRoom, thrownPath) is { } update && _netClient.IsConnected) {
+                update.Strike = LocalStrikeNumber;
                 SendToRoomMembers(update);
                 NoteTraffic(
                     update.Scene, update.Path, $"sent {_toldRoom.Count} event(s) of a tink to {update.Responder}"
@@ -3064,6 +3095,7 @@ internal partial class CoopHits {
         var answered = false;
         _isReplaying = true;
         ReplayedStriker = update.PlayerId;
+        ReplayedStrikeNumber = update.Strike;
         try {
             _gamePatcher.RunAsRemoteHit(() => {
                 foreach (var (eventName, dice) in events) {
@@ -3079,7 +3111,7 @@ internal partial class CoopHits {
         }
 
         NoteReplayed(update, "events", answered);
-        ReplayedStrike?.Invoke(target, update.PlayerId);
+        ReplayedStrike?.Invoke(target, update.PlayerId, update.Strike);
     }
 
     /// <summary>
@@ -4188,6 +4220,7 @@ internal partial class CoopHits {
         bool answered;
         _isReplaying = true;
         ReplayedStriker = update.PlayerId;
+        ReplayedStrikeNumber = update.Strike;
         try {
             SetReplayedRanges(target, touch.Ranges);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
@@ -4203,7 +4236,7 @@ internal partial class CoopHits {
         }
 
         NoteReplayed(update, "touch", answered, DescribeMoves(receiver), waited);
-        ReplayedStrike?.Invoke(target, update.PlayerId);
+        ReplayedStrike?.Invoke(target, update.PlayerId, update.Strike);
     }
 
     /// <summary>
