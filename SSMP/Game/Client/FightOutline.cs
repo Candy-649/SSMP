@@ -30,7 +30,9 @@ namespace SSMP.Game.Client;
 /// and their hits started no fight ("道具命中怪没有成功唤出高亮").
 ///
 /// The fight is over as the creatures that were hit are all dead or gone, or the room changes. A boss keeps it going for
-/// as long as it lives, told apart the way its bar of health is (EnemyHealthBars.IsBoss). Every other creature stops
+/// as long as it lives, told apart the way its bar of health is (EnemyHealthBars.IsBoss), until its duel ends with
+/// nobody beaten, as its bar goes away (EnemyHealthBars.FightOver): the map seller, who lives on after a spar, kept it
+/// lit until the players left the room (USER 11-22 "战斗结束身上高光不会掉"). Every other creature stops
 /// keeping it going once <see cref="QuietTime"/> seconds went by in which no player's attack reached a creature and no
 /// creature's attack hurt this player (USER 11-06 "那个高光改回小怪或者精英怪5秒没有攻击或者被攻击就按掉"): with deaths
 /// alone, a creature of the room that a player hit once and left alive kept it lit after the boss of the fight was
@@ -192,8 +194,9 @@ internal class FightOutline {
     }
 
     /// <summary>
-    /// Whether a fight is on: a creature that a player hit is still alive and here, and it is a boss or the fight saw
-    /// an attack either way less than <see cref="QuietTime"/> seconds ago. The creatures that no longer keep the fight
+    /// Whether a fight is on: a creature that a player hit is still alive and here, and it is a boss whose duel did not
+    /// end, or the fight saw an attack either way less than <see cref="QuietTime"/> seconds ago. The creatures that no
+    /// longer keep the fight
     /// going are let go.
     /// </summary>
     private bool IsFightOn() {
@@ -208,6 +211,8 @@ internal class FightOutline {
                 why = "died";
             } else if (!creature.gameObject.activeInHierarchy) {
                 why = "was switched off";
+            } else if (hit.IsBoss && EnemyHealthBars.FightOver) {
+                why = "ended its duel with nobody beaten";
             } else if (!hit.IsBoss && quiet) {
                 why = $"is no boss, and {QuietTime:0} s went by without an attack either way";
             }

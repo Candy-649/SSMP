@@ -159,6 +159,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private static bool _fightOver;
 
     /// <summary>
+    /// Whether the fight of a boss in the room ended with nobody beaten (see <see cref="_fightOver"/>): the duelist
+    /// lives on, and keeps no fight going (see FightOutline).
+    /// </summary>
+    internal static bool FightOver => _fightOver;
+
+    /// <summary>
     /// The colour of what is left of the health: the white of silk.
     /// </summary>
     private static readonly Color HealthColor = new(0.97f, 0.95f, 0.91f, 0.95f);
