@@ -253,6 +253,12 @@ internal partial class CoopHits {
     public static bool TakesAnothersBlow { get; set; }
 
     /// <summary>
+    /// What this game does once it is through with replaying a blow or touch of another player on an object of the
+    /// room, whatever it set off here, with the object and that player (see CoopSave.TellStrikeDone).
+    /// </summary>
+    public static Action<GameObject, ushort>? ReplayedStrike { get; set; }
+
+    /// <summary>
     /// Whether the hit being replayed did not count on the thing that breaks in the partner's game, so it doesn't count
     /// here either (see <see cref="CoopHitUpdate.Uncounted"/>).
     /// </summary>
@@ -927,6 +933,8 @@ internal partial class CoopHits {
         if (update.Blocked && !update.FromSceneHost && OwnCreatures.RunsHere(component.gameObject)) {
             RelayBlock(update);
         }
+
+        ReplayedStrike?.Invoke(component.gameObject, update.PlayerId);
     }
 
     /// <summary>
@@ -3071,6 +3079,7 @@ internal partial class CoopHits {
         }
 
         NoteReplayed(update, "events", answered);
+        ReplayedStrike?.Invoke(target, update.PlayerId);
     }
 
     /// <summary>
@@ -4194,6 +4203,7 @@ internal partial class CoopHits {
         }
 
         NoteReplayed(update, "touch", answered, DescribeMoves(receiver), waited);
+        ReplayedStrike?.Invoke(target, update.PlayerId);
     }
 
     /// <summary>

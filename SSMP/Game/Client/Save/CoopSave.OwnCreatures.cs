@@ -93,6 +93,13 @@ internal partial class CoopSave {
     private const ushort OwnHostStruckPart = 11;
 
     /// <summary>
+    /// What an update of a creature that every game runs by itself is when it tells that the scene host's game is
+    /// through with a blow of another player on it, whatever the blow set off there, with that player in
+    /// <see cref="CoopSaveUpdate.Key"/>: their game waits for an answer to it no more (see TellStrikeDone).
+    /// </summary>
+    private const ushort OwnStrikeDonePart = 14;
+
+    /// <summary>
     /// Where in the values of an update of a creature that every game runs by itself the place of the player that it
     /// goes after is, beside it, as the game that took the step had them: x, then y (see SeeTargetAsTold).
     /// </summary>
@@ -214,7 +221,8 @@ internal partial class CoopSave {
     /// How long, in seconds, the steps of the scene host's of a state machine that a blow of this game's player set off
     /// on a way of its own are taken for steps from before the blow there, at the most (see
     /// <see cref="AwaitsLocalBlow"/>): the scene host's game has the blow a round trip later, and answers it with a
-    /// step of its own, unless the blow sets nothing off there.
+    /// step of its own, unless the blow sets nothing off there, and then tells that it is through with it (see
+    /// TellStrikeDone). This is for a word that never comes.
     /// </summary>
     private const float LocalBlowAnswerWait = 1f;
 
@@ -233,6 +241,7 @@ internal partial class CoopSave {
     private void RegisterOwnCreatureHooks() {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         OwnThreads.SendToRoomMembers = SendToRoomMembers;
+        CoopHits.ReplayedStrike = TellStrikeDone;
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
@@ -828,6 +837,12 @@ internal partial class CoopSave {
         // Its health came to none there, after which the next blow, of any player, plays here as the game has it
         if (update.PartCount == OwnEmptiedPart && hasHealth) {
             TakeOwnEmptied(player, health);
+            return;
+        }
+
+        // That game is through with a blow of a player on it, whatever the blow set off there
+        if (update.PartCount == OwnStrikeDonePart) {
+            TakeStrikeDone(player, creature, update);
             return;
         }
 
@@ -1533,9 +1548,10 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether a step of the scene host's of a state machine comes from before a blow of this game's player that set it
     /// off on a way of its own here (see _awaitedBlows): until the scene host's game answers the blow with a step that
-    /// it set off there, or for <see cref="LocalBlowAnswerWait"/> where none comes, after which the newest of them is
-    /// taken (see <see cref="UpdateAwaitedBlows"/>), or a later one as it comes. Such a step is let go of, as what the
-    /// blow set off here
+    /// it set off there, or tells that it is through with the blow (see <see cref="TakeStrikeDone"/>), or for
+    /// <see cref="LocalBlowAnswerWait"/> where neither comes, after which the newest of them is taken (see
+    /// <see cref="UpdateAwaitedBlows"/>), or a later one as it comes. Such a step is let go of, as what the blow set
+    /// off here
     /// is this game's to play (USER 11-17 "本地化就是为了让自己的怪是活的"): the boss at the end of the second act, killed
     /// by the user's blow here, rose and roared once more, moved 14 units, and two of its blades set off to strike, by
     /// steps of its fight that Luminary's game took in the 0.36 s before it had the blow (the user's log of 11-21,
@@ -1579,6 +1595,64 @@ internal partial class CoopSave {
                 $"[Own creatures] '{newest.Step.ObjectPath}' had no answer of {newest.Player.Username}'s game to the " +
                 $"blow of this game's player in {LocalBlowAnswerWait:F0}s, and takes the newest step of " +
                 $"'{pair.Key.Name}' that it let go of meanwhile, '{newest.Step.StateName}'"
+            );
+            OnOwnCreature(newest.Player, newest.Step);
+        }
+    }
+
+    /// <summary>
+    /// Tells the members in the room that this game, the scene host's, is through with a blow or touch of another
+    /// player on a creature that every game runs by itself, or on a part of it, after the steps that it set off here,
+    /// if any (see <see cref="OwnStrikeDonePart"/>). A blow that came after the creature had left what it set off in
+    /// the game of the player who struck, like a stun that a blow of this game's player had ended, set off nothing
+    /// here, and that game waited for an answer for a second, its creature held in the stun: the map seller that the
+    /// user struck at 16:42:26.849, which Luminary's blow had woken at 26.899 there, rose only at 27.850 in the user's
+    /// game and leapt 14 units, and the boss at the end of the second act, struck at 16:32:00.807, lay there until
+    /// 01.807, while its hands struck from both sides by Luminary's steps (the user's log of 11-22; USER
+    /// "第一次晕的时候针出了从两边射的招式", "那为啥不告诉我醒了啊", "可是为什么怪本身会多晕一秒").
+    /// </summary>
+    /// <param name="struck">What the blow or touch reached.</param>
+    /// <param name="striker">The player who struck.</param>
+    private void TellStrikeDone(GameObject struck, ushort striker) {
+        if (!OwnCreatures.RunsHere(struck) || OwnCreatures.Owning(struck) is not { } creature) {
+            return;
+        }
+
+        SendToRoomMembers(new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.OwnCreature,
+            Scene = creature.scene.name,
+            ObjectPath = OwnCreatures.PlaceOf(creature),
+            PartCount = OwnStrikeDonePart,
+            Key = striker
+        });
+    }
+
+    /// <summary>
+    /// The scene host's game is through with a blow of a player on a creature that every game runs by itself (see
+    /// <see cref="TellStrikeDone"/>), after the steps that it set off there, which came before. If the blow was this
+    /// game's player's, each state machine of the creature and of its parts that still waits for an answer to it had
+    /// none, and takes the newest step of the scene host's that it let go of meanwhile, as when the wait runs out (see
+    /// <see cref="UpdateAwaitedBlows"/>).
+    /// </summary>
+    private void TakeStrikeDone(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
+        if (_awaitedBlows.Count == 0 || !IsLocalPlayersBlow(player, update)) {
+            return;
+        }
+
+        foreach (var fsm in _awaitedBlows.Keys.ToList()) {
+            if (OwnCreatures.Owning(fsm.GameObject) != creature) {
+                continue;
+            }
+
+            _awaitedBlows.Remove(fsm);
+            if (!_stepsBeforeBlow.Remove(fsm, out var newest)) {
+                continue;
+            }
+
+            Logger.Info(
+                $"[Own creatures] '{newest.Step.ObjectPath}' had all that {player.Username}'s game set off by the " +
+                $"blow of this game's player, and takes the newest step of '{fsm.Name}' that it let go of meanwhile, " +
+                $"'{newest.Step.StateName}'"
             );
             OnOwnCreature(newest.Player, newest.Step);
         }
