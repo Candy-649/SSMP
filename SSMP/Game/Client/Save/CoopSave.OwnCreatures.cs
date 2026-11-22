@@ -170,8 +170,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The state machines of creatures that every game runs by itself that took a step here that a blow set off, of
-    /// this game's player or another's as it came, and go on from there by themselves until they next wait for a step
-    /// of the scene host's (see TakeOwnStep).
+    /// this game's player or another's as it came, or a hurt of a player (see CoopSave.OwnHits), and go on from there
+    /// by themselves until they next wait for a step of the scene host's (see TakeOwnStep).
     /// </summary>
     private readonly HashSet<Fsm> _ownWays = new();
 
@@ -379,6 +379,16 @@ internal partial class CoopSave {
         var waitedFor = IsWaitedFor(self);
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
         var picks = PicksAPart(toState);
+
+        // A way that a hurt of a player takes it plays at once where it is. A game that follows the scene host's tells
+        // that game of a hurt of its own player, and plays the rest of the move by itself, as it does at the word of
+        // another game (see CoopSave.OwnHits)
+        var hit = IsHitWay(self, toState, creature);
+        if (hit && _takingHit != self && OwnCreatures.FollowsSceneHost(creature)) {
+            TellOwnHit(machine, toState, OwnHitPart);
+            StartOwnHit(self, self.ActiveState);
+        }
+
         if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
             !GoesByItselfBeforeFight(self, toState) &&
             (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike || picks)) {
@@ -444,12 +454,18 @@ internal partial class CoopSave {
             }
         }
 
+        // The way that a hurt of a player takes it is told as the hurt, which every other game plays where its own
+        // creature is (see CoopSave.OwnHits)
+        if (IsSceneHost?.Invoke() == true && hit) {
+            TellOwnHit(machine, toState, OwnHostHitPart);
+        }
+
         // A part tells only the steps that the others wait for, which it took by where the players are, by a count or
         // as it was told, or into a state that picks a part of the room: the rest of them the others take by
         // themselves, and a part steps on many times in each move. One that a blow set off is told as such, of another
         // player, with whose it was, or of this game's own, and so is one of a strike back at a blow of another player
         // that this game takes at the word of their game (see MovesAt)
-        if (IsSceneHost?.Invoke() == true && (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
+        if (IsSceneHost?.Invoke() == true && !hit && (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
             Logger.Info(
                 $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' goes from '{self.ActiveStateName}' to " +
                 $"'{toState.Name}' of '{self.Name}'" + (struck ? " at a blow" : "") +
@@ -468,6 +484,7 @@ internal partial class CoopSave {
 
         EnterOwnState(orig, self, toState);
         TakeEarlyCatch(self, toState);
+        TakeEarlyHit(self, toState);
     }
 
     /// <summary>
@@ -794,6 +811,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // It hurt a player there, which it plays here too, where it is (see CoopSave.OwnHits)
+        if (update.PartCount is OwnHitPart or OwnHostHitPart) {
+            TakeOwnHit(player, creature, update);
+            return;
+        }
+
         // It told a part of the room there that it picked by where a player is, which it tells here too
         if (update.PartCount == OwnPickPart) {
             TakeOwnPick(player, creature, update);
@@ -909,8 +932,8 @@ internal partial class CoopSave {
 
                 Logger.Info(
                     $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
-                    $"game, which it played here already, as a blow set it off, {ahead.Count / 2} kinds of rolls " +
-                    "later there"
+                    $"game, which it played here already, as a blow or a hurt set it off, {ahead.Count / 2} kinds " +
+                    "of rolls later there"
                 );
                 return;
             }

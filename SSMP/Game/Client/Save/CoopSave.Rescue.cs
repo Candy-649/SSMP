@@ -804,7 +804,15 @@ internal partial class CoopSave {
             _hurtSourceText = DescribeHurtSource(hero, _hurtSource);
         }
 
-        orig(self);
+        // A part of a creature that every game runs by itself that hurts this game's player: what that sets off in the
+        // creature is played in every game (see CoopSave.OwnHits)
+        var hurting = _hurtingOwn;
+        _hurtingOwn = self.gameObject == _hurtSource ? Entity.OwnCreatures.Owning(self.gameObject) : null;
+        try {
+            orig(self);
+        } finally {
+            _hurtingOwn = hurting;
+        }
     }
 
     /// <summary>

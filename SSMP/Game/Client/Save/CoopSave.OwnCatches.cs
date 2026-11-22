@@ -509,6 +509,27 @@ internal partial class CoopSave {
             return false;
         }
 
+        // The steps of the scene host's of the rest of a move after a hurt here go, whatever its creature did in it,
+        // and the first one out of it ends that move here: the next move, or what cut the move short there (see
+        // CoopSave.OwnHits; USER 11-22 "然后消失，等主机下一招")
+        if (leap.Hit) {
+            if (leap.Catch!.Contains(fsm.GetState(update.StateName))) {
+                Logger.Info(
+                    $"[Own creatures] '{leap.Place}' went to '{update.StateName}' of '{fsm.Name}' in " +
+                    $"{player.Username}'s game, of the move after the hurt, which it plays here by itself"
+                );
+                return true;
+            }
+
+            _ownLeaps.Remove(fsm);
+            Logger.Info(
+                $"[Own creatures] '{leap.Place}' went to '{update.StateName}' of '{fsm.Name}' in " +
+                $"{player.Username}'s game, out of the move after the hurt, and goes on from there here"
+            );
+            TakePartStepsAfter(fsm.GameObject);
+            return false;
+        }
+
         // A talk that is through here waits for the scene host's step out of it, as every one before that is let go
         // of (see CoopSave.OwnTalks)
         if (leap is { Talk: true, Through: true }) {
@@ -540,9 +561,9 @@ internal partial class CoopSave {
 
         foreach (var pair in _ownLeaps.ToList()) {
             // A talk that is through waits for the scene host's step out of it, if none came while it went on (see
-            // CoopSave.OwnTalks)
+            // CoopSave.OwnTalks), and the rest of a move after a hurt waits so always (see KeepsForOwnLeap)
             var leap = pair.Value;
-            if (!leap.Through || leap is { Talk: true, Latest: null }) {
+            if (!leap.Through || leap.Hit || leap is { Talk: true, Latest: null }) {
                 continue;
             }
 
@@ -801,9 +822,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A leap at this game's player, a strike back at their blow, or a talk, that a creature that every game runs by
-    /// itself plays here by itself, in a game that follows the scene host's (see <see cref="PlaysOwnLeap"/>,
-    /// CoopSave.OwnStrikeBacks, CoopSave.OwnTalks).
+    /// A leap at this game's player, a strike back at their blow, a talk, or the rest of a move after a hurt of a
+    /// player, that a creature that every game runs by itself plays here by itself, in a game that follows the scene
+    /// host's (see <see cref="PlaysOwnLeap"/>, CoopSave.OwnStrikeBacks, CoopSave.OwnTalks, CoopSave.OwnHits).
     /// </summary>
     /// <param name="place">Where the creature is in the room (see OwnCreatures.PlaceOf).</param>
     /// <param name="talk">Whether it is a talk.</param>
@@ -831,9 +852,17 @@ internal partial class CoopSave {
 
         /// <summary>
         /// For a catch that no leap led to, the states of its move, through which it goes on (see
-        /// <see cref="StartsOwnRoomCatch"/>); null for anything else.
+        /// <see cref="StartsOwnRoomCatch"/>), and for the rest of a move after a hurt, the states of that (see
+        /// <see cref="Hit"/>); null for anything else.
         /// </summary>
         public HashSet<FsmState>? Catch;
+
+        /// <summary>
+        /// Whether it is the rest of a move after a hurt of a player, through the states in <see cref="Catch"/> (see
+        /// CoopSave.OwnHits): the steps of the scene host's into those are let go of, through it and after it, until
+        /// the first one out of them, which the creature here goes on from.
+        /// </summary>
+        public bool Hit;
 
         /// <summary>
         /// The latest step of the scene host's creature that came meanwhile, which the creature here goes on from once
