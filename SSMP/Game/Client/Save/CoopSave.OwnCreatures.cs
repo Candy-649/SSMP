@@ -651,10 +651,23 @@ internal partial class CoopSave {
     /// <summary>
     /// Tells a member who has come into the room where each creature that every game runs by itself is here and what
     /// it does, or that it is dead, if this game is the scene host's. Their game has them where the room starts them.
+    /// Not while the local player is on the debug trip out of the room (see IsLeavingOnDebugTrip), in which a member
+    /// came into the new start of the fight first: the silk boss, won here, was told dead to them, died once more in
+    /// their game, and as the local player came in, their game told it dead to them in turn, which made the fight won
+    /// twice (the user's log of 11-22, 20:50:14.756 and 17.140; USER "我们打了第二次，好诡异，丝母在左下角苏醒，然后最后打
+    /// 死了莫名其妙判赢两次（").
     /// </summary>
     /// <param name="player">The member.</param>
     private void SendOwnCreaturesTo(ClientPlayerData player) {
         if (OwnCreatures.Count == 0 || !_checkedMembers.Contains(player.Id) || IsSceneHost?.Invoke() != true) {
+            return;
+        }
+
+        if (IsLeavingOnDebugTrip?.Invoke() == true) {
+            Logger.Info(
+                $"[Own creatures] {player.Username} is told nothing of the creatures here: the local player is on " +
+                "the debug trip out of the room, to the new start of the fight that they came into"
+            );
             return;
         }
 

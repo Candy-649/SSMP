@@ -80,6 +80,14 @@ internal partial class BossRoomCoop {
     private bool _debugSkipsEnd;
 
     /// <summary>
+    /// Whether the local player is on the trip of /1 and still in the room it was asked for in. From the fight itself,
+    /// the trip leads into a load of the same room anew, where a player who comes in before them has the fight fresh,
+    /// which this game is not to tell what the room here has (see CoopSave.IsLeavingOnDebugTrip).
+    /// </summary>
+    public bool IsLeavingOnDebugTrip =>
+        (_debugTravelling || _debugPlacing) && SceneManager.GetActiveScene().handle == _debugTravelScene;
+
+    /// <summary>
     /// Carries out the debug chat command /1 that the local player typed, in every player's game.
     /// </summary>
     public void RunDebugTrip() {

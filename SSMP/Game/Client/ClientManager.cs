@@ -455,7 +455,8 @@ internal class ClientManager : IClientManager {
             EndSharedDialogue = () => _bossRoomCoop.EndSharedDialogueNow(),
             IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost,
             IsSceneClient = () => _entityManager.IsSceneRoleDetermined && !_entityManager.IsSceneHost,
-            IsHosting = () => _isHostingServer
+            IsHosting = () => _isHostingServer,
+            IsLeavingOnDebugTrip = () => _bossRoomCoop.IsLeavingOnDebugTrip
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _arenaCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;

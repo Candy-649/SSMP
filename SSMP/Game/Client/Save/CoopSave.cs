@@ -2252,10 +2252,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// TEMPORARY debug (see BossRoomCoop.DebugCommands): whether the local player is on the trip of /1 and still in the
+    /// room it was asked for in, of which the members are told nothing: from the fight itself, the trip leads into a
+    /// load of the same room anew, where a member who came in before them has the fight fresh. Given by the boss room
+    /// code.
+    /// </summary>
+    public Func<bool>? IsLeavingOnDebugTrip { get; set; }
+
+    /// <summary>
     /// Sends an update to each member that the saves were checked with who is in the room of the local player, and to
-    /// nobody else: what only matters in a room doesn't go to the members elsewhere.
+    /// nobody else: what only matters in a room doesn't go to the members elsewhere. Nor while the local player is on
+    /// the debug trip out of the room (see IsLeavingOnDebugTrip): the steps of the boss won here, on its way to its
+    /// end, went to a member who had come into the new start of the fight, as the word of where it was did (see
+    /// SendOwnCreaturesTo; the user's log of 11-22, 20:50:15.112).
     /// </summary>
     private void SendToRoomMembers(CoopSaveUpdate update) {
+        if (IsLeavingOnDebugTrip?.Invoke() == true) {
+            return;
+        }
+
         var sent = false;
         foreach (var member in GetCheckedMembers()) {
             if (!member.IsInLocalScene) {
