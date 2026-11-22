@@ -261,7 +261,8 @@ internal partial class CoopHits {
     /// <summary>
     /// What this game does once it is through with replaying a blow or touch of another player on an object of the
     /// room, whatever it set off here, with the object, that player and the number of the strike in their game (see
-    /// CoopSave.TellStrikeDone).
+    /// CoopSave.TookOthersBlow). Not for a block that the scene host's game tells of (see RelayBlock), which comes as
+    /// that game's, with the number that the blow has in the game of the player who struck.
     /// </summary>
     public static Action<GameObject, ushort, uint>? ReplayedStrike { get; set; }
 
@@ -957,12 +958,16 @@ internal partial class CoopHits {
             waited
         );
 
-        // The scene host's game tells the others of a block of another member's player that it took (see above)
+        // The scene host's game tells the others of a block of another member's player that it took (see above). One
+        // that it told of names no blow of the scene host's player: the number is the striker's (review of 1655e30: a
+        // third game counted the scene host's word of no health at once, by the number of a block of a partner's blow)
         if (update.Blocked && !update.FromSceneHost && OwnCreatures.RunsHere(component.gameObject)) {
             RelayBlock(update);
         }
 
-        ReplayedStrike?.Invoke(component.gameObject, update.PlayerId, update.Strike);
+        if (!update.FromSceneHost) {
+            ReplayedStrike?.Invoke(component.gameObject, update.PlayerId, update.Strike);
+        }
     }
 
     /// <summary>
