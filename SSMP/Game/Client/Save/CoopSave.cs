@@ -778,6 +778,8 @@ internal partial class CoopSave {
         _stepsBeforeBlow.Clear();
         _emptiedTold.Clear();
         _emptiedWords.Clear();
+        _emptiedAtBlows.Clear();
+        _othersBlowsTaken.Clear();
         _keptOut.Clear();
         _keptOutTold.Clear();
         _catchStates.Clear();

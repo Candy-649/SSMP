@@ -5,6 +5,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
+using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
@@ -20,13 +21,19 @@ namespace SSMP.Game.Client.Save;
 /// "房主传过来同理"): the scene host's game turns it at the blow as it comes, or has turned it already, and the others
 /// find the turn among the steps they took (see CoopSave.TakeOwnStep), and what comes after it, the same in every
 /// game, until the next move that goes by the players, which is the scene host's again ("然后后面得泥石流，战吼，都是统一
-/// 的，到下一招分叉路再听房主的"). Each game's health comes to none no later than the scene host's word comes: the blows of
-/// the scene host's player are told before its own word, and those of its own player it took at once.
+/// 的，到下一招分叉路再听房主的"). The word names the blow that emptied it there, which mostly comes to the others after the
+/// word, and counts in their game once it has played that blow too (see CoopSave.TakeOwnEmptied): the word of the
+/// user's blow that emptied the boss came to Luminary's game before the blow, which then played there as the next blow
+/// after it, and the boss fell there 1.6 s before the user's next blow felled it in the user's game, its blades held in
+/// the air all the while and put 30 units away as the scene host's step came (Luminary's log of 11-22, 20:50:12.180 to
+/// 13.780; USER "为啥会差很多", "但是不应该差很多").
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
     /// What an update of a creature that every game runs by itself is when it tells that its health came to none in
-    /// the scene host's game (see <see cref="TellOwnEmptied"/>).
+    /// the scene host's game (see <see cref="TellOwnEmptied"/>), with the player whose blow emptied it there in
+    /// <see cref="CoopSaveUpdate.Key"/>, as a throw names a player (see ThrownThings.CodeOf), and the number of the
+    /// blow in their game in <see cref="CoopSaveUpdate.Sequence"/>, 0 for none.
     /// </summary>
     private const ushort OwnEmptiedPart = 8;
 
@@ -56,6 +63,20 @@ internal partial class CoopSave {
     private readonly HashSet<HealthManager> _emptiedWords = [];
 
     /// <summary>
+    /// The creatures whose health came to none in the scene host's game at a blow of another player than this game's,
+    /// as it told this game, which this game had not played yet as the word came, with that player and the number of
+    /// the blow in their game: the word counts here once it has played that blow or a later one of theirs (see
+    /// <see cref="TookOthersBlow"/>).
+    /// </summary>
+    private readonly Dictionary<HealthManager, (ushort Striker, uint Strike)> _emptiedAtBlows = [];
+
+    /// <summary>
+    /// The newest blow or touch of each other player that this game played on the health of a creature that every game
+    /// runs by itself, by its number in their game (see <see cref="TookOthersBlow"/>).
+    /// </summary>
+    private readonly Dictionary<(HealthManager Health, ushort Striker), uint> _othersBlowsTaken = [];
+
+    /// <summary>
     /// The hook on the look of a creature at its health.
     /// </summary>
     private Hook? OwnHealthHook() {
@@ -69,7 +90,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells the members in the room that the health of a creature that every game runs by itself came to none here,
-    /// in the scene host's game, once each time (see <see cref="TakeOwnEmptied"/>).
+    /// in the scene host's game, once each time, and at which blow (see <see cref="TakeOwnEmptied"/>): of this game's
+    /// player, whose word of the blow goes after this one, or of another, whose blow this game plays as it came.
     /// </summary>
     private void TellOwnEmptied(HealthManager health) {
         if (IsSceneHost?.Invoke() != true || !_emptiedTold.Add(health)) {
@@ -78,28 +100,82 @@ internal partial class CoopSave {
 
         var creature = health.gameObject;
         var place = OwnCreatures.PlaceOf(creature);
+        var (striker, strike) = CoopHits.IsMakingLocalStrike
+            ? (ThrownThings.ThrowersPlayer, CoopHits.LocalStrikeNumber)
+            : CoopHits.IsReplayingPartnersStrike
+                ? (CoopHits.ReplayedStriker, CoopHits.ReplayedStrikeNumber)
+                : (ThrownThings.NoPlayer, 0u);
+        var blow = strike == 0 ? "" :
+            striker == ThrownThings.ThrowersPlayer ? $" at blow {strike} of this game's player," :
+            $" at blow {strike} of the player {striker},";
         Logger.Info(
-            $"[Own creatures] '{place}' has no health left here, {health.hp}, as the members in the room are told"
+            $"[Own creatures] '{place}' has no health left here, {health.hp},{blow} as the members in the room are told"
         );
         SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.OwnCreature,
             Scene = creature.scene.name,
             ObjectPath = place,
-            PartCount = OwnEmptiedPart
+            PartCount = OwnEmptiedPart,
+            Key = striker,
+            Sequence = strike
         });
     }
 
     /// <summary>
     /// Has a creature that every game runs by itself go on here as it has no health, after the scene host's game told
     /// that it came to none there (see <see cref="TellOwnEmptied"/>): the next look of it at its health that finds
-    /// none here goes as the game has it.
+    /// none here goes as the game has it. Where a blow of another player than this game's emptied it there, the word
+    /// counts once this game has played that blow too, which mostly comes after the word: the blow plays here as there,
+    /// as one before its health came to none, and the next one as the one after.
     /// </summary>
-    private void TakeOwnEmptied(ClientPlayerData player, HealthManager health) {
+    private void TakeOwnEmptied(ClientPlayerData player, HealthManager health, CoopSaveUpdate update) {
+        var place = OwnCreatures.PlaceOf(health.gameObject);
+        if (update.Sequence > 0 && !IsLocalPlayersBlow(player, update)) {
+            var striker = update.Key == ThrownThings.ThrowersPlayer ? player.Id : (ushort) update.Key;
+            var strike = (uint) update.Sequence;
+            if (!_othersBlowsTaken.TryGetValue((health, striker), out var taken) || taken < strike) {
+                _emptiedAtBlows[health] = (striker, strike);
+                Logger.Info(
+                    $"[Own creatures] '{place}' has no health left in {player.Username}'s game since blow " +
+                    $"{strike} of the player {striker}, which this game has not played yet, with {health.hp} health " +
+                    "here"
+                );
+                return;
+            }
+        }
+
+        _emptiedAtBlows.Remove(health);
         _emptiedWords.Add(health);
         Logger.Info(
-            $"[Own creatures] '{OwnCreatures.PlaceOf(health.gameObject)}' has no health left in {player.Username}'s " +
-            $"game, and goes on here as it has none at its next look, with {health.hp} health here"
+            $"[Own creatures] '{place}' has no health left in {player.Username}'s game, and goes on here as it has " +
+            $"none at its next look, with {health.hp} health here"
         );
+    }
+
+    /// <summary>
+    /// A blow or touch of another player that this game played on an object of the room, with what it set off here
+    /// (see CoopHits.ReplayedStrike): one on the health of a creature that every game runs by itself is kept, and the
+    /// scene host's word that its health came to none there at it, or at one of theirs before, counts from now on (see
+    /// <see cref="TakeOwnEmptied"/>). The scene host's game tells the others that it is through with it (see
+    /// TellStrikeDone).
+    /// </summary>
+    /// <param name="struck">What the blow or touch reached.</param>
+    /// <param name="striker">The player who struck.</param>
+    /// <param name="strike">The number of the strike in the game of that player.</param>
+    private void TookOthersBlow(GameObject struck, ushort striker, uint strike) {
+        if (struck.TryGetComponent<HealthManager>(out var health) && OwnCreatures.Has(struck)) {
+            _othersBlowsTaken[(health, striker)] = strike;
+            if (_emptiedAtBlows.TryGetValue(health, out var at) && at.Striker == striker && at.Strike <= strike) {
+                _emptiedAtBlows.Remove(health);
+                _emptiedWords.Add(health);
+                Logger.Info(
+                    $"[Own creatures] '{OwnCreatures.PlaceOf(struck)}' took blow {strike} of the player {striker} " +
+                    $"here, and goes on as it has no health at its next look, with {health.hp} health here"
+                );
+            }
+        }
+
+        TellStrikeDone(struck, striker, strike);
     }
 
     /// <summary>

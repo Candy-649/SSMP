@@ -246,7 +246,7 @@ internal partial class CoopSave {
     private void RegisterOwnCreatureHooks() {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         OwnThreads.SendToRoomMembers = SendToRoomMembers;
-        CoopHits.ReplayedStrike = TellStrikeDone;
+        CoopHits.ReplayedStrike = TookOthersBlow;
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
@@ -859,7 +859,7 @@ internal partial class CoopSave {
 
         // Its health came to none there, after which the next blow, of any player, plays here as the game has it
         if (update.PartCount == OwnEmptiedPart && hasHealth) {
-            TakeOwnEmptied(player, health);
+            TakeOwnEmptied(player, health, update);
             return;
         }
 
