@@ -154,33 +154,40 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Forgets that the intros of waiting rooms took control from the local player once the game gives it back itself,
-    /// so that it isn't taken again when the rooms start.
+    /// Forgets that the intros of waiting rooms, and the dialogue of a fight held back for the other players, took
+    /// control from the local player once the game gives it back itself, so that it isn't taken again when they go on.
+    /// The map seller's spar, held 1.35 s after her talk while the user's harpoon took control and gave it back,
+    /// took it again as it started, and nothing gave it back until her blow (the user's log of 11-22, 20:38:43.924 to
+    /// 47.008; USER "最开始的时候我飞针完突然卡死在一个地方了，沙克拉打了一下我又好了").
     /// </summary>
     private void ForgetTakenControl() {
         if (_changingHero) {
             return;
         }
 
-        foreach (var room in _bossRooms.Values) {
-            if (room.Wait is { } wait) {
-                wait.RegainedControl = false;
-                wait.StartedAnimation = false;
-                wait.EnabledPause = false;
-            }
+        foreach (var freed in FreedHeroes()) {
+            freed.RegainedControl = false;
+            freed.StartedAnimation = false;
+            freed.EnabledPause = false;
         }
     }
 
     /// <summary>
-    /// Forgets that the intros of waiting rooms stopped the local player from pausing once the game allows it again
-    /// itself.
+    /// Forgets that the intros of waiting rooms, and the dialogue of a fight held back, stopped the local player from
+    /// pausing once the game allows it again itself.
     /// </summary>
     private void ForgetDisabledPause() {
-        foreach (var room in _bossRooms.Values) {
-            if (room.Wait is { } wait) {
-                wait.EnabledPause = false;
-            }
+        foreach (var freed in FreedHeroes()) {
+            freed.EnabledPause = false;
         }
+    }
+
+    /// <summary>
+    /// What was given back to the local player while rooms wait and fights after their dialogue are held back for the
+    /// other players.
+    /// </summary>
+    private IEnumerable<FreedHero> FreedHeroes() {
+        return _bossRooms.Values.Select(room => room.Wait).OfType<FreedHero>().Concat(_heldFights.Values);
     }
 
     /// <summary>
