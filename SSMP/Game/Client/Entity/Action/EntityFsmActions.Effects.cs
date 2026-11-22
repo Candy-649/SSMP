@@ -1127,11 +1127,44 @@ internal static partial class EntityFsmActions {
         }
 
         return false;
+    }
 
-        static bool IsObjectField(FieldInfo field) {
-            return field.FieldType == typeof(FsmOwnerDefault) || field.FieldType == typeof(FsmGameObject) ||
-                   field.FieldType == typeof(FsmEventTarget);
+    /// <summary>
+    /// Whether every object that an action is given, under any name, is the creature that every game runs by itself
+    /// whose FSM runs it, or a part of that creature (see OwnCreatures.Owning). A needle of the boss at the end of the
+    /// second act reads where it is itself as it flies to where it strikes from, and where its hand is as it flies
+    /// back, with the kind of action by which a creature reads where a player is, and looks at no player either way.
+    /// One that is given no object, or a name that holds none, is not.
+    /// </summary>
+    internal static bool LooksOnlyAtItsCreature(FsmStateAction action) {
+        if (action.Fsm?.GameObject is not { } owner || OwnCreatures.Owning(owner) is not { } creature) {
+            return false;
         }
+
+        var looks = false;
+        foreach (var field in FieldsOf(action.GetType(), ObjectFields, IsObjectField)) {
+            // A field that the action leaves unused, or where it keeps what it found
+            if (field.GetValue(action) is FsmGameObject { IsNone: true } ||
+                field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase)) {
+                continue;
+            }
+
+            if (ObjectIn(action, field) is not { } thing || OwnCreatures.Owning(thing) != creature) {
+                return false;
+            }
+
+            looks = true;
+        }
+
+        return looks;
+    }
+
+    /// <summary>
+    /// Whether a field of an action holds an object: as the object itself, as the owner or as where an event goes.
+    /// </summary>
+    private static bool IsObjectField(FieldInfo field) {
+        return field.FieldType == typeof(FsmOwnerDefault) || field.FieldType == typeof(FsmGameObject) ||
+               field.FieldType == typeof(FsmEventTarget);
     }
 
     /// <summary>

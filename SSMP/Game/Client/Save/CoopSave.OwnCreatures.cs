@@ -1263,8 +1263,10 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a state goes by where the players are: one of its actions looks at them (see
-    /// <see cref="PlayerWayActionTypes"/>), or goes on by what such an action of its state machine stored, like the
-    /// look of a boss before it charges at whether the player it goes after hid, which it saw a state before.
+    /// <see cref="LooksAtPlayers"/>), or goes on by what an action of those kinds of its state machine stored, like the
+    /// look of a boss before it charges at whether the player it goes after hid, which it saw a state before. What any
+    /// of them stored counts, whatever it looked at: a choice by where the creature is itself comes out otherwise in a
+    /// game where it stands elsewhere.
     /// </summary>
     private bool GoesByPlayers(FsmState state) {
         var fsm = state.Fsm;
@@ -1282,7 +1284,7 @@ internal partial class CoopSave {
         }
 
         foreach (var action in state.Actions) {
-            if (action.Enabled && (PlayerWayActionTypes.Contains(action.GetType().Name) ||
+            if (action.Enabled && (LooksAtPlayers(action) ||
                                    Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
                                    Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(stored.Contains))) {
                 return true;
@@ -1290,6 +1292,22 @@ internal partial class CoopSave {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether an action looks at where the players are: one of the kinds that do (see
+    /// <see cref="PlayerWayActionTypes"/>) that decides where its state goes by what it reads, or looks at anything
+    /// else than its creature (see Entity.Action.EntityFsmActions.LooksOnlyAtItsCreature). A needle of the boss at the
+    /// end of the second act, which reads where it is itself as it flies to where it strikes from, waited there for the
+    /// scene host's step and was put where the scene host's was, after it had stopped there or while it was still on
+    /// its way, up to 2.3 away, and so as it flew back to its hand, up to 11.7 away (the user's log of 11-22; USER
+    /// "我这边针都摆好了为什么还会动发射位置", "为啥针飞到位置停好之后房主还要挪"). Where it strikes from is where its
+    /// hand aimed, which the hand did as the scene host's.
+    /// </summary>
+    private static bool LooksAtPlayers(FsmStateAction action) {
+        return PlayerWayActionTypes.Contains(action.GetType().Name) &&
+               (Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) ||
+                !Entity.Action.EntityFsmActions.LooksOnlyAtItsCreature(action));
     }
 
     /// <summary>
