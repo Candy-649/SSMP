@@ -151,6 +151,16 @@ internal partial class CoopSave {
     );
 
     /// <summary>
+    /// The actions that pick a way at random by how often each way came before, by name: by how many times in a row it
+    /// came and how many times it did not, which the action keeps for itself in each game, and which no step carries
+    /// (see <see cref="ChoosesByCount"/>).
+    /// </summary>
+    private static readonly HashSet<string> PastPicksActionTypes = [
+        "SendRandomEventV2", "SendRandomEventV3", "SendRandomEventV3ActiveBool", "SendRandomEventV4",
+        "SendRandomEventFair", "SendRandomEventFairConditional"
+    ];
+
+    /// <summary>
     /// The variables that the actions by which a state goes by where the players are store, for each state machine of
     /// a creature that every game runs by itself whose steps this game has looked at (see GoesByPlayers).
     /// </summary>
@@ -1417,6 +1427,13 @@ internal partial class CoopSave {
     /// one (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
     /// host's step came). Its health is no such count: what it does as it has none goes by the scene host's word that
     /// it has none (see CoopSave.OwnHealth).
+    ///
+    /// So does a pick at random by how often each way came before (see <see cref="PastPicksActionTypes"/>): from the
+    /// same roll, a game that went past the pick once, or through it once more, or that picked otherwise there once,
+    /// picks otherwise from then on, through every fight in the room until it is left. The map seller's pick whether
+    /// to charge, which goes by how many times she did not in a row, came out otherwise in the user's game than in
+    /// the scene host's 13 times in the spars of 11-21, each time to be set into the scene host's move (21:30:02.828,
+    /// 8.3 away; USER 11-22 "和沙克拉反复打的话，随机数不会乱掉吗").
     /// </summary>
     private bool ChoosesByCount(FsmState state) {
         var fsm = state.Fsm;
@@ -1434,8 +1451,9 @@ internal partial class CoopSave {
         }
 
         foreach (var action in state.Actions) {
-            if (action.Enabled && Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
-                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains)) {
+            if (action.Enabled && (PastPicksActionTypes.Contains(action.GetType().Name) ||
+                                   Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
+                                   Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains))) {
                 return true;
             }
         }
