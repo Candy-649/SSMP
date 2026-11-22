@@ -2215,12 +2215,16 @@ internal partial class CoopSave {
                 }
             }
 
-            // What the game itself runs when the hero is alive again. Everything above undoes the death by hand, one
-            // field at a time, and this is the half that cannot be written that way: it lets go of the swing the
-            // death froze part-way through, and it tells the FSMs of the hero that the death was called off. The
-            // death told every one of them to cancel, and nothing else ever tells them otherwise - so without this a
-            // player who was pulled back up walks, looks and swings, and touches nothing.
-            hero.HeroRespawned();
+            // What the game itself runs when the hero is alive again (HeroController.HeroRespawned), but for its word
+            // to the room. The death froze the hero part-way through a swing, and nothing else lets go of it: without
+            // this a player who was pulled back up walks, looks and swings, and touches nothing. The word, "HERO
+            // RESPAWNED" from the hero's ProxyFSM, goes to the room's listeners only, none of the hero's, which take
+            // it as the hero come back from a death: the map seller and the other duelist say the line of a lost
+            // duel, a memory plays its waking, a platform of a boss goes. The map seller's spar that both won ended on
+            // that line in the game of the player who had been pulled up (USER 11-22 "改", to every player hearing
+            // the line of a won duel once she is beaten).
+            playerData.disableSaveQuit = false;
+            hero.CancelAttack();
 
             // Giving control back writes the state of the player straight into the field, without telling the part
             // that decides which animation belongs to that state. Left alone it stays on the last thing it was told,
