@@ -207,11 +207,12 @@ internal partial class CoopSave {
     /// <summary>
     /// The state machines of creatures that every game runs by itself that a blow of this game's player set off on a
     /// way of their own here, in a game that follows the scene host's, with until when, in unscaled time, the steps of
-    /// the scene host's of them are from before the blow there (see <see cref="AwaitsLocalBlow"/>), and the number of
-    /// the blow (CoopHits.LocalStrikeNumber), which the answer of that game names: an answer to an earlier blow is
-    /// from before this one there.
+    /// the scene host's of them are from before the blow there (see <see cref="AwaitsLocalBlow"/>), the number of the
+    /// blow (CoopHits.LocalStrikeNumber), which the answer of that game names: an answer to an earlier blow is from
+    /// before this one there, and the state that the blow set it off into here, the first of its way, into which a
+    /// blow there turns it only from some states (see <see cref="CanTurnInto"/>).
     /// </summary>
-    private readonly Dictionary<Fsm, (float Until, uint Strike)> _awaitedBlows = new();
+    private readonly Dictionary<Fsm, (float Until, uint Strike, string Into)> _awaitedBlows = new();
 
     /// <summary>
     /// The newest step of the scene host's of each state machine in <see cref="_awaitedBlows"/> that was let go of as
@@ -434,7 +435,11 @@ internal partial class CoopSave {
         // by itself, like a tink, waits for no answer (review of 45dad32)
         if (CoopHits.IsMakingLocalStrike && OwnCreatures.FollowsSceneHost(creature) &&
             (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
-            _awaitedBlows[self] = (Time.unscaledTime + LocalBlowAnswerWait, CoopHits.LocalStrikeNumber);
+            var strike = CoopHits.LocalStrikeNumber;
+            var into = _awaitedBlows.TryGetValue(self, out var armed) && armed.Strike == strike
+                ? armed.Into
+                : toState.Name;
+            _awaitedBlows[self] = (Time.unscaledTime + LocalBlowAnswerWait, strike, into);
             _keptOwnSteps.Remove(self);
         }
 
@@ -889,15 +894,32 @@ internal partial class CoopSave {
 
         // One that the scene host's game took before it had a blow of this game's player that set it off on a way of
         // its own here is let go of (see AwaitsLocalBlow), and leaves the steps that it took here as they are, among
-        // which the answer finds the one that the blow set off
+        // which the answer finds the one that the blow set off, as the blow turns the creature there into that way as
+        // well. One into a state from which no blow turns it into that way is its way there, which the blow, coming
+        // later, leaves as it is: it is taken at once, and the wait ends, as what the blow set off here was behind the
+        // scene host's creature (USER 11-22 "这个等反应连晕倒起来都能扣下吗，这个优先级怎么看都不对吧", "那如果在这期间出
+        // 招了，是不是你出招也会扣下"). The map seller that the user struck in her stun at 16:42:26.849, woken there by
+        // Luminary's blow, lay in it here until 27.846, as her waking came at 27.038 and her next move after it, which
+        // struck Luminary there at 27.268 (the user's log and Luminary's of 11-22)
         if (update.PartCount != OwnToldPart && AwaitsLocalBlow(fsm) && !HasOwnStep(fsm, update)) {
-            _stepsBeforeBlow[fsm] = (player, update);
+            var into = _awaitedBlows[fsm].Into;
+            if (CanTurnInto(fsm, update.StateName, into)) {
+                _stepsBeforeBlow[fsm] = (player, update);
+                Logger.Info(
+                    $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+                    "game before that game had the blow of this game's player that set it off on a way of its own " +
+                    "here, which it goes on with"
+                );
+                return;
+            }
+
+            _awaitedBlows.Remove(fsm);
+            _stepsBeforeBlow.Remove(fsm);
             Logger.Info(
                 $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
-                "game before that game had the blow of this game's player that set it off on a way of its own here, " +
-                "which it goes on with"
+                $"game before that game had the blow of this game's player that set it off into '{into}' here, " +
+                "into which no blow turns it from there, and takes the step"
             );
-            return;
         }
 
         var transform = creature.transform;
@@ -1559,9 +1581,9 @@ internal partial class CoopSave {
     /// off on a way of its own here (see _awaitedBlows): until the scene host's game answers the blow with a step that
     /// it set off there, or tells that it is through with the blow (see <see cref="TakeStrikeDone"/>), or for
     /// <see cref="LocalBlowAnswerWait"/> where neither comes, after which the newest of them is taken (see
-    /// <see cref="UpdateAwaitedBlows"/>), or a later one as it comes. Such a step is let go of, as what the blow set
-    /// off here
-    /// is this game's to play (USER 11-17 "本地化就是为了让自己的怪是活的"): the boss at the end of the second act, killed
+    /// <see cref="UpdateAwaitedBlows"/>), or a later one as it comes. Such a step is let go of where a blow there can
+    /// turn the creature from its state into what the blow set off here (see <see cref="CanTurnInto"/>), as that is
+    /// this game's to play (USER 11-17 "本地化就是为了让自己的怪是活的"): the boss at the end of the second act, killed
     /// by the user's blow here, rose and roared once more, moved 14 units, and two of its blades set off to strike, by
     /// steps of its fight that Luminary's game took in the 0.36 s before it had the blow (the user's log of 11-21,
     /// 21:52:36.194 to 36.656).
@@ -1578,6 +1600,15 @@ internal partial class CoopSave {
         _awaitedBlows.Remove(fsm);
         _stepsBeforeBlow.Remove(fsm);
         return false;
+    }
+
+    /// <summary>
+    /// Whether anything, a blow among them, can turn a state machine from a state into another at once: by a way on
+    /// from that state or from any (see <see cref="_awaitedBlows"/>). The map seller goes into 'Stun Damage' only from
+    /// 'Stunned', and into 'Defeat Start' from any state.
+    /// </summary>
+    private static bool CanTurnInto(Fsm fsm, string from, string into) {
+        return fsm.GetState(from).Transitions.Concat(fsm.GlobalTransitions).Any(way => way.ToState == into);
     }
 
     /// <summary>
