@@ -1330,7 +1330,9 @@ internal partial class CoopSave {
     /// <see cref="LooksAtPlayers"/>), or goes on by what an action of those kinds of its state machine stored, like the
     /// look of a boss before it charges at whether the player it goes after hid, which it saw a state before. What any
     /// of them stored counts, whatever it looked at: a choice by where the creature is itself comes out otherwise in a
-    /// game where it stands elsewhere.
+    /// game where it stands elsewhere. An action that only runs its course by it, like a flight over a time by how far
+    /// it goes, chooses nothing (see Entity.Action.EntityFsmActions.ChoosesWhereItGoes): the flight ends into the same
+    /// state in every game.
     /// </summary>
     private bool GoesByPlayers(FsmState state) {
         var fsm = state.Fsm;
@@ -1349,7 +1351,7 @@ internal partial class CoopSave {
 
         foreach (var action in state.Actions) {
             if (action.Enabled && (LooksAtPlayers(action) ||
-                                   Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
+                                   Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
                                    Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(stored.Contains))) {
                 return true;
             }
@@ -1370,7 +1372,7 @@ internal partial class CoopSave {
     /// </summary>
     private static bool LooksAtPlayers(FsmStateAction action) {
         return PlayerWayActionTypes.Contains(action.GetType().Name) &&
-               (Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) ||
+               (Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) ||
                 !Entity.Action.EntityFsmActions.LooksOnlyAtItsCreature(action));
     }
 
@@ -1521,7 +1523,7 @@ internal partial class CoopSave {
         }
 
         foreach (var action in state.Actions) {
-            if (action.Enabled && Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
+            if (action.Enabled && Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
                 Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains)) {
                 return true;
             }

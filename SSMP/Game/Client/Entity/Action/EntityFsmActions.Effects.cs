@@ -1183,6 +1183,43 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Whether an action chooses where its own FSM goes: it is given an event that it may send it on with (see
+    /// <see cref="DecidesWhereItGoes"/>) other than one that it sends only as it runs its course (see
+    /// <see cref="IsCourseEvent"/>), which says when the state goes on but not where: the same way in every game, a
+    /// moment apart. The needles of the boss at the end of the second act fly to where they strike from and back to
+    /// their hand over a time by how far it is, and the end of each flight counted as a choice by where they were: the
+    /// games that follow the scene host's put them where the scene host's were as its step came, while they were still
+    /// on their way, up to 15.7 away as one flew back to its hand (Luminary's log of 11-22, 20:44:40.198; USER "为啥直接
+    /// 放回去，这个不算一招之内吗").
+    /// </summary>
+    internal static bool ChoosesWhereItGoes(FsmStateAction action) {
+        foreach (var field in FieldsOf(action.GetType(), EventFields, IsEventField)) {
+            if (IsCourseEvent(field)) {
+                continue;
+            }
+
+            switch (field.GetValue(action)) {
+                case FsmEvent { Name.Length: > 0 }:
+                case FsmEvent[] events when Array.Exists(events, fsmEvent => fsmEvent is { Name.Length: > 0 }):
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an event field of an action is one that the action sends only as it runs its course: as it finishes
+    /// (finishEvent), or as its animation completes (animationCompleteEvent) or comes to a frame
+    /// (animationTriggerEvent).
+    /// </summary>
+    private static bool IsCourseEvent(FieldInfo field) {
+        return field.Name.Equals("finishEvent", StringComparison.OrdinalIgnoreCase) ||
+               field.Name.Equals("animationCompleteEvent", StringComparison.OrdinalIgnoreCase) ||
+               field.Name.Equals("animationTriggerEvent", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Whether an action is given an event of a name, which it may send its own FSM on to another state with.
     /// </summary>
     private static bool IsGiven(FsmStateAction action, string eventName) {
