@@ -740,6 +740,7 @@ internal static partial class SharedDice {
     public static void ForgetRollNames() {
         NamedRollers.Clear();
         FoundMachines.Clear();
+        PastPickers.Clear();
         ForgetTables();
     }
 

@@ -151,16 +151,6 @@ internal partial class CoopSave {
     );
 
     /// <summary>
-    /// The actions that pick a way at random by how often each way came before, by name: by how many times in a row it
-    /// came and how many times it did not, which the action keeps for itself in each game, and which no step carries
-    /// (see <see cref="ChoosesByCount"/>).
-    /// </summary>
-    private static readonly HashSet<string> PastPicksActionTypes = [
-        "SendRandomEventV2", "SendRandomEventV3", "SendRandomEventV3ActiveBool", "SendRandomEventV4",
-        "SendRandomEventFair", "SendRandomEventFairConditional"
-    ];
-
-    /// <summary>
     /// The variables that the actions by which a state goes by where the players are store, for each state machine of
     /// a creature that every game runs by itself whose steps this game has looked at (see GoesByPlayers).
     /// </summary>
@@ -587,7 +577,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The word of a step that a creature that every game runs by itself took here, with how fast it went and fell,
-    /// what the state that it leaves worked with and where its walk is (see GamePatcher.WriteWalk), which a game that
+    /// what the state that it leaves worked with, what its picks at random kept of their past picks (see
+    /// SharedDice.WritePastPicks) and where its walk is (see GamePatcher.WriteWalk), which a game that
     /// waits for the step takes it with: a boss reckons the speed of its jump from where the player it goes after
     /// stands, which each game has a little elsewhere, and jumped as far as its own game had it, to be moved where the
     /// scene host's landed as it landed (USER 11-15, of that fight, "只有一步闪了一下，其他时候都很丝滑"). So does where the
@@ -618,6 +609,7 @@ internal partial class CoopSave {
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream)) {
             worked.Write(writer);
+            SharedDice.WritePastPicks(writer, fsm);
             GamePatcher.WriteWalk(writer, machine.gameObject);
         }
 
@@ -971,10 +963,11 @@ internal partial class CoopSave {
 
             // A member who has just come in: its walk goes on where the scene host's walks now, rather than from the
             // fresh start that the room gave it as it came in, which took it to the same step within a few frames
-            // (review)
+            // (review), and so do its picks at random from what the scene host's kept, where it has none
             if (newest && update.Values.Count > OwnHealthValue) {
                 using var reader = new BinaryReader(new MemoryStream(update.Bytes));
                 ToldValues.Read(reader);
+                SharedDice.PutPastPicks(reader, fsm);
                 GamePatcher.PutWalk(reader, creature);
             }
 
@@ -1122,8 +1115,9 @@ internal partial class CoopSave {
     /// <summary>
     /// Puts a creature that every game runs by itself where the scene host's was as it took a step, turned the way it
     /// was turned there, going as fast and falling as it fell there, with the rolls and the song that it took the step
-    /// with, with what the state that its state machine left worked with there, and with its walk where it was there
-    /// (see GamePatcher.PutWalk). A state machine that makes no move of it, like the count of the knight's stun, takes
+    /// with, with what its picks at random kept of their past picks there (see SharedDice.PutPastPicks), with what the
+    /// state that its state machine left worked with there, and with its walk where it was there (see
+    /// GamePatcher.PutWalk). A state machine that makes no move of it, like the count of the knight's stun, takes
     /// the step where the creature is here, and so does a step that a blow of another player than the scene host's set
     /// off there (see <see cref="MovesAt"/>).
     /// </summary>
@@ -1131,6 +1125,7 @@ internal partial class CoopSave {
         var creature = fsm.GameObject;
         using var reader = new BinaryReader(new MemoryStream(update.Bytes));
         var worked = ToldValues.Read(reader);
+        SharedDice.PutPastPicks(reader, fsm);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         if (MovesAt(fsm, update)) {
             // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts
@@ -1427,13 +1422,6 @@ internal partial class CoopSave {
     /// one (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
     /// host's step came). Its health is no such count: what it does as it has none goes by the scene host's word that
     /// it has none (see CoopSave.OwnHealth).
-    ///
-    /// So does a pick at random by how often each way came before (see <see cref="PastPicksActionTypes"/>): from the
-    /// same roll, a game that went past the pick once, or through it once more, or that picked otherwise there once,
-    /// picks otherwise from then on, through every fight in the room until it is left. The map seller's pick whether
-    /// to charge, which goes by how many times she did not in a row, came out otherwise in the user's game than in
-    /// the scene host's 13 times in the spars of 11-21, each time to be set into the scene host's move (21:30:02.828,
-    /// 8.3 away; USER 11-22 "和沙克拉反复打的话，随机数不会乱掉吗").
     /// </summary>
     private bool ChoosesByCount(FsmState state) {
         var fsm = state.Fsm;
@@ -1451,9 +1439,8 @@ internal partial class CoopSave {
         }
 
         foreach (var action in state.Actions) {
-            if (action.Enabled && (PastPicksActionTypes.Contains(action.GetType().Name) ||
-                                   Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
-                                   Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains))) {
+            if (action.Enabled && Entity.Action.EntityFsmActions.DecidesWhereItGoes(action) &&
+                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains)) {
                 return true;
             }
         }
