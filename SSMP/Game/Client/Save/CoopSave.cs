@@ -793,7 +793,6 @@ internal partial class CoopSave {
         _toldBehind.Clear();
         _owedWaits.Clear();
         _waitsBehind.Clear();
-        _waitedOut.Clear();
         _waysThrough.Clear();
         _awaitedBlows.Clear();
         _stepsBeforeBlow.Clear();
