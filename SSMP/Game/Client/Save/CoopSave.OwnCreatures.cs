@@ -948,9 +948,14 @@ internal partial class CoopSave {
         // once, which the other had told it there as it went into that attack: the turn here then ended into its
         // rest, whose look took the place of the cast, and the boss waited in its lift for a moment of the cast that
         // never came, until it was set on 10 s later (the user's log of 11-23, 20:07:35.097 to 20:07:45.433; USER
-        // "这个丝母闪来闪去")
+        // "这个丝母闪来闪去"). Not one for a state machine that waits for the answer to a blow of this game's
+        // player, which is looked at as it comes against what the blow set off here (see AwaitsLocalBlow): the word
+        // that the scene host's game is through with the blow, which goes at once, went past the steps there from
+        // before the blow, which waited behind the move, and these were then taken over what the blow set off here,
+        // and its answer played that again from its start (review of 1397e10)
         if (!_takingStepsAfterMove && update.PartCount is not (OwnEmptiedPart or OwnStrikeDonePart) &&
-            PlaysMoveThrough(creature) is { } waiting) {
+            PlaysMoveThrough(creature) is { } waiting &&
+            (PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName) is not { } its || !AwaitsLocalBlow(its.Fsm))) {
             var afterMove = _stepsAfterMove[waiting].Steps;
             afterMove.Add((player, update));
             Logger.Info(
