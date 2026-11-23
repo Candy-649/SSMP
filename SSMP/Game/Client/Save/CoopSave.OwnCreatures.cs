@@ -238,13 +238,15 @@ internal partial class CoopSave {
 
     /// <summary>
     /// While this game sets a creature onto the scene host's latest steps: the last of them of each state machine of
-    /// the creature and of its parts, which plays as the game has it (see <see cref="EnterQuietOnTheWay"/>).
+    /// the creature and of its parts, and apart from it its last pick, which play as the game has them (see
+    /// <see cref="EnterQuietOnTheWay"/>).
     /// </summary>
     private readonly HashSet<CoopSaveUpdate> _lastSteps = new();
 
     /// <summary>
     /// The state machines that this game set on their way into the last of the scene host's latest steps (see
-    /// <see cref="_lastSteps"/>), what they go to from there on playing as the game has it.
+    /// <see cref="_lastSteps"/>), or that got to its state by themselves, what they go to from there on playing as
+    /// the game has it.
     /// </summary>
     private readonly HashSet<Fsm> _atLastStep = new();
 
@@ -581,6 +583,14 @@ internal partial class CoopSave {
             }
 
             SendToRoomMembers(update);
+        }
+
+        // The state of the last of the scene host's latest steps of a state machine that this game sets the creature
+        // onto, which it gets to by itself on the way, plays as the game has it, and the step, if it is still to
+        // come, finds it there (review of 4362d0d: the last step kept, got to by itself as the one before it
+        // finished at once, made no sound)
+        if (_lastSteps.Count > 0 && IsLastStepState(self, toState)) {
+            _atLastStep.Add(self);
         }
 
         EnterOwnState(orig, self, toState);
@@ -2148,9 +2158,12 @@ internal partial class CoopSave {
                 PlaysMoveThrough(fsm.GameObject) is { } waiting && _stepsAfterMove.Remove(waiting, out var queued)
                     ? queued
                     : [];
-            var lastOf = new Dictionary<(string, string), CoopSaveUpdate>();
+            // The last word of each state machine of the creature and of its parts, and apart from it its last pick,
+            // which tells a part of the room and takes the state machine nowhere (review of 4362d0d: the step into
+            // the state that picks, which the creature stayed in, made no sound, as the pick was the last word)
+            var lastOf = new Dictionary<(string, string, bool), CoopSaveUpdate>();
             foreach (var (_, step) in kept.Concat(after)) {
-                lastOf[(step.ObjectPath, step.FsmName)] = step;
+                lastOf[(step.ObjectPath, step.FsmName, step.PartCount == OwnPickPart)] = step;
             }
 
             _lastSteps.UnionWith(lastOf.Values);
@@ -2183,6 +2196,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether a state that a state machine of a creature that every game runs by itself goes to is that of the last
+    /// of the scene host's latest words of it that this game sets the creature onto, a pick aside (see
+    /// <see cref="_lastSteps"/>).
+    /// </summary>
+    private bool IsLastStepState(Fsm fsm, FsmState state) {
+        var place = OwnCreatures.PlaceOf(fsm.GameObject);
+        return _lastSteps.Any(
+            last => last.PartCount != OwnPickPart && last.ObjectPath == place && last.FsmName == fsm.Name &&
+                    last.StateName == state.Name
+        );
+    }
+
+    /// <summary>
     /// Takes a word of what a step of the scene host's did there, a catch, a strike back, a hurt of a player or a pick,
     /// which, as the last of the scene host's latest words of its state machine that this game sets the creature onto
     /// (see <see cref="_lastSteps"/>), plays as the game has it, with what it sets off (see
@@ -2209,10 +2235,11 @@ internal partial class CoopSave {
     /// <see cref="UpdateKeptSteps"/>): a state on the way, which the next step takes it out of at once, plays no sound
     /// once and shakes no camera (see <see cref="NoisesOnTheWay"/>), as the sounds of all of them would come at once
     /// and their shakes pile up (USER 11-23 "那就把声音和震屏关了"). The last of the latest steps of each state machine
-    /// plays as the game has it, from the way into it on (see <see cref="_atLastStep"/>), and so does a word of what
-    /// a step did there that is the last (see <see cref="TakeWhatStepDid"/>), a move that this game plays by itself,
-    /// the steps after which wait for its end (see <see cref="PlaysOwnMove"/>), and what such a state sets off in
-    /// other state machines as it starts.
+    /// plays as the game has it, from the way into it on, or from where it gets to its state by itself (see
+    /// <see cref="_atLastStep"/>), and so do a word of what a step did there that is the last (see
+    /// <see cref="TakeWhatStepDid"/>), a move that this game plays by itself, the steps after which wait for its end
+    /// (see <see cref="PlaysOwnMove"/>), and what such a state sets off in other state machines as it starts. What a
+    /// state on the way sets off in a part stays as quiet as it.
     /// </summary>
     private void EnterQuietOnTheWay(Action<Fsm, FsmState> orig, Fsm fsm, FsmState toState) {
         if (!_takingKeptSteps && !_settingOntoLatest) {
