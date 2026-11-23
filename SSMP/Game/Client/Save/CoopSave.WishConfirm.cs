@@ -216,11 +216,9 @@ internal partial class CoopSave {
         typeof(DialogueYesNoBox).GetField("requiredItemAmounts", InstanceFlags);
 
     /// <summary>
-    /// The fields with the animations of a panel, looked up from a panel of the game the first time one is seen.
+    /// The field with the closing animation of a panel, looked up from a panel of the game the first time one is seen.
     /// </summary>
     private static FieldInfo? _paneClosingField;
-
-    private static FieldInfo? _paneOpeningField;
 
     private static bool _paneFieldsLookedUp;
 
@@ -2047,7 +2045,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a box is in use, either because it holds an answer of its own or because its panel is still animating.
+    /// Whether a box is in use: it holds its answers from when it is asked to open until its panel has closed, when it
+    /// runs one of them, and one whose answers were taken off still closes. What its panel keeps of its opening says
+    /// nothing: the game never lets go of it, as the end of that animation lets go of what it keeps of the closing
+    /// instead, and every box counted as in use for good once one had opened, which kept the question whether to
+    /// watch another player's round from ever being asked (the user's log of 11-23, the contest of throwing pins;
+    /// USER "这个飞镖游戏没有观战"), and a question of a member that waits for a free box from being shown.
     /// </summary>
     private static bool IsBoxBusy(object? box) {
         if (box == null) {
@@ -2065,10 +2068,9 @@ internal partial class CoopSave {
         if (!_paneFieldsLookedUp) {
             _paneFieldsLookedUp = true;
             _paneClosingField = pane.GetType().GetField("closeAnimRoutine", InstanceFlags);
-            _paneOpeningField = pane.GetType().GetField("openAnimRoutine", InstanceFlags);
         }
 
-        return _paneClosingField?.GetValue(pane) != null || _paneOpeningField?.GetValue(pane) != null;
+        return _paneClosingField?.GetValue(pane) != null;
     }
 
     /// <summary>
