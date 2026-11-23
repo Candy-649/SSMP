@@ -267,6 +267,15 @@ internal partial class CoopHits {
     public static Action<GameObject, ushort, uint>? ReplayedStrike { get; set; }
 
     /// <summary>
+    /// Whether a creature that every game runs by itself, which an object is or is a part of, plays a move through here
+    /// before steps of the scene host's that came meanwhile (see CoopSave.KeepsForAfterMove): a replay of a blow, a
+    /// touch or a tink of another player on it waits until it has taken them, as they came before it there (see
+    /// <see cref="HoldReplay"/>; review of 06e0bad: a blow of the scene host's player set it off on a way of its own
+    /// here in the move before, and the steps from before the blow there played over that way after it).
+    /// </summary>
+    public static Func<GameObject, bool>? WaitsForAMove { get; set; }
+
+    /// <summary>
     /// Whether the hit being replayed did not count on the thing that breaks in the partner's game, so it doesn't count
     /// here either (see <see cref="CoopHitUpdate.Uncounted"/>).
     /// </summary>
@@ -993,11 +1002,11 @@ internal partial class CoopHits {
     /// and a vine took the first and turned the second away in one game only. It opened in one game and stood in the
     /// other (USER 10-29, "两边没有同时破墙，我都进去了，她还在外面打门"). The same as <see cref="LetReplaysPastHitPause"/>
     /// does for the game's own breakable things. A replay that comes while others for the same thing wait, waits behind
-    /// them.
+    /// them, and so does one on a creature that plays a move through here (see <see cref="WaitsForAMove"/>).
     /// </summary>
     /// <returns>Whether the replay waits.</returns>
     private bool HoldReplay(CoopHitUpdate update, GameObject target) {
-        if (!IsHeld(target) && !IsBetweenHits(target)) {
+        if (!IsHeld(target) && !IsBetweenHits(target) && WaitsForAMove?.Invoke(target) != true) {
             return false;
         }
 
@@ -1050,7 +1059,11 @@ internal partial class CoopHits {
         try {
             foreach (var held in _releasingReplays) {
                 var update = held.Update;
-                var what = update.Kind == CoopHitKind.ObjectTouch ? "touch" : "hit";
+                var what = update.Kind switch {
+                    CoopHitKind.ObjectTouch => "touch",
+                    CoopHitKind.ObjectEvents => "events",
+                    _ => "hit"
+                };
                 if (held.Target == null) {
                     NoteTraffic(
                         update.Scene, update.Path,
@@ -1059,15 +1072,20 @@ internal partial class CoopHits {
                     continue;
                 }
 
-                // Behind another for the same thing that still waits, or the thing is still between hits
+                // Behind another for the same thing that still waits, or the thing is still between hits, which events
+                // do not wait for, or its creature still plays a move through here
                 var waited = now - held.Since;
-                if (waited < HeldReplayTime && (IsHeld(held.Target) || IsBetweenHits(held.Target))) {
+                var waits = IsHeld(held.Target) || WaitsForAMove?.Invoke(held.Target) == true ||
+                            (update.Kind != CoopHitKind.ObjectEvents && IsBetweenHits(held.Target));
+                if (waited < HeldReplayTime && waits) {
                     _heldReplays.Add(held);
                     continue;
                 }
 
                 if (update.Kind == CoopHitKind.ObjectTouch) {
                     ReplayTouch(update, waited);
+                } else if (update.Kind == CoopHitKind.ObjectEvents) {
+                    ReplayObjectEvents(update, waited);
                 } else {
                     ReplayHit(update, waited);
                 }
@@ -3061,9 +3079,12 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Tells a state machine of the room the events that it was told in the partner's game, each with the dice their
-    /// game had as it was told: by a tink of the partner's attack, or by the director of a game of the festival.
+    /// game had as it was told: by a tink of the partner's attack, or by the director of a game of the festival. Ones
+    /// for a creature that plays a move through here wait until it is through (see <see cref="WaitsForAMove"/>).
     /// </summary>
-    private void ReplayObjectEvents(CoopHitUpdate update) {
+    /// <param name="update">The events.</param>
+    /// <param name="waited">For ones that waited, how long, in seconds; null for ones that have just come.</param>
+    private void ReplayObjectEvents(CoopHitUpdate update, float? waited = null) {
         var target = FindPlace(update);
         if (target == null) {
             NotReplayed(update, "events", "the object is not here");
@@ -3079,6 +3100,11 @@ internal partial class CoopHits {
         var told = fsms[update.Index];
         if (!told.isActiveAndEnabled || !IsRoomObject(told)) {
             NotReplayed(update, "events", "the state machine is switched off or not a part of the room here");
+            return;
+        }
+
+        if (waited == null && WaitsForAMove?.Invoke(target) == true) {
+            _heldReplays.Add((update, target, Time.unscaledTime));
             return;
         }
 
