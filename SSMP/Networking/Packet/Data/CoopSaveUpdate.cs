@@ -172,6 +172,12 @@ internal class CoopSaveUpdate : IPacketData {
     public byte[] Bytes { get; set; } = [];
 
     /// <summary>
+    /// For a step of a creature that every game runs by itself, when this game got it, in seconds of real time. It is
+    /// not sent.
+    /// </summary>
+    public float CameAt { get; set; }
+
+    /// <summary>
     /// A copy of this update with lists of its own, for sending the same update to one more player.
     /// </summary>
     public CoopSaveUpdate Copy() {

@@ -240,7 +240,7 @@ internal partial class CoopSave {
             KeepOut(fsm, catchState);
         }
 
-        orig(fsm, toState);
+        EnterQuietOnTheWay(orig, fsm, toState);
     }
 
     /// <summary>

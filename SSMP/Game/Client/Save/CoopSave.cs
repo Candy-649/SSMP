@@ -1256,6 +1256,7 @@ internal partial class CoopSave {
                 OnDeliveryLooks(player, update);
                 break;
             case CoopSaveUpdateKind.OwnCreature:
+                update.CameAt = Time.unscaledTime;
                 OnOwnCreature(player, update);
                 break;
             case CoopSaveUpdateKind.QuestShopPicks:
