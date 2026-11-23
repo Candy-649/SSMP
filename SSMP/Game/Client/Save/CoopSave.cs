@@ -556,6 +556,14 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a creature through its move here takes the steps of the scene host's
+        // that came meanwhile
+        try {
+            UpdateStepsAfterMove();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         if (IsGroupComplete(marker, members)) {
             UpdateCheckedPlayTime(marker);
             ReleaseHold(hero);
@@ -768,11 +776,13 @@ internal partial class CoopSave {
         _playerWayValues.Clear();
         _countedValues.Clear();
         _makesMoves.Clear();
+        _putsItself.Clear();
         _fightsOn.Clear();
         _beforeTalkEnd.Clear();
         _picks.Clear();
         _ownWays.Clear();
         _keptOwnSteps.Clear();
+        _stepsAfterMove.Clear();
         _waysThrough.Clear();
         _awaitedBlows.Clear();
         _stepsBeforeBlow.Clear();

@@ -178,6 +178,13 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, bool> _makesMoves = new();
 
     /// <summary>
+    /// Whether a step of the scene host's into each state of each state machine of a creature that every game runs by
+    /// itself, whose steps this game has taken, leads it on a way that puts it at a place of its own (see
+    /// PutsItselfOnItsWay).
+    /// </summary>
+    private readonly Dictionary<(Fsm Fsm, string State), bool> _putsItself = new();
+
+    /// <summary>
     /// The state machines of creatures that every game runs by itself that took a step here that a blow set off, of
     /// this game's player or another's as it came, or a hurt of a player (see CoopSave.OwnHits), and go on from there
     /// by themselves until they next wait for a step of the scene host's (see TakeOwnStep).
@@ -196,6 +203,20 @@ internal partial class CoopSave {
     /// <see cref="TakeKeptSteps"/>).
     /// </summary>
     private bool _takingKeptSteps;
+
+    /// <summary>
+    /// The steps of the scene host's, with whose game they came from, that came for a state machine of a creature that
+    /// every game runs by itself while it was still on its way to steps of the scene host's that it gets to by itself
+    /// (see <see cref="_keptOwnSteps"/>), from the first one that it does not get to by itself on, as they came: it
+    /// plays its move through, and takes them then (see <see cref="KeepsForAfterMove"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, List<(ClientPlayerData Player, CoopSaveUpdate Step)>> _stepsAfterMove = new();
+
+    /// <summary>
+    /// Whether this game takes the steps of the scene host's that a state machine kept for after its move (see
+    /// <see cref="UpdateStepsAfterMove"/>).
+    /// </summary>
+    private bool _takingStepsAfterMove;
 
     /// <summary>
     /// The steps of the scene host's that a state machine of a creature that every game runs by itself went on its way
@@ -875,6 +896,17 @@ internal partial class CoopSave {
         // its own player or a talk by itself (see CoopSave.OwnTalks, CoopSave.OwnCatches)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
 
+        // One that comes while steps of the scene host's before it wait for the creature here to play its move through
+        // waits behind them, as it came, whatever takes it then (see KeepsForAfterMove)
+        if (!_takingStepsAfterMove && _stepsAfterMove.TryGetValue(fsm, out var afterMove)) {
+            afterMove.Add((player, update));
+            Logger.Info(
+                $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+                $"game, which waits behind {afterMove.Count - 1} step(s) of that game until its move is through here"
+            );
+            return;
+        }
+
         // The answer of the scene host's game to a blow of this game's player that set it off on a way of its own here:
         // what that game takes from then on comes after the blow there (see AwaitsLocalBlow), whatever takes this one
         // (review of 45dad32: one that came in a leap was kept for its end, and the wait went on). One to an earlier
@@ -943,12 +975,17 @@ internal partial class CoopSave {
         // before this one that it was to get to by itself, and has not, are taken first, as they came, before this one
         // tells whom it goes after and that its fight is on, and one that it played here already is past them (see
         // TakeKeptSteps; review of a0d1558: whom the last kept step went after stood, and the first step into the
-        // fight, kept, ran the talk on the way)
+        // fight, kept, ran the talk on the way), but while it is still on its way to them, as it plays its move
+        // through, which this one waits for (see KeepsForAfterMove)
         var keeps = found == null && update.PartCount != OwnToldPart && !_takingKeptSteps &&
                     ReachesByItself(fsm, update.StateName);
         if (found != null && !_takingKeptSteps) {
             _keptOwnSteps.Remove(fsm);
         } else if (found == null && !keeps) {
+            if (KeepsForAfterMove(player, fsm, update)) {
+                return;
+            }
+
             TakeKeptSteps(fsm);
         }
 
@@ -1135,6 +1172,7 @@ internal partial class CoopSave {
             (moves ? $"game{(update.PartCount == OwnHostStruckPart ? " at a blow there" : "")}, where it was there, " +
                      $"{away:F1} away"
                 : update.PartCount == OwnStruckPart ? $"game at a blow there, where it is here, {away:F1} away"
+                : MakesMoves(fsm) ? $"game, where it is here, {away:F1} away, as its move puts it at a place of its own"
                 : "game, where it is here") + BesideAsTold(update)
         );
     }
@@ -1407,7 +1445,9 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether a step of the scene host's puts a creature that every game runs by itself where the scene host's was as
     /// it took it: a step of a state machine that makes its moves (see MakesMoves), which no blow of another player
-    /// than the scene host's set off there. The game takes what a blow sets off at once, the stun that it counts too,
+    /// than the scene host's set off there, into a move that puts it at no place of its own on its way (see
+    /// <see cref="PutsItselfOnItsWay"/>), or one that tells a member who has just come in where it is. The game takes
+    /// what a blow sets off at once, the stun that it counts too,
     /// as the knockback of the blow starts, which moves the creature only over the next moment: where it was there as
     /// it took such a step is where it was before the knockback. The game of the player who struck had the blow and
     /// its knockback a moment before the step came, and so had every other game, which that player's game told of the
@@ -1421,7 +1461,137 @@ internal partial class CoopSave {
     /// USER "第一次瘫痪，我是向右飞针的，但是我朋友那边boss是向左弹开虚弱的").
     /// </summary>
     private bool MovesAt(Fsm fsm, CoopSaveUpdate update) {
-        return MakesMoves(fsm) && update.PartCount != OwnStruckPart;
+        return MakesMoves(fsm) && update.PartCount != OwnStruckPart &&
+               (update.PartCount == OwnToldPart || !PutsItselfOnItsWay(fsm, update.StateName));
+    }
+
+    /// <summary>
+    /// Whether a step of the scene host's into a state takes a state machine, on the one way that it goes on from there
+    /// by itself and through no state whose way on the others wait for, to an action that puts its creature at a place
+    /// of its own, as a whole: a place in the values of its state machine, which come as in every game, or by where a
+    /// part of its own is, which is where it is there too, and none that an action on the way found by where a player
+    /// is or where it is itself (see <see cref="FindsAPlace"/>). The move takes it there from where it is here, as from
+    /// where it was there: put where the scene host's was as the step came, a blade of the boss at the end of the
+    /// second act, a moment behind, still on its way back to its hand here as its next strike came, jumped to where it
+    /// was there, up to 9.7 away, and flew from there to where it strikes from, which its hand had set as there
+    /// (Luminary's log of 11-22, 20:48:39.133; USER 11-23 "那指刃不就是只是要正常走下一招飞过去吗", "为啥要瞬移过去").
+    /// </summary>
+    private bool PutsItselfOnItsWay(Fsm fsm, string stateName) {
+        if (!_putsItself.TryGetValue((fsm, stateName), out var puts)) {
+            puts = PutsItselfAtItsOwnPlace(fsm, stateName);
+            _putsItself[(fsm, stateName)] = puts;
+        }
+
+        return puts;
+    }
+
+    /// <summary>
+    /// See <see cref="PutsItselfOnItsWay"/>: what an action on the way finds of where a player or the creature itself
+    /// is, and what the actions after it work out from that, is followed to the first action that puts the creature
+    /// at a place.
+    /// </summary>
+    private bool PutsItselfAtItsOwnPlace(Fsm fsm, string stateName) {
+        var owner = fsm.GameObject;
+        var found = new HashSet<string>();
+        var seen = new HashSet<FsmState>();
+        for (var state = fsm.GetState(stateName); state != null && seen.Count < MaxWayInSteps && seen.Add(state);) {
+            foreach (var action in state.Actions) {
+                if (!action.Enabled) {
+                    continue;
+                }
+
+                if (PlaceItPutsItselfAt(action, owner) is { } place) {
+                    return !place.Exists(found.Contains);
+                }
+
+                if (FindsAPlace(action, owner) || VariablesOf(action, false).Any(found.Contains)) {
+                    found.UnionWith(VariablesOf(action, true));
+                }
+            }
+
+            var ways = state.Transitions.Where(each => TakenByItself(state, each)).ToList();
+            if (GoesByPlayers(state) || ChoosesByCount(state) || ways.Count != 1) {
+                return false;
+            }
+
+            state = ways[0].ToFsmState ?? fsm.GetState(ways[0].ToState);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The variables of the place where an action puts the creature whose state machine runs it, at once or over a
+    /// while, as a whole and not only along one side, or null for an action that does not: none for a place that the
+    /// action is given as it is.
+    /// </summary>
+    private static List<string>? PlaceItPutsItselfAt(FsmStateAction action, GameObject owner) {
+        var (thing, place) = action switch {
+            HutongGames.PlayMaker.Actions.SetPosition set => (set.gameObject, WholePlace(set.vector, set.x, set.y)),
+            HutongGames.PlayMaker.Actions.SetPosition2d set => (set.gameObject, WholePlace(set.vector, set.x, set.y)),
+            HutongGames.PlayMaker.Actions.AnimatePositionTo animate => (animate.gameObject,
+                animate.toValue.IsNone ? null : new NamedVariable[] { animate.toValue }),
+            _ => ((FsmOwnerDefault?) null, (NamedVariable[]?) null)
+        };
+        if (thing == null || place == null || action.Fsm.GetOwnerDefaultTarget(thing) != owner) {
+            return null;
+        }
+
+        return place.Where(each => each.UseVariable && each.Name.Length > 0).Select(each => each.Name).ToList();
+    }
+
+    /// <summary>
+    /// The variables of a place that an action is given as a whole or along both sides, or null for one that it is
+    /// given only along one side, or not at all.
+    /// </summary>
+    private static NamedVariable[]? WholePlace(NamedVariable whole, FsmFloat x, FsmFloat y) {
+        return !whole.IsNone || !x.IsNone && !y.IsNone ? [whole, x, y] : null;
+    }
+
+    /// <summary>
+    /// Whether an action finds where something is that each game may have elsewhere: where a player is, by an action
+    /// that looks at the players (see <see cref="LooksAtPlayers"/>), or, by reading where a thing is, where the
+    /// creature itself is, or anything but a part of its own, like the hand of a blade, which is where it is there
+    /// too.
+    /// </summary>
+    private static bool FindsAPlace(FsmStateAction action, GameObject owner) {
+        if (LooksAtPlayers(action)) {
+            return true;
+        }
+
+        var type = action.GetType();
+        if (!type.Name.StartsWith("GetPosition", StringComparison.Ordinal)) {
+            return false;
+        }
+
+        var thing = (type.GetField("gameObject") ?? type.GetField("GameObject"))?.GetValue(action) switch {
+            FsmOwnerDefault each => action.Fsm.GetOwnerDefaultTarget(each),
+            FsmGameObject each => each.Value,
+            _ => null
+        };
+        return thing == null || thing == owner || OwnCreatures.Owning(thing) != OwnCreatures.Owning(owner);
+    }
+
+    /// <summary>
+    /// The variables that an action is given, or of those only the ones that it keeps what it works out in: where it
+    /// keeps a result, like storeResult, the one that it works on, like floatVariable, and every one of an action that
+    /// reads something, like where a thing is, but for how deep a thing is, which is no place.
+    /// </summary>
+    private static IEnumerable<string> VariablesOf(FsmStateAction action, bool kept) {
+        var type = action.GetType();
+        var reads = type.Name.StartsWith("Get", StringComparison.Ordinal);
+        foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public)) {
+            if (field.GetValue(action) is not NamedVariable { UseVariable: true, Name.Length: > 0 } variable ||
+                kept && field.Name.Equals("z", StringComparison.OrdinalIgnoreCase)) {
+                continue;
+            }
+
+            if (!kept || reads || field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase) ||
+                field.Name.EndsWith("Result", StringComparison.OrdinalIgnoreCase) ||
+                field.Name.EndsWith("Variable", StringComparison.OrdinalIgnoreCase)) {
+                yield return variable.Name;
+            }
+        }
     }
 
     /// <summary>
@@ -1760,10 +1930,13 @@ internal partial class CoopSave {
     /// <summary>
     /// Takes the steps of the scene host's that a state machine kept, as it was to get to them by itself and has not
     /// (see <see cref="KeepOwnStep"/>), one after another as they came, before a step that it does not get to by
-    /// itself. Many come at once after a stall of the network, and the state machine, a moment behind, was set
-    /// straight to the later one where it goes round in a part of it with that one (see WalkInto), past the states
-    /// that it was to go through by itself: the map seller went past the one where she sets herself to go home, and
-    /// waited for good for a step of her fight in a game whose fight was over (the user's log of 11-21, 21:42:03).
+    /// itself, once it does not get to them by itself any more, or goes on a way of its own from a blow or a hurt
+    /// here: while it is on its way to them, it plays its move through, and that step waits (see
+    /// <see cref="KeepsForAfterMove"/>). Many come at once after a stall of the network, and the state machine, a
+    /// moment behind, was set straight to the later one where it goes round in a part of it with that one (see
+    /// WalkInto), past the states that it was to go through by itself: the map seller went past the one where she sets
+    /// herself to go home, and waited for good for a step of her fight in a game whose fight was over (the user's log
+    /// of 11-21, 21:42:03).
     /// </summary>
     private void TakeKeptSteps(Fsm fsm) {
         if (_takingKeptSteps || !_keptOwnSteps.TryGetValue(fsm, out var kept)) {
@@ -1790,6 +1963,81 @@ internal partial class CoopSave {
             }
         } finally {
             _takingKeptSteps = false;
+        }
+    }
+
+    /// <summary>
+    /// Keeps a step of the scene host's that a state machine does not get to by itself while it is still on its way
+    /// to steps of the scene host's before it that it gets to by itself (see <see cref="KeepOwnStep"/>), with every
+    /// step after it, as they came, until it is through its move here (see <see cref="UpdateStepsAfterMove"/>). Taken
+    /// as it came, after the steps before it, all at once, the map seller, still in the air in her stomp here a moment
+    /// behind, was put down where the scene host's had landed, 6.7 away, and set into her next move (Luminary's log of
+    /// 11-22, 20:39:03.332; USER 11-23 "都说了多少遍了让客机一招演完，怎么还会有沙克拉被直接拉到地上的道理？"). Not one
+    /// on a way of its own from a blow or a hurt here, nor one that does not get to the first of the steps before it by
+    /// itself any more, whose steps are taken as they came at once (see <see cref="TakeKeptSteps"/>). Whether it keeps
+    /// the step.
+    /// </summary>
+    private bool KeepsForAfterMove(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
+        if (_takingKeptSteps || update.PartCount == OwnToldPart || _ownWays.Contains(fsm) ||
+            !_keptOwnSteps.TryGetValue(fsm, out var kept) || !ReachesByItself(fsm, kept[0].Step.StateName)) {
+            return false;
+        }
+
+        _stepsAfterMove[fsm] = [(player, update)];
+        Logger.Info(
+            $"[Own creatures] '{update.ObjectPath}' went to '{update.StateName}' of '{fsm.Name}' in " +
+            $"{player.Username}'s game, which it does not get to by itself, while it is still on its way here to " +
+            $"'{kept[0].Step.StateName}', a step there before it: it plays its move through first"
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// Has each state machine that plays its move through here take the steps of the scene host's that came meanwhile
+    /// (see <see cref="KeepsForAfterMove"/>), as they came, a frame after it got by itself to the last of the steps
+    /// before them, outside of the step of its state machine. One that went on a way of its own from a blow or a hurt
+    /// here meanwhile, or that does not get to the first of those by itself any more, takes them now as well, after
+    /// those, as before (see <see cref="TakeKeptSteps"/>). Where one of them is a step that it gets to by itself again,
+    /// the rest wait once more.
+    /// </summary>
+    private void UpdateStepsAfterMove() {
+        if (_stepsAfterMove.Count == 0) {
+            return;
+        }
+
+        foreach (var pair in _stepsAfterMove.ToList()) {
+            var fsm = pair.Key;
+            if (fsm.FsmComponent == null) {
+                _stepsAfterMove.Remove(fsm);
+                continue;
+            }
+
+            var onItsWay = _keptOwnSteps.TryGetValue(fsm, out var kept);
+            if (onItsWay && !_ownWays.Contains(fsm) && ReachesByItself(fsm, kept![0].Step.StateName)) {
+                continue;
+            }
+
+            _stepsAfterMove.Remove(fsm);
+            var steps = pair.Value;
+            Logger.Info(
+                $"[Own creatures] '{steps[0].Step.ObjectPath}' " + (onItsWay
+                    ? $"does not get to '{kept![0].Step.StateName}' of '{fsm.Name}' by itself any more"
+                    : $"is through its move in '{fsm.Name}' here") +
+                $", and takes the {steps.Count} step(s) of the scene host's that came meanwhile, as they came: " +
+                string.Join(", ", steps.Select(each => $"'{each.Step.StateName}'"))
+            );
+            _takingStepsAfterMove = true;
+            try {
+                for (var i = 0; i < steps.Count; i++) {
+                    OnOwnCreature(steps[i].Player, steps[i].Step);
+                    if (_stepsAfterMove.TryGetValue(fsm, out var again)) {
+                        again.AddRange(steps.Skip(i + 1));
+                        break;
+                    }
+                }
+            } finally {
+                _takingStepsAfterMove = false;
+            }
         }
     }
 
