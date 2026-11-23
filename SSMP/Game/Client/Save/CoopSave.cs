@@ -556,17 +556,18 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
-        // Also once the partner is gone, so that a creature through its move here takes the steps of the scene host's
-        // that came meanwhile
+        // Also once the partner is gone, so that a creature a second behind the steps of the scene host's that came is
+        // set onto the latest, before the creatures through their move here take those that came meanwhile
         try {
-            UpdateStepsAfterMove();
+            UpdateKeptSteps();
         } catch (Exception e) {
             LogInteractionError(e);
         }
 
-        // Also once the partner is gone, so that a creature that waits here before a step goes on with it
+        // Also once the partner is gone, so that a creature through its move here takes the steps of the scene host's
+        // that came meanwhile
         try {
-            UpdateWaitsBehind();
+            UpdateStepsAfterMove();
         } catch (Exception e) {
             LogInteractionError(e);
         }
@@ -790,9 +791,6 @@ internal partial class CoopSave {
         _ownWays.Clear();
         _keptOwnSteps.Clear();
         _stepsAfterMove.Clear();
-        _toldBehind.Clear();
-        _owedWaits.Clear();
-        _waitsBehind.Clear();
         _waysThrough.Clear();
         _awaitedBlows.Clear();
         _stepsBeforeBlow.Clear();

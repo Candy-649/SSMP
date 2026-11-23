@@ -102,14 +102,6 @@ internal partial class CoopSave {
     private const ushort OwnStrikeDonePart = 14;
 
     /// <summary>
-    /// What an update of a creature that every game runs by itself is when a game that follows the scene host's tells
-    /// it that a state machine of the creature there got to a step of the scene host's later than the step came, by
-    /// <see cref="CoopSaveUpdate.Values"/>[0] seconds more than it told last: the scene host's creature waits that
-    /// long before steps that the others wait for, so that it catches up (see TellBehind, WaitsBehind).
-    /// </summary>
-    private const ushort OwnBehindPart = 15;
-
-    /// <summary>
     /// Where in the values of an update of a creature that every game runs by itself the place of the player that it
     /// goes after is, beside it, as the game that took the step had them: x, then y (see SeeTargetAsTold).
     /// </summary>
@@ -225,10 +217,12 @@ internal partial class CoopSave {
         _stepsAfterMove = new();
 
     /// <summary>
-    /// How long, in seconds of game time, a state machine plays its move through before steps of the scene host's that
-    /// came meanwhile, at the most (see <see cref="KeepsForAfterMove"/>): a move that the game plays by itself ends
-    /// within moments, and one that has not by then waits in a state for what does not come here, like a place that it
-    /// never gets to (review of 06e0bad).
+    /// How long after a step of the scene host's came here, in seconds of real time, a state machine of a creature
+    /// that every game runs by itself that gets to it by itself may still be on its way to it: later than that, the
+    /// creature is set onto the scene host's latest (see <see cref="UpdateKeptSteps"/>). A move that the game plays
+    /// by itself ends within moments, and one that has not by then waits in a state for what does not come here, like
+    /// a place that it never gets to (review of 06e0bad), and a game that stopped for a moment is that much behind
+    /// from then on (USER 11-23 "迟了1秒就直接跳到房主传过来最新的状态").
     /// </summary>
     private const float MoveThroughWait = 1f;
 
@@ -239,48 +233,10 @@ internal partial class CoopSave {
     private bool _takingStepsAfterMove;
 
     /// <summary>
-    /// How far behind the scene host's steps a state machine of a creature that every game runs by itself was told to
-    /// be here last, in seconds (see <see cref="TellBehind"/>).
+    /// Whether this game sets a creature onto the scene host's latest steps, a second behind them (see
+    /// <see cref="UpdateKeptSteps"/>): none of them is kept to be got to by itself, nor waits for a move.
     /// </summary>
-    private readonly Dictionary<Fsm, float> _toldBehind = new();
-
-    /// <summary>
-    /// How much further behind a state machine gets here, in seconds, before it is told: what the network adds or
-    /// takes on the way, step by step, is less (see <see cref="TellBehind"/>).
-    /// </summary>
-    private const float BehindStep = 0.05f;
-
-    /// <summary>
-    /// How long, in the scene host's game, a state machine of a creature that every game runs by itself is to wait
-    /// still before steps that the others wait for, by each member who told that it is behind there, in seconds (see
-    /// <see cref="TakeBehind"/>, <see cref="WaitsBehind"/>).
-    /// </summary>
-    private readonly Dictionary<Fsm, Dictionary<ushort, float>> _owedWaits = new();
-
-    /// <summary>
-    /// The steps that state machines of creatures that every game runs by itself wait before in the scene host's game,
-    /// with the state that they wait in, and until when, in seconds of real time (see <see cref="WaitsBehind"/>).
-    /// </summary>
-    private readonly Dictionary<Fsm, (string From, string To, float Until)> _waitsBehind = new();
-
-    /// <summary>
-    /// Whether this game gives a state machine the step that it waited before (see <see cref="UpdateWaitsBehind"/>),
-    /// which goes without waiting again.
-    /// </summary>
-    private bool _givingBack;
-
-    /// <summary>
-    /// How long the scene host's creature waits before one step at the most, in seconds: it stands still a little
-    /// longer, and waits the rest at its next (USER 11-23 "允许场景主机等一会儿", "场景主机后面的动作就插入一段比较小的等待来平衡
-    /// 差距").
-    /// </summary>
-    private const float MostWaitAtStep = 0.3f;
-
-    /// <summary>
-    /// The speed below which the scene host's creature stands still, in units a second, so that it may wait before a
-    /// step (see <see cref="WaitsBehind"/>): not in a jump, a dash or a flight.
-    /// </summary>
-    private const float StillSpeed = 0.5f;
+    private bool _settingOntoLatest;
 
     /// <summary>
     /// The steps of the scene host's that a state machine of a creature that every game runs by itself went on its way
@@ -502,13 +458,6 @@ internal partial class CoopSave {
                 );
             }
 
-            return;
-        }
-
-        // In the scene host's game, a step that the others wait for waits a moment, as the creature stands still, while
-        // a game that follows this one is behind there (see WaitsBehind)
-        if (WaitsBehind(self, toState, creature, waitedFor && !picks, hit)) {
-            MachineSwitchToStateField?.SetValue(self, null);
             return;
         }
 
@@ -752,12 +701,6 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="player">The member.</param>
     private void SendOwnCreaturesTo(ClientPlayerData player) {
-        // A member who comes in takes the creatures where they are here, behind in nothing (review of 9ad6c79: one who
-        // came back was waited for as far as they were behind before they left)
-        foreach (var owed in _owedWaits.Values) {
-            owed.Remove(player.Id);
-        }
-
         if (OwnCreatures.Count == 0 || !_checkedMembers.Contains(player.Id) || IsSceneHost?.Invoke() != true) {
             return;
         }
@@ -932,12 +875,6 @@ internal partial class CoopSave {
             return;
         }
 
-        // A game that follows this one got to steps of this one later than they came there (see TellBehind)
-        if (update.PartCount == OwnBehindPart) {
-            TakeBehind(player, creature, update);
-            return;
-        }
-
         // One that comes while steps of the scene host's before it wait for the creature here to play its move through
         // waits behind them, as it came, whatever takes it then: a step, what a step did there, a hurt of a player,
         // a catch, a strike back or a pick (see KeepsForAfterMove; review of 06e0bad: a hurt that came was looked at
@@ -1078,7 +1015,7 @@ internal partial class CoopSave {
         // TakeKeptSteps; review of a0d1558: whom the last kept step went after stood, and the first step into the
         // fight, kept, ran the talk on the way), but while it is still on its way to them, as it plays its move
         // through, which this one waits for (see KeepsForAfterMove)
-        var keeps = found == null && update.PartCount != OwnToldPart && !_takingKeptSteps &&
+        var keeps = found == null && update.PartCount != OwnToldPart && !_takingKeptSteps && !_settingOntoLatest &&
                     ReachesByItself(fsm, update.StateName);
         if (found != null && !_takingKeptSteps) {
             _keptOwnSteps.Remove(fsm);
@@ -1116,9 +1053,6 @@ internal partial class CoopSave {
         }
 
         if (found is { } took) {
-            // Ahead of the scene host's game, it is behind there no more (see TellBehind)
-            TellBehind(fsm, 0f);
-
             // Played here already, from a blow that came here at another moment: where it is and the way it faces are
             // its own, until it next waits for a step of the scene host's. What the scene host's game rolled and told
             // on its way there between the blow here and the blow there, this one never does, as the blow stopped it
@@ -1211,11 +1145,6 @@ internal partial class CoopSave {
         // which is the feel of the blow of the player who struck (see CoopHits.TakesAnothersBlow), and which this
         // game plays when that player is its own: the knight a moment behind here, still on its way to the guard
         // that parried a blow of this game's player there (review)
-        // Waiting here for the step, it is behind there no more (see TellBehind)
-        if (_heldOwnSteps.TryGetValue(fsm, out var heldAt) && heldAt == fsm.ActiveStateName) {
-            TellBehind(fsm, 0f);
-        }
-
         _waysThrough.Remove(fsm);
         var way = WayInto(fsm, update.StateName);
         var from = fsm.ActiveStateName;
@@ -2047,7 +1976,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// A state machine got by itself to the state of a step of the scene host's that it kept, which goes, with those
-    /// before it: as long after the step came as it is behind there (see <see cref="TellBehind"/>).
+    /// before it.
     /// </summary>
     private void ReachKeptStep(Fsm fsm, string stateName) {
         if (!_keptOwnSteps.TryGetValue(fsm, out var kept)) {
@@ -2059,16 +1988,9 @@ internal partial class CoopSave {
             return;
         }
 
-        var came = kept[index].Came;
         kept.RemoveRange(0, index + 1);
         if (kept.Count == 0) {
             _keptOwnSteps.Remove(fsm);
-        }
-
-        // Not while it is set onto them, as it goes on by itself into the state of the next on the way (review of
-        // 9ad6c79: that step, which came long before, told it as far behind as it had just caught up)
-        if (!_takingKeptSteps) {
-            TellBehind(fsm, Time.unscaledTime - came);
         }
     }
 
@@ -2093,9 +2015,6 @@ internal partial class CoopSave {
             "that it was to get to by itself, as they came: " +
             string.Join(", ", kept.Select(each => $"'{each.Step.StateName}'"))
         );
-
-        // Set onto the latest of them, it is behind there no more (see TellBehind)
-        TellBehind(fsm, 0f);
         _takingKeptSteps = true;
         try {
             // One that is taken may take the state machine on by itself into the state of the next, which then goes
@@ -2118,8 +2037,8 @@ internal partial class CoopSave {
     /// Keeps a step of the scene host's that a state machine does not get to by itself while it is still on its way
     /// to steps of the scene host's before it that it gets to by itself (see <see cref="KeepOwnStep"/>), with every
     /// step after it of the creature's state machines and of its parts, as they came, until it is through its move
-    /// here, for <see cref="MoveThroughWait"/> at the most
-    /// (see <see cref="UpdateStepsAfterMove"/>), and every blow of another player on its creature too (see
+    /// here (see <see cref="UpdateStepsAfterMove"/>), or is set onto them a second after the first of the steps
+    /// before it came (see <see cref="UpdateKeptSteps"/>), and every blow of another player on its creature too (see
     /// CoopHits.WaitsForAMove). Taken
     /// as it came, after the steps before it, all at once, the map seller, still in the air in her stomp here a moment
     /// behind, was put down where the scene host's had landed, 6.7 away, and set into her next move (Luminary's log of
@@ -2129,7 +2048,7 @@ internal partial class CoopSave {
     /// the step.
     /// </summary>
     private bool KeepsForAfterMove(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
-        if (_takingKeptSteps || update.PartCount == OwnToldPart || _ownWays.Contains(fsm) ||
+        if (_takingKeptSteps || _settingOntoLatest || update.PartCount == OwnToldPart || _ownWays.Contains(fsm) ||
             !_keptOwnSteps.TryGetValue(fsm, out var kept) || !ReachesByItself(fsm, kept[0].Step.StateName)) {
             return false;
         }
@@ -2144,13 +2063,62 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Sets each creature that every game runs by itself, one of whose state machines has not got by itself to the
+    /// first of the steps of the scene host's that it kept within <see cref="MoveThroughWait"/> of when that step
+    /// came, onto the scene host's latest: that state machine onto those steps, and then every step of the creature
+    /// that waited for its move (see <see cref="KeepsForAfterMove"/>), as they came, none of them kept to be got to
+    /// by itself again nor waiting for a move (USER 11-23 "删掉等人吧，还是最简单的两道，一招演完立刻演下一招，和迟了1秒
+    /// 就直接跳到房主传过来最新的状态"). The silk boss waited 4.5 s in its lift for a moment of a look that never came,
+    /// with the steps there that it was to get to by itself kept, before a step came that it does not get to by
+    /// itself, and 4.7 s more as that step and those after it, taken at the second of the move, waited once more
+    /// behind the steps kept (the user's log of 11-23, 20:07:35.161 to 20:07:45.367).
+    /// </summary>
+    private void UpdateKeptSteps() {
+        if (_keptOwnSteps.Count == 0) {
+            return;
+        }
+
+        var now = Time.unscaledTime;
+        foreach (var fsm in _keptOwnSteps.Keys.ToList()) {
+            // Set onto the latest, another state machine of the creature may have got to its own as well
+            if (!_keptOwnSteps.TryGetValue(fsm, out var kept) || now - kept[0].Came < MoveThroughWait) {
+                continue;
+            }
+
+            if (fsm.FsmComponent == null) {
+                _keptOwnSteps.Remove(fsm);
+                continue;
+            }
+
+            Logger.Info(
+                $"[Own creatures] '{kept[0].Step.ObjectPath}' did not get to '{kept[0].Step.StateName}' of " +
+                $"'{fsm.Name}' by itself within {MoveThroughWait:F0}s of when it came, and is set onto the scene " +
+                "host's latest"
+            );
+            _takingStepsAfterMove = true;
+            _settingOntoLatest = true;
+            try {
+                TakeKeptSteps(fsm);
+                if (PlaysMoveThrough(fsm.GameObject) is { } waiting && _stepsAfterMove.Remove(waiting, out var after)) {
+                    foreach (var (player, step) in after.Steps) {
+                        OnOwnCreature(player, step);
+                    }
+                }
+            } finally {
+                _takingStepsAfterMove = false;
+                _settingOntoLatest = false;
+            }
+        }
+    }
+
+    /// <summary>
     /// Has each state machine that plays its move through here take the steps of the scene host's that came meanwhile
     /// (see <see cref="KeepsForAfterMove"/>), as they came, a frame after it got by itself to the last of the steps
-    /// before them, outside of the step of its state machine. One that went on a way of its own from a blow or a hurt
-    /// here meanwhile, or that does not get to the first of those by itself any more, takes them now as well, after
-    /// those, as before (see <see cref="TakeKeptSteps"/>), and so does one that does not get to them within
-    /// <see cref="MoveThroughWait"/>, which is set onto those first. Where one of them is a step that a state machine
-    /// of the creature gets to by itself again, the rest wait once more.
+    /// before them, outside of the step of its state machine (USER 11-23 "一招演完立刻演下一招"). One that went on a
+    /// way of its own from a blow or a hurt here meanwhile, or that does not get to the first of those by itself any
+    /// more, takes them now as well, after those, as before (see <see cref="TakeKeptSteps"/>), and one that does not
+    /// get to those in time is set onto them and these (see <see cref="UpdateKeptSteps"/>). Where one of them is a
+    /// step that a state machine of the creature gets to by itself again, the rest wait once more.
     /// </summary>
     private void UpdateStepsAfterMove() {
         if (_stepsAfterMove.Count == 0) {
@@ -2164,18 +2132,16 @@ internal partial class CoopSave {
                 continue;
             }
 
-            var played = Time.time - pair.Value.Since;
             var onItsWay = _keptOwnSteps.TryGetValue(fsm, out var kept);
-            var getsThere = onItsWay && !_ownWays.Contains(fsm) && ReachesByItself(fsm, kept![0].Step.StateName);
-            if (getsThere && played < MoveThroughWait) {
+            if (onItsWay && !_ownWays.Contains(fsm) && ReachesByItself(fsm, kept![0].Step.StateName)) {
                 continue;
             }
 
             _stepsAfterMove.Remove(fsm);
             var steps = pair.Value.Steps;
-            var why = !onItsWay ? $"is through its move in '{fsm.Name}' here after {played:F2}s"
+            var why = !onItsWay
+                ? $"is through its move in '{fsm.Name}' here after {Time.time - pair.Value.Since:F2}s"
                 : _ownWays.Contains(fsm) ? $"went on a way of its own in '{fsm.Name}' here"
-                : getsThere ? $"did not get to '{kept![0].Step.StateName}' by itself in time"
                 : $"does not get to '{kept![0].Step.StateName}' by itself any more";
             Logger.Info(
                 $"[Own creatures] '{steps[0].Step.ObjectPath}' {why}, and takes the {steps.Count} step(s) of the " +
@@ -2184,14 +2150,6 @@ internal partial class CoopSave {
             );
             _takingStepsAfterMove = true;
             try {
-                // Not there in time, it is set onto them first, which came before: the first of the steps after them,
-                // which it does not get to by itself, waited behind them once more as it was taken while it was still
-                // on its way to them, and so on each second, and the silk boss waited in its lift 4.7 s longer that
-                // way, with up to 21 steps behind (the user's log of 11-23, 20:07:40.656 to 20:07:45.367)
-                if (getsThere) {
-                    TakeKeptSteps(fsm);
-                }
-
                 for (var i = 0; i < steps.Count; i++) {
                     OnOwnCreature(steps[i].Player, steps[i].Step);
                     if (PlaysMoveThrough(fsm.GameObject) is { } again) {
@@ -2223,174 +2181,6 @@ internal partial class CoopSave {
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Tells the scene host's game how far behind it a state machine of a creature that every game runs by itself is
-    /// here, as it gets to a step of that game's: as long after the step came as it got there by itself, and not at
-    /// all where it waited for the step, had taken it already or was set onto it. A hurt of this game's player stops
-    /// this game for a moment, as the game has it, and a step of the scene host's comes late at times over the
-    /// network: the creature here is behind by as much from then on, as it plays each move through, and nothing here
-    /// catches it up. The scene host's creature waits that long, a little at a time, before steps that the others wait
-    /// for (see WaitsBehind; USER 11-23 "允许场景主机等一会儿", "那就发消息吧": the map seller in the user's spar with
-    /// Luminary on 11-22, 20:38:47 to 20:39:51, through 12 hurts of Luminary's there and 11 of the user's steps that
-    /// came over 0.1 s late, was set onto the user's steps 77 times as it was behind). Told only as it gets further
-    /// behind than it was told last, by <see cref="BehindStep"/> at least, and as it is behind no more once it was
-    /// told behind, with none, so that the scene host's game waits no longer for it (review of 9ad6c79: it waited
-    /// still for a game that had caught up by itself).
-    /// </summary>
-    private void TellBehind(Fsm fsm, float behind) {
-        var told = _toldBehind.TryGetValue(fsm, out var last) ? last : 0f;
-        var caughtUp = behind < BehindStep && told >= BehindStep;
-        if (!caughtUp && behind < told + BehindStep) {
-            if (behind < told) {
-                _toldBehind[fsm] = behind;
-            }
-
-            return;
-        }
-
-        _toldBehind[fsm] = behind;
-        var machine = fsm.FsmComponent;
-        var word = new CoopSaveUpdate {
-            Kind = CoopSaveUpdateKind.OwnCreature,
-            Scene = machine.gameObject.scene.name,
-            ObjectPath = OwnCreatures.PlaceOf(machine.gameObject),
-            FsmName = machine.FsmName,
-            StateName = fsm.ActiveStateName,
-            PartCount = OwnBehindPart,
-            Values = [caughtUp ? 0f : behind - told]
-        };
-        Logger.Info(
-            caughtUp
-                ? $"[Own creatures] '{word.ObjectPath}' is behind the scene host's steps of '{fsm.Name}' no more, " +
-                  $"{behind:F2}s, which the scene host's game is told"
-                : $"[Own creatures] '{word.ObjectPath}' gets to a step of '{fsm.Name}' of the scene host's " +
-                  $"{behind:F2}s after it came, {behind - told:F2}s later than told last, which the scene host's " +
-                  "game is told"
-        );
-        SendToRoomMembers(word);
-    }
-
-    /// <summary>
-    /// Takes the word of a game that follows this one that a state machine of a creature that every game runs by itself
-    /// is further behind there (see <see cref="TellBehind"/>): the scene host's creature waits as much longer before
-    /// its next steps that the others wait for (see <see cref="WaitsBehind"/>), up to as long as the creature there
-    /// plays its moves through, after which it is set onto the steps there (see <see cref="MoveThroughWait"/>). One
-    /// that tells none is behind no more, and is waited for no longer.
-    /// </summary>
-    private void TakeBehind(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
-        if (IsSceneHost?.Invoke() != true) {
-            return;
-        }
-
-        var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
-        if (!_owedWaits.TryGetValue(fsm, out var owed)) {
-            owed = new Dictionary<ushort, float>();
-            _owedWaits[fsm] = owed;
-        }
-
-        var further = update.Values[0];
-        var waits = further > 0f
-            ? Mathf.Min((owed.TryGetValue(player.Id, out var was) ? was : 0f) + further, MoveThroughWait)
-            : 0f;
-        owed[player.Id] = waits;
-        Logger.Info(
-            further > 0f
-                ? $"[Own creatures] '{update.ObjectPath}' is {further:F2}s further behind in '{fsm.Name}' in " +
-                  $"{player.Username}'s game, and waits {waits:F2}s here before its next steps that the others wait " +
-                  "for"
-                : $"[Own creatures] '{update.ObjectPath}' is behind in '{fsm.Name}' in {player.Username}'s game no " +
-                  "more, and waits for it no longer here"
-        );
-    }
-
-    /// <summary>
-    /// Whether, in the scene host's game, a state machine of a creature that every game runs by itself waits a moment
-    /// before a step that the others wait for, out of a state that goes by where the players are, while a game that
-    /// follows this one is behind there (see <see cref="TakeBehind"/>): the games that wait for the step take it as
-    /// late, and the one behind, which gets there late, catches up, as every game plays each move through. Only as the
-    /// creature stands still, not in a jump, a dash or a flight, and not at a step that a blow, a hurt or another state
-    /// machine set off, which plays at once; a part goes as its creature tells it. As long as the game furthest behind
-    /// of the members in the room is, <see cref="MostWaitAtStep"/> at the most, and the rest at the next such step. The
-    /// chosen step goes on once the time is up (see <see cref="UpdateWaitsBehind"/>), and every other way of its own
-    /// out of the state waits until then as well: a state whose choice stopped its start finishes in the next frame,
-    /// and went on into the way that it takes when it chooses none (review of 9ad6c79). What a blow, a hurt or another
-    /// state machine sets off meanwhile goes at once, and the step waits no more.
-    /// </summary>
-    private bool WaitsBehind(Fsm fsm, FsmState toState, GameObject creature, bool waitedFor, bool hit) {
-        if (_givingBack) {
-            return false;
-        }
-
-        var setOff = hit || CoopHits.IsMakingLocalStrike || CoopHits.IsReplayingPartnersStrike ||
-                     CoopHits.TakesAnothersBlow || Fsm.EventData?.SentByFsm is { } sender && sender != fsm;
-        if (_waitsBehind.ContainsKey(fsm)) {
-            if (setOff) {
-                _waitsBehind.Remove(fsm);
-                return false;
-            }
-
-            return true;
-        }
-
-        if (setOff || !waitedFor || !_owedWaits.TryGetValue(fsm, out var owed) || IsSceneHost?.Invoke() != true ||
-            fsm.ActiveState is not { } from || !GoesByPlayers(from) || OwnCreatures.IsPart(creature) ||
-            creature.TryGetComponent<Rigidbody2D>(out var body) &&
-            body.linearVelocity.sqrMagnitude > StillSpeed * StillSpeed) {
-            return false;
-        }
-
-        var here = GetCheckedMembers().Where(member => member.IsInLocalScene).Select(member => member.Id).ToHashSet();
-        var most = owed.Where(each => here.Contains(each.Key)).Select(each => each.Value).DefaultIfEmpty().Max();
-        if (most <= 0f) {
-            return false;
-        }
-
-        var wait = Mathf.Min(most, MostWaitAtStep);
-        foreach (var id in owed.Keys.ToList()) {
-            owed[id] = Mathf.Max(0f, owed[id] - wait);
-        }
-
-        _waitsBehind[fsm] = (from.Name, toState.Name, Time.unscaledTime + wait);
-        Logger.Info(
-            $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' waits {wait:F2}s in '{from.Name}' of '{fsm.Name}' " +
-            $"before it goes to '{toState.Name}', as a game that follows this one is behind there"
-        );
-        return true;
-    }
-
-    /// <summary>
-    /// Has each state machine that waited before a step in the scene host's game (see <see cref="WaitsBehind"/>) take
-    /// the step once the time is up, there and then, as its own switch would take it: the state that chose it may
-    /// choose only once. Left to it as its switch to take as it next runs, an event that came to it before, like the
-    /// hit of a blow, took it from inside the blow, as one that the blow set off (review of 9ad6c79). One that went
-    /// elsewhere meanwhile has it no more.
-    /// </summary>
-    private void UpdateWaitsBehind() {
-        if (_waitsBehind.Count == 0) {
-            return;
-        }
-
-        foreach (var pair in _waitsBehind.ToList()) {
-            var (from, to, until) = pair.Value;
-            if (Time.unscaledTime < until) {
-                continue;
-            }
-
-            var fsm = pair.Key;
-            _waitsBehind.Remove(fsm);
-            if (fsm.FsmComponent == null || fsm.ActiveStateName != from) {
-                continue;
-            }
-
-            _givingBack = true;
-            try {
-                fsm.SetStateAsItRuns(to);
-            } finally {
-                _givingBack = false;
-            }
-        }
     }
 
     /// <summary>
