@@ -564,6 +564,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a creature that waits here before a step goes on with it
+        try {
+            UpdateWaitsBehind();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         if (IsGroupComplete(marker, members)) {
             UpdateCheckedPlayTime(marker);
             ReleaseHold(hero);
@@ -783,6 +790,10 @@ internal partial class CoopSave {
         _ownWays.Clear();
         _keptOwnSteps.Clear();
         _stepsAfterMove.Clear();
+        _toldBehind.Clear();
+        _owedWaits.Clear();
+        _waitsBehind.Clear();
+        _waitedOut.Clear();
         _waysThrough.Clear();
         _awaitedBlows.Clear();
         _stepsBeforeBlow.Clear();
