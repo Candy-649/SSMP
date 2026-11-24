@@ -57,20 +57,22 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The creatures whose health came to none in the scene host's game, as it told this game, which follows it, with
-    /// the health that each had here as the word counted, until a look of theirs at their health here finds none, and
-    /// goes on as the game has it, or until they were given more health here than that, for the next part of their
-    /// fight (see <see cref="OnOwnHealthCompare"/>).
+    /// the health that each had here as the word came, or less as it counted, until a look of theirs at their health
+    /// here finds none, and goes on as the game has it, or until they were given more health here than that, for the
+    /// next part of their fight (see <see cref="OnOwnHealthCompare"/>).
     /// </summary>
     private readonly Dictionary<HealthManager, int> _emptiedWords = new();
 
     /// <summary>
     /// The creatures whose health came to none in the scene host's game at a blow of another player than this game's,
     /// as it told this game, which this game had not played yet as the word came, with that player and the number of
-    /// the blow in their game: the word counts here as it plays that blow, and is let go of at a later one of theirs,
-    /// which tells that that blow never played here, where the scene host's steps take the creature on (see
-    /// <see cref="TookOthersBlow"/>).
+    /// the blow in their game, and the health that it had here as the word came: the word counts here as it plays that
+    /// blow, and is let go of at a later one of theirs, which tells that that blow never played here, where the scene
+    /// host's steps take the creature on (see <see cref="TookOthersBlow"/>). The blow can play here after the next
+    /// part's health: kept behind a move that the creature plays through here, as are the scene host's steps after
+    /// it, which go first as the move ends (review of 6be63b5).
     /// </summary>
-    private readonly Dictionary<HealthManager, (ushort Striker, uint Strike)> _emptiedAtBlows = [];
+    private readonly Dictionary<HealthManager, (ushort Striker, uint Strike, int HadThen)> _emptiedAtBlows = [];
 
     /// <summary>
     /// The newest blow or touch of each other player that this game played on the health of a creature that every game
@@ -137,7 +139,7 @@ internal partial class CoopSave {
             var striker = update.Key == ThrownThings.ThrowersPlayer ? player.Id : (ushort) update.Key;
             var strike = (uint) update.Sequence;
             if (!_othersBlowsTaken.TryGetValue((health, striker), out var taken) || taken < strike) {
-                _emptiedAtBlows[health] = (striker, strike);
+                _emptiedAtBlows[health] = (striker, strike, health.hp);
                 Logger.Info(
                     $"[Own creatures] '{place}' has no health left in {player.Username}'s game since blow " +
                     $"{strike} of the player {striker}, which this game has not played yet, with {health.hp} health " +
@@ -182,7 +184,7 @@ internal partial class CoopSave {
                 _emptiedAtBlows.Remove(health);
                 var place = OwnCreatures.PlaceOf(struck);
                 if (at.Strike == strike) {
-                    _emptiedWords[health] = health.hp;
+                    _emptiedWords[health] = Mathf.Min(at.HadThen, health.hp);
                     Logger.Info(
                         $"[Own creatures] '{place}' took blow {strike} of the player {striker} here, and goes on as " +
                         $"it has no health at its next look, with {health.hp} health here"

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using MonoMod.Cil;
+using SSMP.Animation.Effects;
 using SSMP.Game.Client.Entity;
 using SSMP.Util;
 using Logger = SSMP.Logging.Logger;
@@ -80,11 +81,13 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Whether a hit that the game deals by itself after a blow goes to the members in the room: one of the local
-    /// player's, or of a tool of theirs, on a creature that every game runs by itself.
+    /// player's on a creature that every game runs by itself, by what struck as their blow does (see MakeDamagerHit):
+    /// their character, the needle that a throw of theirs left in the room, or a tool of theirs.
     /// </summary>
     private bool SendsLagHit(HealthManager health, HitInstance hit) {
         return HasMembers && OwnCreatures.Has(health.gameObject) &&
-               (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source));
+               (hit.IsHeroDamage || hit.Source != null && HeroHarpoon.IsLocalNeedlePart(hit.Source.transform) ||
+                LocalToolComponent.IsLocalTool(hit.Source));
     }
 
     /// <summary>
