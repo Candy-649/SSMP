@@ -150,13 +150,19 @@ internal partial class CoopSave {
     /// <summary>
     /// The actions by which a state goes by where the players are: those that look at where the player whom the
     /// creature goes after is, how far, whether it passed them, whether a player stands in one of its ranges, or
-    /// whether this game's player has come into place. Facing one leaves where it goes as it is, and a song a creature
-    /// hears in every game (see SharedDice.RollForSong).
+    /// whether this game's player has come into place, and those that look at whether a player sees the creature or
+    /// at how many things are in a zone that a player comes into, like a creature that waits to be seen, or until no
+    /// player is near to come out again: each game's player sees it and comes near at other moments (USER 11-24 "可以
+    /// 把更多的怪本地化吗"). Facing one leaves where it goes as it is, and a song a creature hears in every game (see
+    /// SharedDice.RollForSong).
     /// </summary>
     private static readonly HashSet<string> PlayerWayActionTypes = new(
         Entity.Action.ActionRegistry.TargetedFsmActionTypes
             .Where(type => !type.StartsWith("Face") && type is not ("Tk2DAnimationByDirection" or "TakeSilk"))
-            .Concat(["CheckAlertRangeByName", "WaitForHeroInPosition"])
+            .Concat([
+                "CheckAlertRangeByName", "WaitForHeroInPosition", "CheckOutOfCamera", "GameObjectIsVisible",
+                "CheckTrackTriggerCount", "CheckTrackTriggerCountV2"
+            ])
     );
 
     /// <summary>
@@ -1475,7 +1481,7 @@ internal partial class CoopSave {
             stored = [];
             foreach (var each in fsm.States) {
                 foreach (var action in each.Actions) {
-                    if (PlayerWayActionTypes.Contains(action.GetType().Name)) {
+                    if (PlayerWayActionTypes.Contains(action.GetType().Name) || LooksAtPlayersAtTimes(action)) {
                         stored.UnionWith(Entity.Action.EntityFsmActions.ValueVariablesOf(action));
                     }
                 }
@@ -1503,12 +1509,33 @@ internal partial class CoopSave {
     /// scene host's step and was put where the scene host's was, after it had stopped there or while it was still on
     /// its way, up to 2.3 away, and so as it flew back to its hand, up to 11.7 away (the user's log of 11-22; USER
     /// "我这边针都摆好了为什么还会动发射位置", "为啥针飞到位置停好之后房主还要挪"). Where it strikes from is where its
-    /// hand aimed, which the hand did as the scene host's.
+    /// hand aimed, which the hand did as the scene host's. So does one of the kinds that look at a player only now and
+    /// then, where it does (see <see cref="LooksAtPlayersAtTimes"/>).
     /// </summary>
     private static bool LooksAtPlayers(FsmStateAction action) {
         return PlayerWayActionTypes.Contains(action.GetType().Name) &&
                (Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) ||
-                !Entity.Action.EntityFsmActions.LooksOnlyAtItsCreature(action));
+                !Entity.Action.EntityFsmActions.LooksOnlyAtItsCreature(action)) ||
+               LooksAtPlayersAtTimes(action);
+    }
+
+    /// <summary>
+    /// Whether an action of the kinds that look at a player only now and then, like where an object is, how high it
+    /// stands or what a ray cast from it hits (see Entity.Action.ActionRegistry.TargetedWherePlayerActionTypes), looks
+    /// at the player whom the creature goes after to choose where its state goes or to keep a number of them: one made
+    /// to look at that player (see GamePatcher.LooksAtAPlayerByMake), in a state that does nothing to a player, where
+    /// it reads this game's own, like the hold of a knight that keeps a caught player within its room as it lets them
+    /// go. A creature that digs under the ground bursts out where the player is along it, which each game has a
+    /// little elsewhere: it would come out in another place in each game until the scene host's next step put it where
+    /// the scene host's came out (11-16 survey; USER 11-24 "可以把更多的怪本地化吗"). One that only keeps an object,
+    /// like a player in a variable or the nearest thing of a kind, keeps no number to tell.
+    /// </summary>
+    private static bool LooksAtPlayersAtTimes(FsmStateAction action) {
+        return Entity.Action.ActionRegistry.TargetedWherePlayerActionTypes.Contains(action.GetType().Name) &&
+               (Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) ||
+                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any()) &&
+               GamePatcher.LooksAtAPlayerByMake(action) &&
+               !Entity.Action.EntityFsmActions.DealsWithThePlayerIn(action.State);
     }
 
     /// <summary>

@@ -1375,6 +1375,37 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Whether an action of the kinds that look at a player only now and then (see
+    /// <see cref="ActionRegistry.TargetedWherePlayerActionTypes"/>) is made to look at one: a field of it that may be
+    /// pointed at the player whom its creature goes after held, before that, a variable named for a player (see
+    /// <see cref="IsTargetVariableName"/>). It goes by how the state is made, the same in every game, rather than by
+    /// what the variable holds as it is asked, which may be no one yet in one game and the player in another.
+    /// </summary>
+    internal static bool LooksAtAPlayerByMake(FsmStateAction action) {
+        foreach (var field in GetFsmGameObjectFields(action.GetType())) {
+            if (field.GetValue(action) is FsmGameObject current && HoldsAPlayerByMake(action, field, current)) {
+                return true;
+            }
+        }
+
+        foreach (var field in GetFsmOwnerDefaultFields(action.GetType())) {
+            if (field.GetValue(action) is FsmOwnerDefault {
+                    OwnerOption: OwnerDefaultOption.SpecifyGameObject, GameObject: { } current
+                } && HoldsAPlayerByMake(action, field, current)) {
+                return true;
+            }
+        }
+
+        return false;
+
+        static bool HoldsAPlayerByMake(FsmStateAction action, FieldInfo field, FsmGameObject current) {
+            var held = HeldAim(action, field, current);
+            return held.UseVariable && IsTargetVariableName(held.Name) &&
+                   CanRetargetFsmGameObjectField(action, field, held);
+        }
+    }
+
+    /// <summary>
     /// Points a field of an action at a player with an object of its own, kept for the field from then on, and keeps
     /// what the field held; or, for no player, gives the field back what it held (see <see cref="PointedAims"/>).
     /// This prevents vanilla PlayMaker variables such as <c>Hero</c> from fighting the multiplayer retargeter. A field
