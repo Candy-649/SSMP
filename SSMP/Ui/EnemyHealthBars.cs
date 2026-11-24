@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using GlobalEnums;
 using MonoMod.RuntimeDetour;
+using SSMP.Game.Client.Entity;
 using SSMP.Game.Client.Entity.Action;
 using SSMP.Game.Client.Entity.Component;
 using SSMP.Game.Settings;
@@ -738,11 +739,16 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// <summary>
         /// The bar of a creature with a HealthManager. A copy's own steps can set its health ahead of what it is told
         /// for a moment, and are not shown: the health is the scene host's to say (USER 11-09 "客机也不应该自己摆弄血条，
-        /// 因为客机那边有个复制体，自己搞太容易搞砸了").
+        /// 因为客机那边有个复制体，自己搞太容易搞砸了"). A creature that every game runs by itself has none once the
+        /// scene host's game told that it came to none there, until it is given more for the next part of its fight
+        /// (see OwnCreatures.HasNoHealthAsTold).
         /// </summary>
         public static Bar Of(HealthManager healthManager, bool isBoss) {
             return new Bar(
-                healthManager.gameObject, () => HealthManagerComponent.ToldHealthOf(healthManager) ?? healthManager.hp,
+                healthManager.gameObject,
+                () => OwnCreatures.HasNoHealthAsTold?.Invoke(healthManager) == true
+                    ? 0
+                    : HealthManagerComponent.ToldHealthOf(healthManager) ?? healthManager.hp,
                 () => healthManager == null || healthManager.isDead, GetInitialHealth(healthManager), isBoss
             );
         }

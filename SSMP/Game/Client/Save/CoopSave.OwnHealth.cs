@@ -56,11 +56,12 @@ internal partial class CoopSave {
     private readonly HashSet<HealthManager> _emptiedTold = [];
 
     /// <summary>
-    /// The creatures whose health came to none in the scene host's game, as it told this game, which follows it, until
-    /// a look of theirs at their health here finds none, and goes on as the game has it (see
-    /// <see cref="OnOwnHealthCompare"/>).
+    /// The creatures whose health came to none in the scene host's game, as it told this game, which follows it, with
+    /// the health that each had here as the word counted, until a look of theirs at their health here finds none, and
+    /// goes on as the game has it, or until they were given more health here than that, for the next part of their
+    /// fight (see <see cref="OnOwnHealthCompare"/>).
     /// </summary>
-    private readonly HashSet<HealthManager> _emptiedWords = [];
+    private readonly Dictionary<HealthManager, int> _emptiedWords = new();
 
     /// <summary>
     /// The creatures whose health came to none in the scene host's game at a blow of another player than this game's,
@@ -147,11 +148,20 @@ internal partial class CoopSave {
         }
 
         _emptiedAtBlows.Remove(health);
-        _emptiedWords.Add(health);
+        _emptiedWords[health] = health.hp;
         Logger.Info(
             $"[Own creatures] '{place}' has no health left in {player.Username}'s game, and goes on here as it has " +
             $"none at its next look, with {health.hp} health here"
         );
+    }
+
+    /// <summary>
+    /// Whether the health of a creature that every game runs by itself came to none in the scene host's game, as it
+    /// told this game, and was given no more here since: its bar shows none then, as the scene host's does, whatever
+    /// this game's own count of the blows left it (USER 11-24 "丝母假死在我这里血条没有到0", "死了就死了不行吗").
+    /// </summary>
+    private bool HasNoHealthAsTold(HealthManager health) {
+        return _emptiedWords.TryGetValue(health, out var hadThen) && health.hp <= Mathf.Max(hadThen, 1);
     }
 
     /// <summary>
@@ -172,7 +182,7 @@ internal partial class CoopSave {
                 _emptiedAtBlows.Remove(health);
                 var place = OwnCreatures.PlaceOf(struck);
                 if (at.Strike == strike) {
-                    _emptiedWords.Add(health);
+                    _emptiedWords[health] = health.hp;
                     Logger.Info(
                         $"[Own creatures] '{place}' took blow {strike} of the player {striker} here, and goes on as " +
                         $"it has no health at its next look, with {health.hp} health here"
@@ -213,12 +223,25 @@ internal partial class CoopSave {
             return;
         }
 
+        // The word is of the part of the fight that the health came to none in: health given here since, more than it
+        // had as the word counted, is the next part's, which the scene host's steps took the creature on to while it
+        // still had some here, and its look at none in that part goes by the scene host's word of that part (the boss
+        // at the end of the second act fell so with 13 here, the logs of 11-24 19:39:45, and a later look at none
+        // would have ended a part of its fight before the scene host's game did)
+        var place = OwnCreatures.PlaceOf(creature);
+        if (_emptiedWords.TryGetValue(health, out var hadThen) && health.hp > Mathf.Max(hadThen, 1)) {
+            _emptiedWords.Remove(health);
+            Logger.Info(
+                $"[Own creatures] '{place}' was given health here, {health.hp}, since the scene host's game told " +
+                $"that it had none, {hadThen} here then, and waits for the scene host's word of this part"
+            );
+        }
+
         if (health.hp > 0) {
             orig(self);
             return;
         }
 
-        var place = OwnCreatures.PlaceOf(creature);
         if (_emptiedWords.Remove(health)) {
             Logger.Info(
                 $"[Own creatures] '{place}' has no health here, {health.hp}, as the scene host's game told, and goes " +

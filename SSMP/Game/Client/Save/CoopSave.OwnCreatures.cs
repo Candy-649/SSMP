@@ -326,6 +326,7 @@ internal partial class CoopSave {
         CoopHits.ReplayedStrike = TookOthersBlow;
         CoopHits.WaitsForAMove = struck => PlaysMoveThrough(struck) != null;
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
+        OwnCreatures.HasNoHealthAsTold = HasNoHealthAsTold;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
         _ownCreatureHooks.Add(CreateHook(

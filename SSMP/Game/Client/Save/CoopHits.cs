@@ -703,6 +703,7 @@ internal partial class CoopHits {
 
         RegisterThrownHooks();
         RegisterSignalHooks();
+        RegisterLagHitHooks();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += ReleaseHeldReplays;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += UpdateChasers;
@@ -944,7 +945,9 @@ internal partial class CoopHits {
                 ? () => responder.Hit(hit)
                 : update.Blocked
                     ? () => TakeAsBlock(creature, hit)
-                    : () => TakeAsWound(creature, hit);
+                    : update.ExtraDamage
+                        ? () => TakeAsExtraDamage(creature, hit)
+                        : () => TakeAsWound(creature, hit);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
                 () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(strike, component, striker))
             ), source.HitName);
@@ -1680,6 +1683,20 @@ internal partial class CoopHits {
         }
 
         creature.TakeDamage(hit);
+        return IHitResponder.Response.DamageEnemy;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself take damage without a hit that the game dealt by itself after a
+    /// blow of another player, as it took it in their game (see CoopHits.LagHits). One that died here already takes
+    /// none.
+    /// </summary>
+    private static IHitResponder.HitResponse TakeAsExtraDamage(HealthManager creature, HitInstance hit) {
+        if (creature.isDead) {
+            return IHitResponder.Response.None;
+        }
+
+        creature.ApplyExtraDamage(hit);
         return IHitResponder.Response.DamageEnemy;
     }
 

@@ -180,6 +180,13 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// Whether the health of a creature that every game runs by itself came to none in the scene host's game, as it
+    /// told this game, which follows it, and was given no more here since (see CoopSave.OwnHealth); set by the
+    /// CoopSave.
+    /// </summary>
+    public static Func<HealthManager, bool>? HasNoHealthAsTold { get; set; }
+
+    /// <summary>
     /// The state machine of a creature that every game runs by itself that a talk of the local player tells its event
     /// now, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
     /// </summary>
