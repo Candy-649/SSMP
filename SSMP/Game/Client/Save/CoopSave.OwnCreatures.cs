@@ -1522,13 +1522,15 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether an action of the kinds that look at a player only now and then, like where an object is, how high it
     /// stands or what a ray cast from it hits (see Entity.Action.ActionRegistry.TargetedWherePlayerActionTypes), looks
-    /// at the player whom the creature goes after to choose where its state goes or to keep a number of them: one made
-    /// to look at that player (see GamePatcher.LooksAtAPlayerByMake), in a state that does nothing to a player, where
-    /// it reads this game's own, like the hold of a knight that keeps a caught player within its room as it lets them
-    /// go. A creature that digs under the ground bursts out where the player is along it, which each game has a
-    /// little elsewhere: it would come out in another place in each game until the scene host's next step put it where
-    /// the scene host's came out (11-16 survey; USER 11-24 "可以把更多的怪本地化吗"). One that only keeps an object,
-    /// like a player in a variable or the nearest thing of a kind, keeps no number to tell.
+    /// at the player whom the creature goes after to choose where its state goes or to work out a number of its state
+    /// machine (see Entity.Action.EntityFsmActions.ValueVariablesOf): one made to look at that player (see
+    /// GamePatcher.LooksAtAPlayerByMake), in a state that does nothing to a player. One in a state that does is about
+    /// the player that the state acts on, like the hold of a knight that keeps a caught player within its room as it
+    /// lets them go, which reads where they are and puts them back within it. A creature that digs under the ground
+    /// bursts out where the player is along it, which each game has a little elsewhere: it would come out in another
+    /// place in each game until the scene host's next step put it where the scene host's came out (11-16 survey; USER
+    /// 11-24 "可以把更多的怪本地化吗"). One that only keeps an object, like a player in a variable or the nearest thing
+    /// of a kind, works out no number to tell.
     /// </summary>
     private static bool LooksAtPlayersAtTimes(FsmStateAction action) {
         return Entity.Action.ActionRegistry.TargetedWherePlayerActionTypes.Contains(action.GetType().Name) &&
