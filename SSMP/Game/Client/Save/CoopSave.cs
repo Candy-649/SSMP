@@ -549,6 +549,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // The words of summons that waited for them to be made here
+        try {
+            UpdateSummonWords();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // A state machine set off here by a blow of this game's player, which the scene host's game did not answer
         try {
             UpdateAwaitedBlows();
@@ -827,6 +834,7 @@ internal partial class CoopSave {
         _ledMoves.Clear();
         _ledMovesMet.Clear();
         _earlyLedSteps.Clear();
+        _summonWords.Clear();
 
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);

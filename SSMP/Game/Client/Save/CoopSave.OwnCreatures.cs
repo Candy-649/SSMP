@@ -848,6 +848,12 @@ internal partial class CoopSave {
                 continue;
             }
 
+            // What made a summon, which their game makes as it did here before they are told what it does (see
+            // CoopSave.OwnSummons)
+            if (OwnCreatures.MakerOf(creature) is { } maker) {
+                TellOwnMade(player, pair.Value.Scene, pair.Value.Place, maker);
+            }
+
             // What the third act does to it, out or not, before its steps: the health that comes with them has what
             // the game doubles for one that turns already
             if (OwnThreads.WordFor(creature) is { } thread) {
@@ -955,6 +961,12 @@ internal partial class CoopSave {
     /// <param name="update">The update.</param>
     private void OnOwnCreature(ClientPlayerData player, CoopSaveUpdate update) {
         var place = update.ObjectPath;
+
+        // A summon that is not made or started here yet waits for it (see CoopSave.OwnSummons)
+        if (OwnCreatures.IsSummonPlace(place) && KeepsSummonWord(player, update)) {
+            return;
+        }
+
         if (OwnCreatures.Find(update.Scene, place) is not { } creature) {
             Logger.Info($"[Own creatures] {player.Username}'s game told of '{place}', which does not run here");
             return;
@@ -1974,7 +1986,9 @@ internal partial class CoopSave {
     /// another state than the others, so that a count is full at another blow in each game: the scene host's is the
     /// one (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
     /// host's step came). Its health is no such count: what it does as it has none goes by the scene host's word that
-    /// it has none (see CoopSave.OwnHealth).
+    /// it has none (see CoopSave.OwnHealth). So is how many objects there are under one (GetChildCount), like the
+    /// flies that a conductor made, under the object of the dead ones, which each game has more or fewer of for a
+    /// moment as a fly dies at another moment there, and calls back: the scene host's count is the one.
     /// </summary>
     private bool ChoosesByCount(FsmState state) {
         var fsm = state.Fsm;
@@ -1984,6 +1998,12 @@ internal partial class CoopSave {
                 foreach (var action in each.Actions) {
                     if (HitCounters.CountedBy(action) is { Length: > 0 } name) {
                         counted.Add(name);
+                    }
+
+                    if (action is HutongGames.PlayMaker.Actions.GetChildCount {
+                            storeResult: { UseVariable: true, Name.Length: > 0 } children
+                        }) {
+                        counted.Add(children.Name);
                     }
                 }
             }

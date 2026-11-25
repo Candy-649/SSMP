@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Save;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -225,19 +227,194 @@ internal static class OwnCreatures {
             return;
         }
 
-        // A talk with it goes through the hook on how a talking character tells its FSM about a talk, which a room with
-        // no copy in it never put in place
-        Entity.HookTalks();
         var place = ScenePath.Get(creature.transform);
-        Creatures[creature] = (creature.scene.name, place);
+        var parts = TakeAt(creature, type, place, part => ScenePath.Get(part.transform));
+        Logger.Info(
+            $"[Own creatures] '{place}' ({type}) runs in each game as the room's own, with no copy, and {parts} " +
+            "part(s) with state machines of their own"
+        );
+    }
 
-        // Its parts with state machines of their own, while they still hang under it, and the state machines that each
-        // game runs by itself
+    /// <summary>
+    /// What starts the place of a summon: a creature that a creature that every game runs by itself made as it ran,
+    /// which every game makes by itself and names alike (see <see cref="TakeSummon"/>), rather than a place in the
+    /// room, where each game has its own made one at another place among the others.
+    /// </summary>
+    private const char SummonStart = '%';
+
+    /// <summary>
+    /// What stands between the place of a summon and the path of an object of it under it.
+    /// </summary>
+    private const char SummonPartStart = '|';
+
+    /// <summary>
+    /// What made a summon (see <see cref="TakeSummon"/>): the place of the creature that made it, and the state machine
+    /// and state of the action that made it, with the number of that action in the state, by which the scene host's
+    /// game has a member who comes in make it too (see CoopSave.OwnSummons).
+    /// </summary>
+    public readonly record struct SummonMaker(string Place, string Fsm, string State, int Action);
+
+    /// <summary>
+    /// What made each summon here (see <see cref="SummonMaker"/>).
+    /// </summary>
+    private static readonly Dictionary<GameObject, SummonMaker> Makers = new();
+
+    /// <summary>
+    /// The creature that made each summon here.
+    /// </summary>
+    private static readonly Dictionary<GameObject, GameObject> SummonedBy = new();
+
+    /// <summary>
+    /// Whether two creatures that every game runs by itself are one, or one of them made the other as its summon (see
+    /// <see cref="TakeSummon"/>): what one of them tells the other is the creature's own, as what its parts tell one
+    /// another (see CoopSave.OwnTells).
+    /// </summary>
+    public static bool AreKin(GameObject? one, GameObject? other) {
+        return one == other || one != null && other != null &&
+            (SummonedBy.TryGetValue(one, out var oneBy) && oneBy == other ||
+             SummonedBy.TryGetValue(other, out var otherBy) && otherBy == one);
+    }
+
+    /// <summary>
+    /// Makes what an action of a creature that every game runs by itself, or of a part of one, makes as it starts,
+    /// where that is a creature of a kind that every game runs by itself, as a summon of it (see
+    /// <see cref="TakeSummon"/>), the way the action makes it (CreateObject.OnEnter): every game makes its own as its
+    /// creature runs, under the name that the action gives it there. One of that name that is here already, made at
+    /// the word of the scene host's game for the local player, who came in after it was made there (see
+    /// CoopSave.OwnSummons), is the one that the action makes. Before, the scene host's game made it alone and every
+    /// other showed a copy of it (see RoomCreatures). Whether the action is such a one.
+    /// </summary>
+    public static bool MakesSummon(CreateObject action) {
+        if (Creatures.Count == 0 || action.Fsm?.FsmComponent is not { } machine || machine == null ||
+            !RollsUnderPlace(machine.gameObject) || action.gameObject.Value is not { } prefab || prefab == null ||
+            !EntityRegistry.TryGetEntry(prefab, out var entry) || !entry.OwnInEachGame) {
+            return false;
+        }
+
+        var maker = machine.gameObject;
+        SharedDice.RollByName(maker, RollName(maker));
+        var key = SharedDice.NextOwnThrowKey(action)!;
+        var summon = Find(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, SummonStart + key);
+        if (summon != null) {
+            Logger.Info(
+                $"[Own creatures] '{PlaceOf(maker)}' makes '{SummonStart + key}' in '{action.State.Name}' of " +
+                $"'{machine.FsmName}', which is here already"
+            );
+        } else {
+            summon = MakeAs(action, prefab);
+            TakeSummon(summon, entry.Type, key, maker, action);
+        }
+
+        action.storeObject.Value = summon;
+        action.Finish();
+        return true;
+    }
+
+    /// <summary>
+    /// Makes a summon that the scene host's game made before the local player came in, as the action that made it there
+    /// makes it (see <see cref="MakesSummon"/>), and takes it at its place there.
+    /// </summary>
+    /// <param name="place">Its place there.</param>
+    /// <param name="maker">What made it there.</param>
+    /// <returns>The summon, or null where its maker or the action is not here.</returns>
+    public static GameObject? MakeSummonAsTold(string place, SummonMaker maker) {
+        if (Find(null, maker.Place) is not { } by ||
+            PlayMakerFSM.FindFsmOnGameObject(by, maker.Fsm) is not { } machine || machine == null ||
+            machine.Fsm.GetState(maker.State) is not { } state || maker.Action >= state.Actions.Length ||
+            state.Actions[maker.Action] is not CreateObject action || action.gameObject.Value is not { } prefab ||
+            !EntityRegistry.TryGetEntry(prefab, out var entry)) {
+            return null;
+        }
+
+        var summon = MakeAs(action, prefab);
+        TakeSummon(summon, entry.Type, place.Substring(1), by, action);
+        return summon;
+    }
+
+    /// <summary>
+    /// What made a summon here, or null for a creature that is none (see <see cref="Makers"/>).
+    /// </summary>
+    public static SummonMaker? MakerOf(GameObject creature) {
+        return Makers.TryGetValue(creature, out var maker) ? maker : null;
+    }
+
+    /// <summary>
+    /// Makes what an action that makes an object makes, as the action does (CreateObject.OnEnter): at its spawn point,
+    /// moved by its position and turned as it is or by its rotation, or else at its position and rotation.
+    /// </summary>
+    private static GameObject MakeAs(CreateObject action, GameObject prefab) {
+        var position = Vector3.zero;
+        var angles = Vector3.zero;
+        if (action.spawnPoint.Value is { } point && point != null) {
+            position = point.transform.position;
+            if (!action.position.IsNone) {
+                position += action.position.Value;
+            }
+
+            angles = action.rotation.IsNone ? point.transform.eulerAngles : action.rotation.Value;
+        } else {
+            if (!action.position.IsNone) {
+                position = action.position.Value;
+            }
+
+            if (!action.rotation.IsNone) {
+                angles = action.rotation.Value;
+            }
+        }
+
+        return UnityEngine.Object.Instantiate(prefab, position, Quaternion.Euler(angles));
+    }
+
+    /// <summary>
+    /// Takes a creature that a creature that every game runs by itself made as it ran, its summon, as one that every
+    /// game runs by itself too, under the name that the action that made it gave it, the same in every game (see
+    /// SharedDice.NextOwnThrowKey): each game makes its own, which rolls under that name, and whose parts are named
+    /// after it (USER 11-25 "各生各的，不看人的部分投骰子，看人的部分听房主").
+    /// </summary>
+    /// <param name="creature">The summon.</param>
+    /// <param name="type">Its kind.</param>
+    /// <param name="key">The name that the action that made it gave it.</param>
+    /// <param name="maker">The creature, or part of one, whose action made it.</param>
+    /// <param name="action">The action.</param>
+    private static void TakeSummon(
+        GameObject creature,
+        EntityType type,
+        string key,
+        GameObject maker,
+        CreateObject action
+    ) {
+        var place = SummonStart + key;
+        var parts = TakeAt(
+            creature, type, place,
+            part => place + SummonPartStart + Component.PartsComponent.GetPath(creature.transform, part.transform)
+        );
+        var made = new SummonMaker(
+            PlaceOf(maker), action.Fsm.FsmComponent.FsmName, action.State.Name,
+            Array.IndexOf(action.State.Actions, action)
+        );
+        Makers[creature] = made;
+        SummonedBy[creature] = Owning(maker) ?? maker;
+        Logger.Info(
+            $"[Own creatures] '{place}' ({type}), which '{made.Place}' made here in '{made.State}' of '{made.Fsm}', " +
+            $"runs in each game as the room's own, made by each, with {parts} part(s) with state machines of their own"
+        );
+    }
+
+    /// <summary>
+    /// Takes a creature as one that every game runs by itself at a place (see <see cref="Take"/>), with its parts with
+    /// state machines of their own, while they still hang under it, at theirs, and the state machines that each game
+    /// runs by itself. A talk with it goes through the hook on how a talking character tells its FSM about a talk,
+    /// which a room with no copy in it never put in place.
+    /// </summary>
+    /// <returns>How many parts it has.</returns>
+    private static int TakeAt(GameObject creature, EntityType type, string place, Func<GameObject, string> partPlace) {
+        Entity.HookTalks();
+        Creatures[creature] = (creature.scene.name, place);
         var parts = 0;
         foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
             var part = machine.gameObject;
             if (part != creature && !Parts.ContainsKey(part)) {
-                Parts[part] = (creature, creature.scene.name, ScenePath.Get(part.transform));
+                Parts[part] = (creature, creature.scene.name, partPlace(part));
                 parts++;
             }
 
@@ -246,10 +423,55 @@ internal static class OwnCreatures {
             }
         }
 
-        Logger.Info(
-            $"[Own creatures] '{place}' ({type}) runs in each game as the room's own, with no copy, and {parts} " +
-            "part(s) with state machines of their own"
-        );
+        return parts;
+    }
+
+    /// <summary>
+    /// Whether a place is that of a summon or of a part of one (see <see cref="TakeSummon"/>).
+    /// </summary>
+    public static bool IsSummonPlace(string place) {
+        return place.Length > 0 && place[0] == SummonStart;
+    }
+
+    /// <summary>
+    /// The path that names an object of a summon in every game (see <see cref="TakeSummon"/>): the place of the summon,
+    /// and the path of the object under it, or null for an object of no summon.
+    /// </summary>
+    public static string? SummonPathOf(GameObject target) {
+        if (Creatures.Count == 0) {
+            return null;
+        }
+
+        if (Parts.TryGetValue(target, out var part)) {
+            return IsSummonPlace(part.Place) ? part.Place : null;
+        }
+
+        for (var current = target.transform; current != null; current = current.parent) {
+            if (Creatures.TryGetValue(current.gameObject, out var at)) {
+                return !IsSummonPlace(at.Place) ? null
+                    : current == target.transform ? at.Place
+                    : at.Place + SummonPartStart + Component.PartsComponent.GetPath(current, target.transform);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The object of a summon that a path names (see <see cref="SummonPathOf"/>), or null where there is none here.
+    /// </summary>
+    public static GameObject? FindSummonPath(string scene, string path) {
+        if (Find(scene, path) is { } found) {
+            return found;
+        }
+
+        var start = path.IndexOf(SummonPartStart);
+        if (start < 0 || Find(scene, path.Substring(0, start)) is not { } summon) {
+            return null;
+        }
+
+        var under = summon.transform.Find(path.Substring(start + 1));
+        return under != null ? under.gameObject : null;
     }
 
     /// <summary>
@@ -402,17 +624,19 @@ internal static class OwnCreatures {
 
     /// <summary>
     /// The creature at a place of a scene as the room loaded it, if it is one that every game runs by itself, or the
-    /// part with state machines of its own of one there.
+    /// part with state machines of its own of one there; of any scene of the room for none given, like the creature
+    /// that made a summon, which may stand in a part of the room loaded beside it, while what it made is made in the
+    /// room itself.
     /// </summary>
-    public static GameObject? Find(string scene, string place) {
+    public static GameObject? Find(string? scene, string place) {
         foreach (var pair in Creatures) {
-            if (pair.Key != null && pair.Value.Scene == scene && pair.Value.Place == place) {
+            if (pair.Key != null && (scene == null || pair.Value.Scene == scene) && pair.Value.Place == place) {
                 return pair.Key;
             }
         }
 
         foreach (var pair in Parts) {
-            if (pair.Key != null && pair.Value.Scene == scene && pair.Value.Place == place) {
+            if (pair.Key != null && (scene == null || pair.Value.Scene == scene) && pair.Value.Place == place) {
                 return pair.Key;
             }
         }
@@ -453,6 +677,8 @@ internal static class OwnCreatures {
     public static void Clear() {
         Creatures.Clear();
         Parts.Clear();
+        Makers.Clear();
+        SummonedBy.Clear();
         EachGame.Clear();
         Dead.Clear();
         Deaths.Clear();

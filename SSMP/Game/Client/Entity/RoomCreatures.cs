@@ -139,11 +139,14 @@ internal class RoomCreatures {
         }
 
         void Find(GameObject? prefab, UnityEngine.Component maker, CreateObject? create) {
-            // A creature's own FSMs run in one game only, and what they spawn is sent already
+            // A creature's own FSMs run in one game only, and what they spawn is sent already. A creature that every
+            // game runs by itself makes a creature of a kind that every game runs by itself in every game, as its
+            // summon (see OwnCreatures.MakesSummon)
             if (prefab == null ||
                 !EntityRegistry.TryGetEntry(prefab, out var entry) ||
                 !EntitySpawner.IsSpawnedAsEntity(prefab) ||
-                EntityProcessor.IsRegistered(maker.gameObject)) {
+                EntityProcessor.IsRegistered(maker.gameObject) ||
+                entry.OwnInEachGame && OwnCreatures.Owning(maker.gameObject) != null) {
                 return;
             }
 
@@ -206,9 +209,14 @@ internal class RoomCreatures {
     }
 
     /// <summary>
-    /// Makes an object from a prefab, and for a creature that the room makes, does it in the scene host's game only.
+    /// Makes an object from a prefab, and for a creature that the room makes, does it in the scene host's game only. A
+    /// summon of a creature that every game runs by itself is made by every game (see OwnCreatures.MakesSummon).
     /// </summary>
     private void OnCreateObject(Action<CreateObject> orig, CreateObject self) {
+        if (OwnCreatures.MakesSummon(self)) {
+            return;
+        }
+
         var prefab = self.gameObject is { UseVariable: false } prefabField ? prefabField.Value : null;
         if (prefab == null || !IsMadeByTheRoom(prefab) || EntityProcessor.IsRegistered(self.Fsm.GameObject)) {
             orig(self);

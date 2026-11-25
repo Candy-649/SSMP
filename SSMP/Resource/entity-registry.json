@@ -493,6 +493,7 @@
   {
     "base_object_name": "Song Pilgrim Maestro",
     "type": "Maestro",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -745,6 +746,7 @@
   {
     "base_object_name": "Song Pilgrim Target",
     "type": "Choristor",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -770,6 +772,7 @@
   {
     "base_object_name": "Song Automaton Tiny",
     "type": "SongAutomatonTiny",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1756,6 +1759,7 @@
   {
     "base_object_name": "Song Pilgrim 01",
     "type": "Envoy",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1783,6 +1787,7 @@
   {
     "base_object_name": "Song Pilgrim 03",
     "type": "Choristor",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1796,6 +1801,7 @@
   {
     "base_object_name": "Song Reed Grand",
     "type": "GrandReed",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2545,6 +2551,7 @@
   {
     "base_object_name": "Scrollkeeper",
     "type": "Scrollreader",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2934,6 +2941,7 @@
   {
     "base_object_name": "Pilgrim Fly",
     "type": "WingedPilgrim",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3583,6 +3591,7 @@
   {
     "base_object_name": "Song Reed",
     "type": "Reed",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

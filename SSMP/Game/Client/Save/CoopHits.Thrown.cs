@@ -604,9 +604,10 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// The scene and path that find an object in the others' games: its place in the room, or for a part of a thing
-    /// that a creature threw its name and where it is (see <see cref="ThrownThings.PathOf(GameObject)"/>), with the
-    /// room it is in.
+    /// The scene and path that find an object in the others' games: its place in the room, for a part of a thing that
+    /// a creature threw its name and where it is (see <see cref="ThrownThings.PathOf(GameObject)"/>), and for an
+    /// object of a creature that a creature that every game runs by itself made, the name that every game gave it
+    /// (see OwnCreatures.SummonPathOf), with the room it is in.
     /// </summary>
     /// <param name="target">The object.</param>
     /// <param name="scene">The scene.</param>
@@ -616,6 +617,12 @@ internal partial class CoopHits {
         if (ThrownThings.Count > 0 && ThrownThings.PathOf(target) is { } thrownPath) {
             scene = SceneManager.GetActiveScene().name;
             path = thrownPath;
+            return true;
+        }
+
+        if (Entity.OwnCreatures.SummonPathOf(target) is { } summonPath) {
+            scene = target.scene.name;
+            path = summonPath;
             return true;
         }
 
@@ -633,9 +640,10 @@ internal partial class CoopHits {
     /// Finds the object that an update of the partner names (see <see cref="TryGetPlace"/>).
     /// </summary>
     private static GameObject? FindPlace(CoopHitUpdate update) {
-        return ThrownThings.IsPath(update.Path)
-            ? ThrownThings.Find(update.Path)
-            : ScenePath.Find(update.Path, update.Scene);
+        return ThrownThings.IsPath(update.Path) ? ThrownThings.Find(update.Path)
+            : Entity.OwnCreatures.IsSummonPlace(update.Path)
+                ? Entity.OwnCreatures.FindSummonPath(update.Scene, update.Path)
+                : ScenePath.Find(update.Path, update.Scene);
     }
 
     /// <summary>

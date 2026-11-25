@@ -54,13 +54,16 @@ internal partial class CoopSave {
     /// Whether a state machine of a creature that every game runs by itself goes to a state as something outside the
     /// creature tells it: another state machine than its own and those of its parts, whose event takes it there, or
     /// one of them that each game runs by itself for its own player (see OwnCreatures.RunsInEachGame), which hears
-    /// what only this game's player does, like the throw of their harpoon.
+    /// what only this game's player does, like the throw of their harpoon. Not the creature that made it, or one that
+    /// it made, its summon (see OwnCreatures.AreKin), whose orders go by what each game has under it: a conductor
+    /// picks the fly that it sends at the player among those under it, whose order each game has otherwise as they
+    /// leave and come back, and an order taken at once in every game would send another fly in each.
     /// </summary>
     private static bool ToldFromOutside(Fsm fsm, FsmState toState, GameObject creature) {
         return Fsm.EventData?.SentByFsm is { } teller && teller != fsm && fsm.LastTransition is { } way &&
                way.ToState == toState.Name &&
                (teller.GameObject is not { } tellerObject ||
-                OwnCreatures.Owning(tellerObject) != OwnCreatures.Owning(creature) ||
+                !OwnCreatures.AreKin(OwnCreatures.Owning(tellerObject), OwnCreatures.Owning(creature)) ||
                 teller.FsmComponent is { } heard && OwnCreatures.RunsInEachGame(heard));
     }
 

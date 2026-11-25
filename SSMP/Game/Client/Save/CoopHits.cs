@@ -4574,8 +4574,10 @@ internal partial class CoopHits {
     /// its name (see <see cref="ThrownThings"/>).
     /// </summary>
     internal static bool IsRoomObject(Component component) {
-        // A thing that a creature threw, which every game knows by its name rather than by a place in the room
-        var isThrown = ThrownThings.Count > 0 && ThrownThings.IsThrown(component.gameObject);
+        // A thing that a creature threw, which every game knows by its name rather than by a place in the room, and so
+        // a creature that a creature that every game runs by itself made, its summon (see OwnCreatures.TakeSummon)
+        var isThrown = ThrownThings.Count > 0 && ThrownThings.IsThrown(component.gameObject) ||
+                       OwnCreatures.SummonPathOf(component.gameObject) != null;
         var scene = component.gameObject.scene;
         if (!isThrown && (!scene.IsValid() || scene.name == "DontDestroyOnLoad") ||
             component.GetComponentInParent<HealthManager>(true) is { } creature &&
