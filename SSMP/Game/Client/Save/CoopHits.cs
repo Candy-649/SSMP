@@ -267,6 +267,12 @@ internal partial class CoopHits {
     public static Action<GameObject, ushort, uint>? ReplayedStrike { get; set; }
 
     /// <summary>
+    /// What this game does as a creature that every game runs by itself gives way to a blow of another player that
+    /// extracts from it, with their character here and that player (see CoopSave.TakeOthersExtract).
+    /// </summary>
+    public static Action<HealthManager, GameObject, ushort>? TakesOthersExtract { get; set; }
+
+    /// <summary>
     /// Whether a creature that every game runs by itself, which an object is or is a part of, plays a move through here
     /// before steps of the scene host's that came meanwhile (see CoopSave.KeepsForAfterMove): a replay of a blow, a
     /// touch or a tink of another player on it waits until it has taken them, as they came before it there (see
@@ -947,7 +953,9 @@ internal partial class CoopHits {
                     ? () => TakeAsBlock(creature, hit)
                     : update.ExtraDamage
                         ? () => TakeAsExtraDamage(creature, hit)
-                        : () => TakeAsWound(creature, hit);
+                        : HitCounters.Extracts(creature, hit) && OwnCreatures.Has(creature.gameObject)
+                            ? () => TakeAsExtract(creature, striker, update.PlayerId)
+                            : () => TakeAsWound(creature, hit);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
                 () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(strike, component, striker))
             ), source.HitName);
@@ -1683,6 +1691,22 @@ internal partial class CoopHits {
         }
 
         creature.TakeDamage(hit);
+        return IHitResponder.Response.DamageEnemy;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself give way to a blow of another player that extracts from it, as it
+    /// did in their game, drawn to their character here, which their game plays to its end and tells (see
+    /// CoopSave.OwnExtracts). The game's own way with such a blow would draw it to this game's player, and set this
+    /// game's hero to extracting it if it was in the middle of an extraction of its own. One that died here already,
+    /// or a blow of a player whose character is not here, does nothing.
+    /// </summary>
+    private static IHitResponder.HitResponse TakeAsExtract(HealthManager creature, GameObject? striker, ushort player) {
+        if (creature.isDead || striker == null) {
+            return IHitResponder.Response.None;
+        }
+
+        TakesOthersExtract?.Invoke(creature, striker, player);
         return IHitResponder.Response.DamageEnemy;
     }
 

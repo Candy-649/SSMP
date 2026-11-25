@@ -392,6 +392,7 @@
   {
     "base_object_name": "MossBone Crawler Fat",
     "type": "MassiveMossgrub",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -619,6 +620,7 @@
   {
     "base_object_name": "Bone Worm BlueBlood",
     "type": "Plasmid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1396,8 +1398,22 @@
     ]
   },
   {
+    "base_object_name": "MossBone Crawler Summon",
+    "type": "Mossgrub",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "MossBone Crawler Summon",
+    "fsm_names": [
+      "Noise Reaction",
+      "Summon Control"
+    ]
+  },
+  {
     "base_object_name": "MossBone Crawler",
     "type": "Mossgrub",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2092,6 +2108,7 @@
   {
     "base_object_name": "Swamp Mosquito",
     "type": "SwampSquit",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2497,6 +2514,7 @@
   {
     "base_object_name": "MossBone Fly",
     "type": "Mossmir",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2578,6 +2596,7 @@
   {
     "base_object_name": "Swamp Goomba",
     "type": "Miremite",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -4048,6 +4067,7 @@
   {
     "base_object_name": "MossBone Cocoon",
     "type": "MossBoneCocoon",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

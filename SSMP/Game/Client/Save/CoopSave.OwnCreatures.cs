@@ -330,6 +330,7 @@ internal partial class CoopSave {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         OwnThreads.SendToRoomMembers = SendToRoomMembers;
         CoopHits.ReplayedStrike = TookOthersBlow;
+        CoopHits.TakesOthersExtract = TakeOthersExtract;
         CoopHits.WaitsForAMove = struck => PlaysMoveThrough(struck) != null;
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
         OwnCreatures.HasNoHealthAsTold = HasNoHealthAsTold;
@@ -399,6 +400,12 @@ internal partial class CoopSave {
                 $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' has {lives.hp} health again in " +
                 $"'{toState.Name}' of '{self.Name}', after a death that it comes back from"
             );
+        }
+
+        // In an extraction of another player's, which only the word of their game ends (see CoopSave.OwnExtracts)
+        if (_othersExtracts.Count > 0 && HoldsInOthersExtract(self, toState)) {
+            MachineSwitchToStateField?.SetValue(self, null);
+            return;
         }
 
         // The way into a step of the scene host's, which plays as it came: nothing holds it back, and the step itself
@@ -497,7 +504,7 @@ internal partial class CoopSave {
         // which the scene host's game is told of and plays too (see CoopSave.OwnTells)
         var waitedFor = IsWaitedFor(self);
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
-        var setOffHere = ToldFromOutside(self, toState, creature);
+        var setOffHere = ToldFromOutside(self, toState, creature) || EndsOwnExtract(self, toState);
         var picks = PicksAPart(toState);
 
         // A tell from outside that the scene host's game played at the word of another game a moment before, which

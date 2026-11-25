@@ -380,8 +380,9 @@ internal partial class CoopSave {
         }
 
         if (leap == null) {
-            return StartsOwnRoomCatch(machine, toState) || StartsOwnStrikeBack(machine, toState) ||
-                   StartsOwnLeap(machine, toState) || ToldInOwnLeap(fsm, creature);
+            return StartsOwnExtract(machine, toState) || StartsOwnRoomCatch(machine, toState) ||
+                   StartsOwnStrikeBack(machine, toState) || StartsOwnLeap(machine, toState) ||
+                   ToldInOwnLeap(fsm, creature);
         }
 
         if (leap.Through) {
@@ -863,6 +864,12 @@ internal partial class CoopSave {
         /// the first one out of them, which the creature here goes on from.
         /// </summary>
         public bool Hit;
+
+        /// <summary>
+        /// Whether it is an extraction by this game's player, through the states in <see cref="Catch"/> (see
+        /// CoopSave.OwnExtracts), whose end the scene host's game is told of.
+        /// </summary>
+        public bool Extract;
 
         /// <summary>
         /// The latest step of the scene host's creature that came meanwhile, which the creature here goes on from once
