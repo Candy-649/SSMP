@@ -825,6 +825,7 @@ internal partial class CoopSave {
         _keptOutTold.Clear();
         _deathsOwed.Clear();
         _catchStates.Clear();
+        _lookStates.Clear();
         _ownLeaps.Clear();
         _partStepsInLeap.Clear();
         _earlyCatches.Clear();

@@ -272,6 +272,9 @@ internal partial class CoopSave {
             _earlyLedSteps[fsm] = early;
         }
 
+        // A step of a move that a scene host before numbered, which this game never followed, is no step of a look
+        // of this game's own, which goes after it (see CoopSave.OwnSilkLooks)
+        NoteSilkLook(number);
         early.Add((player.Id, number, step, into));
         Logger.Info($"[Own creatures] {told}, which comes before the move does here, and waits for it");
     }

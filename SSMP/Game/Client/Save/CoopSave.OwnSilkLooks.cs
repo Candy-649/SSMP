@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Entity;
@@ -31,10 +33,16 @@ internal partial class CoopSave {
     private const string SilkField = "silk";
 
     /// <summary>
-    /// How many looks at the silk of another player the creatures of this game made as the scene host's, which numbers
-    /// the move from each (see <see cref="StartsOthersSilkLook"/>).
+    /// The number of the latest look at the silk of another player that a creature made in the game of a scene host,
+    /// this game's or one before it as far as this game heard, after which the next one of this game's goes (see
+    /// <see cref="StartsOthersSilkLook"/>, <see cref="NoteSilkLook"/>).
     /// </summary>
     private ulong _silkLooks;
+
+    /// <summary>
+    /// The state that looks at silk whose move each state of a state machine is of (see <see cref="LookStateOf"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, Dictionary<FsmState, FsmState>> _lookStates = new();
 
     /// <summary>
     /// Whether a state looks at the silk of the player.
@@ -51,6 +59,43 @@ internal partial class CoopSave {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The state that looks at silk whose move a state is of (see Entity.Action.EntityFsmActions.MoveFrom), the look
+    /// itself for one, or null.
+    /// </summary>
+    private FsmState? LookStateOf(Fsm fsm, FsmState state) {
+        if (!_lookStates.TryGetValue(fsm, out var firsts)) {
+            firsts = new Dictionary<FsmState, FsmState>();
+            foreach (var each in fsm.States) {
+                if (LooksAtSilk(each)) {
+                    firsts[each] = each;
+                }
+            }
+
+            foreach (var look in firsts.Values.ToList()) {
+                foreach (var inMove in Entity.Action.EntityFsmActions.MoveFrom(fsm, look)) {
+                    firsts.TryAdd(inMove, look);
+                }
+            }
+
+            _lookStates[fsm] = firsts;
+        }
+
+        return firsts.TryGetValue(state, out var first) ? first : null;
+    }
+
+    /// <summary>
+    /// Notes the number of a move that this game heard of, from a look or from a step that another game leads, so that
+    /// a look of its own, as it becomes the scene host, is numbered after it. A move of the scene host before, whose
+    /// steps its player's game sends on to the new one, was otherwise taken for the new one's move of the same number,
+    /// steps and all (review of facfc46, with three players or more): one numbered after it goes, and so do they.
+    /// </summary>
+    private void NoteSilkLook(ulong number) {
+        if (number > _silkLooks) {
+            _silkLooks = number;
+        }
     }
 
     /// <summary>
@@ -87,28 +132,39 @@ internal partial class CoopSave {
     /// that player is this game's, telling every step of it (see CoopSave.OwnLedMoves), or else follow it, taking the
     /// steps of the scene host's in it and none of its own, with what it does to the player kept off this game's (see
     /// KeepOut): a look at the scene host's player, or at no one, which the step tells by no number, is the scene
-    /// host's game's to lead, and so is one in the state that a member who has just come in is told of, whose number
-    /// they do not have.
+    /// host's game's to lead, and so is one that a member who has just come in is put into, at the look or in the
+    /// move after it, whose number they do not have.
     /// </summary>
     private void FollowsSilkLookAsTold(PlayMakerFSM machine, FsmState toState, CoopSaveUpdate step, ushort host) {
         var fsm = machine.Fsm;
-        if (!LooksAtSilk(toState) || _ledMoves.ContainsKey(fsm) || _ownLeaps.ContainsKey(fsm)) {
+        if (_ledMoves.ContainsKey(fsm) || _ownLeaps.ContainsKey(fsm) || LookStateOf(fsm, toState) is not { } look) {
             return;
         }
 
         var creature = machine.gameObject;
         var place = OwnCreatures.PlaceOf(creature);
-        var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, toState);
-        var number = step.PartCount is OwnStruckPart or OwnToldPart ? 0UL : step.Sequence;
-        if (number > 0 && HeroController.SilentInstance is { } hero &&
-            GamePatcher.TargetOf(creature) == hero.gameObject) {
+        var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, look);
+
+        // The number comes with the step into the look itself. One into the move after it, which a member who has just
+        // come in is put into, has none, and the move is followed as the scene host's game tells it all the same:
+        // otherwise what it does to the player, like the flash and the drain of the spin that another player's game
+        // led, went on that member's own (review of facfc46)
+        var number = toState == look && step.PartCount is not (OwnStruckPart or OwnToldPart) ? step.Sequence : 0UL;
+        NoteSilkLook(number);
+
+        // Whom the scene host's game looked at, as its step says, rather than whom the creature goes after here: a
+        // song or another move here may point it at someone else, and a game that went on with a move of its own
+        // player's as led elsewhere waited for itself, as the scene host's game waited for it (review of facfc46)
+        var looked = ThrownThings.FigureOf?.Invoke(step.Part, host);
+        var atLocalPlayer = looked != null && HeroController.SilentInstance is { } hero && looked == hero.gameObject;
+        if (number > 0 && atLocalPlayer) {
             _ownLeaps[fsm] = new OwnLeap(place, false, "look at the silk of the local player") {
                 Catch = states,
                 Led = true,
                 Move = number
             };
             Logger.Info(
-                $"[Own creatures] '{place}' looks at the silk of the local player in '{toState.Name}' of " +
+                $"[Own creatures] '{place}' looks at the silk of the local player in '{look.Name}' of " +
                 $"'{fsm.Name}', move {number}, which it plays here by itself to its end, leading it"
             );
             return;
@@ -116,13 +172,16 @@ internal partial class CoopSave {
 
         var leader = number > 0 ? step.Part : host;
         FollowLedMove(fsm, states, null, leader, number);
-        if (!GoesAfterLocalPlayer(creature) && !_keptOut.ContainsKey(fsm)) {
-            KeepOut(fsm, toState);
+        if (looked != null && !atLocalPlayer && !_keptOut.ContainsKey(fsm)) {
+            KeepOut(fsm, look);
         }
 
         Logger.Info(
-            $"[Own creatures] '{place}' looks at the silk of the player {leader} in '{toState.Name}' of '{fsm.Name}'" +
-            (number > 0 ? $", move {number}," : "") + " which goes on as the scene host's game tells"
+            $"[Own creatures] '{place}' looks at the silk of the player {leader} in '{look.Name}' of '{fsm.Name}'" +
+            (toState != look
+                ? $", here put into '{toState.Name}' of the move,"
+                : number > 0 ? $", move {number}," : "") +
+            " which goes on as the scene host's game tells"
         );
     }
 }
