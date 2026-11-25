@@ -452,19 +452,24 @@ internal partial class ArenaCoop {
     }
 
     /// <summary>
-    /// Sends the state of the arenas in the scene to a player who entered it, if the local player is the scene host.
+    /// Sends the state of the arenas in the scene to a player who entered it, if the local player is the scene host:
+    /// of those that are out, and of those of a memory that were won here and switched off as the way past them opened,
+    /// whose ends the player who comes into the memory later has played as they walk into them (see
+    /// TryPlayMemoryEnd). An arena whose battle every game runs by itself is not asked about as they walk in (see
+    /// OnStartBattle), and they would fight alone every chamber that the scene host had won, while it waited for them
+    /// at the boss.
     /// </summary>
     public void OnPlayerEnterScene() {
         if (!_entityManager.IsSceneHost) {
             return;
         }
 
-        var battleScenes = Object.FindObjectsByType<BattleScene>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        var battleScenes = Object.FindObjectsByType<BattleScene>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         foreach (var battleScene in battleScenes) {
-            var state = GetState(battleScene);
-            if (IsCompleted(battleScene)) {
-                Send(state.Path, BattleSceneStatus.AlreadyWon);
-            } else if (state.Started) {
+            var isOut = battleScene.gameObject.activeInHierarchy;
+            if (IsCompleted(battleScene) && (isOut || IsInMemory(battleScene))) {
+                Send(GetState(battleScene).Path, BattleSceneStatus.AlreadyWon);
+            } else if (isOut && GetState(battleScene) is { Started: true } state) {
                 SendRunning(battleScene, state);
             }
         }

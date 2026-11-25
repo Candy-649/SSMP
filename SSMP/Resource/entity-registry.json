@@ -650,6 +650,20 @@
   {
     "base_object_name": "Coral Conch Driller",
     "type": "Conchfly",
+    "own_in_each_game": true,
+    "parent_name": "Wave",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Coral Conch Driller",
+    "fsm_names": [
+      "Control",
+      "FSM"
+    ]
+  },
+  {
+    "base_object_name": "Coral Conch Driller",
+    "type": "Conchfly",
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1155,6 +1169,7 @@
   {
     "base_object_name": "Coral Flyer Throw",
     "type": "Yago",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2822,6 +2837,7 @@
   {
     "base_object_name": "Coral Flyer",
     "type": "Kakri",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
