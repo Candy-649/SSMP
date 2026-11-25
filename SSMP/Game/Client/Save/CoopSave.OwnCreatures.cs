@@ -692,15 +692,18 @@ internal partial class CoopSave {
 
         var creature = self.gameObject;
         var place = OwnCreatures.PlaceOf(creature);
+        var death = OwnCreatures.CountDeath(creature);
         Logger.Info(
-            $"[Own creatures] '{place}' died here at ({where.x:F1}, {where.y:F1}), as the members in the room are " +
-            "told" + (target != null ? $", the player it goes after {beside.x:F1}, {beside.y:F1} from it" : "")
+            $"[Own creatures] '{place}' died here at ({where.x:F1}, {where.y:F1}), its death {death} here, as the " +
+            "members in the room are told" +
+            (target != null ? $", the player it goes after {beside.x:F1}, {beside.y:F1} from it" : "")
         );
         SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.OwnCreature,
             Scene = creature.scene.name,
             ObjectPath = place,
             PartCount = 2,
+            Sequence = death,
             Part = ThrownThings.CodeOf?.Invoke(target) ?? ThrownThings.NoPlayer,
             Values = attackDirection is { } direction
                 ? [where.x, where.y, facing, turned, beside.x, beside.y, direction]
@@ -868,9 +871,11 @@ internal partial class CoopSave {
         var shown = thing.TryGetComponent<Renderer>(out var look) && look.enabled;
         update.Values.Add(shown ? 1f : 0f);
 
-        // Their own has all its health, which the blows before they came took here
+        // Their own has all its health, which the blows before they came took here, and counts its deaths from as many
+        // as it had here, of one that came back from them (see OwnCreatures.TakeDeath)
         if (health != null) {
             update.Values.Add(health.hp);
+            update.Sequence = OwnCreatures.DeathsOf(thing);
         }
 
         Logger.Info(
@@ -966,8 +971,11 @@ internal partial class CoopSave {
         // Died there just now: it dies here too, as the game has a creature die, though the blow that killed it there
         // did not here, or has not come yet
         if (update.PartCount == 2) {
-            if (!OwnCreatures.MarkDead(creature)) {
-                Logger.Info($"[Own creatures] '{place}' died in {player.Username}'s game, and here already");
+            if (!OwnCreatures.TakeDeath(creature, update.Sequence)) {
+                Logger.Info(
+                    $"[Own creatures] '{place}' died in {player.Username}'s game, its death {update.Sequence} there, " +
+                    $"which it played here already, of {OwnCreatures.DeathsOf(creature)} here"
+                );
                 return;
             }
 
@@ -979,8 +987,9 @@ internal partial class CoopSave {
             var diedAt = new Vector3(update.Values[0], update.Values[1], dying.position.z);
             var lookedAt = update.Part != ThrownThings.NoPlayer;
             Logger.Info(
-                $"[Own creatures] '{place}' died in {player.Username}'s game and dies here too, where it did there, " +
-                $"{Vector2.Distance(dying.position, diedAt):F1} away" + (lookedAt
+                $"[Own creatures] '{place}' died in {player.Username}'s game, its death {update.Sequence} there, and " +
+                $"dies here too, where it did there, {Vector2.Distance(dying.position, diedAt):F1} away, with " +
+                $"{health.hp} health here" + (lookedAt
                     ? $", the player it goes after {update.Values[4]:F1}, {update.Values[5]:F1} from it there"
                     : "")
             );
@@ -996,6 +1005,11 @@ internal partial class CoopSave {
                 OwnCreatures.SeeTargetAtDeath(creature, diedAt + new Vector3(update.Values[4], update.Values[5], 0f));
             }
 
+            // It has no health here either, as there, where the blow that killed it did not land here, or has not come
+            // yet: the health that it still had here was taken for health that it has again after a death that it comes
+            // back from at the first step of its death, and a blow of this game's player in it told a death of it once
+            // more (review of cfaf69f)
+            health.hp = 0;
             OwnCreatures.AwardJournalKill(health);
             _dyingAsTold = true;
             try {
@@ -1188,6 +1202,15 @@ internal partial class CoopSave {
                     $"rather than {health.hp}"
                 );
                 health.hp = healthThere;
+            }
+
+            // And the deaths that it came back from there, from which the next is counted here as there: a death of
+            // it by the blow of this game's player was told by a number that the scene host's game played already
+            if (update.Sequence > 0) {
+                Logger.Info(
+                    $"[Own creatures] '{place}' died {update.Sequence} time(s) in {player.Username}'s game before"
+                );
+                OwnCreatures.SetDeaths(creature, update.Sequence);
             }
 
             OwnThreads.TookHealth(creature);

@@ -65,6 +65,12 @@ internal static class OwnCreatures {
     private static readonly HashSet<GameObject> Dead = [];
 
     /// <summary>
+    /// How many deaths of each creature this game played, its own and those that it was told, which numbers the word
+    /// of each death (see <see cref="CountDeath"/>).
+    /// </summary>
+    private static readonly Dictionary<GameObject, ulong> Deaths = new();
+
+    /// <summary>
     /// Whether this game is the scene host's, null while that is not settled yet; set by the ClientManager.
     /// </summary>
     public static Func<bool?>? SceneRole { get; set; }
@@ -324,10 +330,54 @@ internal static class OwnCreatures {
     /// <summary>
     /// Notes that a creature that every game runs by itself that died has health again, as its state machines play a
     /// death that it comes back from, like the bell creature that sinks into the ground and comes up again, whose next
-    /// death is told or taken once more (see <see cref="MarkDead"/>).
+    /// death here is told once more (see <see cref="MarkDead"/>; a word of another game's goes by its number, see
+    /// <see cref="TakeDeath"/>).
     /// </summary>
     public static void MarkAlive(GameObject creature) {
         Dead.Remove(creature);
+    }
+
+    /// <summary>
+    /// Counts a death of a creature that every game runs by itself that this game tells, returning its number, by
+    /// which every other game knows whether it played that death already (see <see cref="TakeDeath"/>).
+    /// </summary>
+    public static ulong CountDeath(GameObject creature) {
+        Deaths.TryGetValue(creature, out var deaths);
+        Deaths[creature] = ++deaths;
+        return deaths;
+    }
+
+    /// <summary>
+    /// Takes a death of a creature that every game runs by itself that another game told, by its number there,
+    /// returning whether this game has yet to play it: not one that it played already, as its own or at the word of
+    /// a third game, which comes again or late. A creature that comes back from its death has health again before such
+    /// a word, like the map seller, whose health is set high as her defeat starts, and its death was played once more
+    /// (review of cfaf69f; the user's log of 11-21, 21:41:49).
+    /// </summary>
+    public static bool TakeDeath(GameObject creature, ulong number) {
+        if (Deaths.TryGetValue(creature, out var deaths) && deaths >= number) {
+            return false;
+        }
+
+        Deaths[creature] = number;
+        Dead.Add(creature);
+        return true;
+    }
+
+    /// <summary>
+    /// How many deaths of a creature that every game runs by itself this game played, which a member who comes into
+    /// the room counts from (see <see cref="SetDeaths"/>).
+    /// </summary>
+    public static ulong DeathsOf(GameObject creature) {
+        return Deaths.TryGetValue(creature, out var deaths) ? deaths : 0;
+    }
+
+    /// <summary>
+    /// Has this game count the deaths of a creature that every game runs by itself from as many as the scene host's
+    /// game played before the local player came in.
+    /// </summary>
+    public static void SetDeaths(GameObject creature, ulong deaths) {
+        Deaths[creature] = deaths;
     }
 
     /// <summary>
@@ -384,6 +434,7 @@ internal static class OwnCreatures {
         Creatures.Clear();
         Parts.Clear();
         Dead.Clear();
+        Deaths.Clear();
         DeathLooks.Clear();
         OwnThreads.Clear();
     }
