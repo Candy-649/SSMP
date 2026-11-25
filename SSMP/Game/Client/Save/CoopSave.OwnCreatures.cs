@@ -402,8 +402,8 @@ internal partial class CoopSave {
             );
         }
 
-        // In an extraction of another player's, which only the word of their game ends (see CoopSave.OwnExtracts)
-        if (_othersExtracts.Count > 0 && HoldsInOthersExtract(self, toState)) {
+        // In a move of another player's, which the game of that player leads (see CoopSave.OwnLedMoves)
+        if (_ledMoves.Count > 0 && HoldsInLedMove(self, toState)) {
             MachineSwitchToStateField?.SetValue(self, null);
             return;
         }
@@ -504,7 +504,7 @@ internal partial class CoopSave {
         // which the scene host's game is told of and plays too (see CoopSave.OwnTells)
         var waitedFor = IsWaitedFor(self);
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
-        var setOffHere = ToldFromOutside(self, toState, creature) || EndsOwnExtract(self, toState);
+        var setOffHere = !LeadsMove(self) && ToldFromOutside(self, toState, creature);
         var picks = PicksAPart(toState);
 
         // A tell from outside that the scene host's game played at the word of another game a moment before, which
@@ -874,6 +874,9 @@ internal partial class CoopSave {
         update.TargetId = player.Id;
         update.PartCount = OwnToldPart;
 
+        // The player whose move it is in here, which their own follows as it goes into it (see FollowExtractAsTold)
+        update.Key = LeaderCodeOf(fsm);
+
         // Whether it is shown here, as the states that show it and hide it made it (see OnOwnCreature)
         var shown = thing.TryGetComponent<Renderer>(out var look) && look.enabled;
         update.Values.Add(shown ? 1f : 0f);
@@ -1080,6 +1083,12 @@ internal partial class CoopSave {
         // Something outside it told it to go on there, which it is told here too (see CoopSave.OwnTells)
         if (update.PartCount == OwnTellPart) {
             TakeOwnTell(player, creature, update);
+            return;
+        }
+
+        // It went on in a move that the game of the player it acts on leads (see CoopSave.OwnLedMoves)
+        if (update.PartCount == OwnLedStepPart) {
+            TakeLedStep(player, creature, update);
             return;
         }
 
@@ -1327,6 +1336,8 @@ internal partial class CoopSave {
             MoveOwnSteps(creature, there - transform.position);
         }
 
+        // Drawn to the character of the player who extracts from it, of an extraction that the step goes into
+        FollowExtractAsTold(player, fsm, update);
         PutAtSceneHostsStep(fsm, update, keepsPlace);
         OwnCreatures.SceneHostsStep = (fsm, update.StateName);
 

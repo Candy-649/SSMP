@@ -132,11 +132,6 @@ internal partial class CoopSave {
         Logger.Info(
             $"[Own creatures] {told}, and is told the same here, from '{fsm.ActiveStateName}' into '{way.ToState}'"
         );
-        _takingTell = true;
-        try {
-            fsm.Event(way.FsmEvent);
-        } finally {
-            _takingTell = false;
-        }
+        fsm.Event(way.FsmEvent);
     }
 }

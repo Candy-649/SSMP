@@ -390,7 +390,12 @@ internal partial class CoopSave {
         }
 
         // A talk goes on to its end, a catch that no leap led to through its move, and a leap until a state that goes
-        // by where the players are
+        // by where the players are. Every step of a move that this game leads is told, and so is the one out of it,
+        // which is this game's too
+        if (leap.Led) {
+            TellLedStep(machine, toState, leap.Move);
+        }
+
         if (leap.Talk ? !Entity.Entity.EndsTalk(fsm, toState)
             : leap.Catch?.Contains(toState) ?? !GoesByPlayers(toState)) {
             return true;
@@ -401,7 +406,7 @@ internal partial class CoopSave {
             $"[Own creatures] '{leap.Place}' is through its {leap.What} in '{fsm.Name}', as it goes to " +
             $"'{toState.Name}'"
         );
-        return false;
+        return leap.Led;
     }
 
     /// <summary>
@@ -866,10 +871,16 @@ internal partial class CoopSave {
         public bool Hit;
 
         /// <summary>
-        /// Whether it is an extraction by this game's player, through the states in <see cref="Catch"/> (see
-        /// CoopSave.OwnExtracts), whose end the scene host's game is told of.
+        /// Whether it is a move that acts on this game's player that this game leads, through the states in
+        /// <see cref="Catch"/>, whose every step it tells the scene host's game (see CoopSave.OwnLedMoves).
         /// </summary>
-        public bool Extract;
+        public bool Led;
+
+        /// <summary>
+        /// The number that this game gave a move that it leads (see <see cref="Led"/>), which its steps carry: the
+        /// number of the blow of this game's player that set off an extraction.
+        /// </summary>
+        public ulong Move;
 
         /// <summary>
         /// The latest step of the scene host's creature that came meanwhile, which the creature here goes on from once

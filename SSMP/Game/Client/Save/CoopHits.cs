@@ -268,9 +268,10 @@ internal partial class CoopHits {
 
     /// <summary>
     /// What this game does as a creature that every game runs by itself gives way to a blow of another player that
-    /// extracts from it, with their character here and that player (see CoopSave.TakeOthersExtract).
+    /// extracts from it, with their character here, that player and the number of the blow in their game (see
+    /// CoopSave.TakeOthersExtract).
     /// </summary>
-    public static Action<HealthManager, GameObject, ushort>? TakesOthersExtract { get; set; }
+    public static Action<HealthManager, GameObject, ushort, uint>? TakesOthersExtract { get; set; }
 
     /// <summary>
     /// Whether a creature that every game runs by itself, which an object is or is a part of, plays a move through here
@@ -954,7 +955,7 @@ internal partial class CoopHits {
                     : update.ExtraDamage
                         ? () => TakeAsExtraDamage(creature, hit)
                         : HitCounters.Extracts(creature, hit) && OwnCreatures.Has(creature.gameObject)
-                            ? () => TakeAsExtract(creature, striker, update.PlayerId)
+                            ? () => TakeAsExtract(creature, striker, update.PlayerId, update.Strike)
                             : () => TakeAsWound(creature, hit);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
                 () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(strike, component, striker))
@@ -1701,12 +1702,17 @@ internal partial class CoopHits {
     /// game's hero to extracting it if it was in the middle of an extraction of its own. One that died here already,
     /// or a blow of a player whose character is not here, does nothing.
     /// </summary>
-    private static IHitResponder.HitResponse TakeAsExtract(HealthManager creature, GameObject? striker, ushort player) {
+    private static IHitResponder.HitResponse TakeAsExtract(
+        HealthManager creature,
+        GameObject? striker,
+        ushort player,
+        uint strike
+    ) {
         if (creature.isDead || striker == null) {
             return IHitResponder.Response.None;
         }
 
-        TakesOthersExtract?.Invoke(creature, striker, player);
+        TakesOthersExtract?.Invoke(creature, striker, player, strike);
         return IHitResponder.Response.DamageEnemy;
     }
 

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using SSMP.Animation.Effects;
 using SSMP.Game.Client.Entity;
+using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -16,16 +17,20 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// struck it and waits there until that hero is done, at which it dies or is hit, or, for some, until that hero is
 /// hurt, at which it lets go (USER 11-25 "你先把能本地化的都本地化了吧").
 ///
-/// The game of the player who extracts plays it as the game does, by itself. In a game that follows the scene host's,
-/// that is a move of its own to its end, like a leap at this game's player (see CoopSave.OwnCatches), and what ends it
-/// is told to the scene host's game (see CoopSave.OwnTells), whose step every other game takes. Every other game
-/// gives way to that player's blow as it comes, drawn to their character there, and extracts nothing for its own
-/// player's hero (see <see cref="TakeOthersExtract"/>), and nothing of its own takes the creature out of it, like a
-/// hurt of its own player or the end of an extraction of theirs, until the word of the game that extracts does (see
-/// <see cref="HoldsInOthersExtract"/>). Every game took the blow as the game takes one of its own player's: the
-/// creature was drawn to the player of each game and waited there for good, and a hero in the middle of an extraction
-/// of its own was set to extract it too. With three or four players, each extraction is the game of its own player's,
-/// and every other game shows it at their character.
+/// The game of the player who extracts plays it as the game does, by itself, and leads it (see CoopSave.OwnLedMoves):
+/// in a game that follows the scene host's, it tells the scene host's game its steps, and the scene host's game, which
+/// gives way to the blow as it comes, drawn to their character there, takes them (see <see cref="TakeOthersExtract"/>).
+/// Every other game takes it into the extraction with the step of the scene host's that the blow set off there, which
+/// names the player who struck, drawn to their character there (see <see cref="FollowExtractAsTold"/>), and so does a
+/// member who comes in during it. No other game extracts anything for its own player's hero, and nothing of its own
+/// takes the creature out of it, like a hurt of its own player or the end of an extraction of theirs (see
+/// HoldsInLedMove). A blow that extracts from a creature in an extraction already is the scene host's game's to let
+/// go of, as only it knows which came first: two players who extracted from the same one at once each had theirs go
+/// on in their own game, and the scene host's, set to the second, waited for the end of it for good (review of
+/// 92d7aab). Every game took the blow as the game takes one of its own player's: the creature was drawn to the player
+/// of each game and waited there for good, and a hero in the middle of an extraction of its own was set to extract it
+/// too. With three or four players, each extraction is the game of its own player's, and every other game shows it at
+/// their character.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -50,19 +55,6 @@ internal partial class CoopSave {
     /// (see <see cref="ExtractStates"/>).
     /// </summary>
     private readonly Dictionary<Fsm, HashSet<FsmState>?> _extractStates = new();
-
-    /// <summary>
-    /// The state machines of creatures that every game runs by itself in an extraction of another player's here, with
-    /// its states and the variable of the hero, which holds that player's character meanwhile (see
-    /// <see cref="TakeOthersExtract"/>).
-    /// </summary>
-    private readonly Dictionary<Fsm, (HashSet<FsmState> States, FsmGameObject? Hero)> _othersExtracts = new();
-
-    /// <summary>
-    /// Whether the scene host's game takes the tell of another game now (see TakeOwnTell), which takes a creature out
-    /// of an extraction of another player's (see <see cref="HoldsInOthersExtract"/>).
-    /// </summary>
-    private bool _takingTell;
 
     /// <summary>
     /// The states of the extraction of a state machine: the one that it gives way to extracting in, and those that it
@@ -96,81 +88,107 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Has a creature that every game runs by itself give way to a blow of another player that extracts from it (see
-    /// CoopHits.TakeAsExtract), drawn to their character here: each of its state machines that gives way to extracting
-    /// has its variable of the hero hold that character, with the places under it that a creature is drawn to (see
-    /// HeroChildEffects.GetFigurePart), until it is out of the extraction. The scene host's game tells it of the blow
-    /// as the game does, but for this game's hero, which extracts nothing, and every other game takes it into the
-    /// extraction with the step of the scene host's that comes after the blow: steps of that game from before the blow
-    /// still to come would take it out again, and its own way in may be held for one of the scene host's anyway.
+    /// Has a state machine of a creature that every game runs by itself follow an extraction by another player, drawn
+    /// to their character here: its variable of the hero holds that character, with the places under it that a
+    /// creature is drawn to (see HeroChildEffects.GetFigurePart), until it is out of the extraction (see
+    /// CoopSave.OwnLedMoves).
     /// </summary>
-    private void TakeOthersExtract(HealthManager health, GameObject figure, ushort striker) {
+    private void FollowExtract(Fsm fsm, HashSet<FsmState> states, GameObject figure, ushort leader, ulong number) {
         foreach (var path in ExtractPoints) {
             HeroChildEffects.GetFigurePart(figure, path);
         }
 
-        var sceneHost = IsSceneHost?.Invoke() == true;
-        foreach (var machine in health.GetComponents<PlayMakerFSM>()) {
-            var fsm = machine.Fsm;
-            if (ExtractStates(fsm) is not { } states) {
-                continue;
-            }
+        var hero = fsm.Variables.FindFsmGameObject("Hero");
+        if (hero != null) {
+            hero.Value = figure;
+        }
 
-            var hero = fsm.Variables.FindFsmGameObject("Hero");
-            if (hero != null) {
-                hero.Value = figure;
-            }
+        FollowLedMove(fsm, states, hero, leader, number);
+    }
 
-            _othersExtracts[fsm] = (states, hero);
+    /// <summary>
+    /// Has a creature that every game runs by itself, in the scene host's game, give way to a blow of another player
+    /// that extracts from it (see CoopHits.TakeAsExtract), drawn to their character here, as the game does but for
+    /// this game's hero, which extracts nothing: their game leads the extraction, whose steps the creature here takes,
+    /// those that came before the blow as well (see CoopSave.OwnLedMoves). One in an extraction already, of this game's
+    /// player or of another, goes on with that, and the blow goes nowhere. Every other game takes the extraction from
+    /// the step that the blow sets off here (see <see cref="FollowExtractAsTold"/>): the blow there, which comes there
+    /// at another moment, may come after it, or never, for a blow of this game's player (review of 92d7aab: their
+    /// creature, drawn to their own player there, stayed there).
+    /// </summary>
+    private void TakeOthersExtract(HealthManager health, GameObject figure, ushort striker, uint strike) {
+        var place = OwnCreatures.PlaceOf(health.gameObject);
+        if (IsSceneHost?.Invoke() != true) {
             Logger.Info(
-                $"[Own creatures] '{OwnCreatures.PlaceOf(health.gameObject)}' gives way to the extracting blow of " +
-                $"the player {striker} in '{fsm.ActiveStateName}' of '{fsm.Name}', drawn to their character here" +
-                (sceneHost ? "" : " with the scene host's step")
+                $"[Own creatures] '{place}' takes extracting blow {strike} of the player {striker}, which it gives " +
+                "way to with the scene host's step"
             );
-            if (sceneHost) {
+            return;
+        }
+
+        var machines = new List<(PlayMakerFSM Machine, HashSet<FsmState> States)>();
+        var extracted = false;
+        foreach (var machine in health.GetComponents<PlayMakerFSM>()) {
+            if (ExtractStates(machine.Fsm) is { } states) {
+                machines.Add((machine, states));
+                extracted |= machine.Fsm.ActiveState is { } at && states.Contains(at);
+            }
+        }
+
+        foreach (var (machine, states) in machines) {
+            var fsm = machine.Fsm;
+            if (extracted) {
+                Logger.Info(
+                    $"[Own creatures] '{place}' takes extracting blow {strike} of the player {striker} in " +
+                    $"'{fsm.ActiveStateName}' of '{fsm.Name}', in an extraction already, which goes on"
+                );
+            } else {
+                FollowExtract(fsm, states, figure, striker, strike);
+                Logger.Info(
+                    $"[Own creatures] '{place}' gives way to extracting blow {strike} of the player {striker} in " +
+                    $"'{fsm.ActiveStateName}' of '{fsm.Name}', drawn to their character here, as their game leads"
+                );
                 machine.SendEvent(ExtractEvent);
             }
+
+            MeetLedMove(fsm, striker, strike);
         }
     }
 
     /// <summary>
-    /// Whether a state machine in an extraction of another player's here (see <see cref="TakeOthersExtract"/>) is held
-    /// in it at a switch of its own out of it, like at a hurt of this game's player, at which some let go, or at the
-    /// end of an extraction of theirs, which every creature in one hears. Only the word of the game that extracts takes
-    /// it out, as a step of the scene host's, a tell that the scene host's game takes (see CoopSave.OwnTells) or its
-    /// death, which the game tells its state machines of (HealthManager.Die), and its hero is this game's player again.
+    /// Has a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
+    /// follow an extraction of another player's that a step of the scene host's takes it into, before it does (see
+    /// <see cref="FollowExtract"/>): one that a blow set off there, of the scene host's player or of another, which
+    /// names the player who struck, or the state that it is in there, for a member who has just come in, which names
+    /// the player who extracts (see TellOwnState). An extraction of this game's player's is its own, and one that it
+    /// follows already goes on.
     /// </summary>
-    private bool HoldsInOthersExtract(Fsm fsm, FsmState toState) {
-        if (!_othersExtracts.TryGetValue(fsm, out var extract) || fsm.ActiveState is not { } at ||
-            !extract.States.Contains(at) || extract.States.Contains(toState)) {
-            return false;
+    private void FollowExtractAsTold(ClientPlayerData sceneHost, Fsm fsm, CoopSaveUpdate update) {
+        var leader = update.PartCount switch {
+            OwnStruckPart or OwnToldPart => (ushort) update.Key,
+            OwnHostStruckPart => ThrownThings.ThrowersPlayer,
+            _ => ThrownThings.NoPlayer
+        };
+        if (leader == ThrownThings.NoPlayer || _ledMoves.ContainsKey(fsm) || ExtractStates(fsm) is not { } states ||
+            fsm.GetState(update.StateName) is not { } into || !states.Contains(into) ||
+            ThrownThings.FigureOf?.Invoke(leader, sceneHost.Id) is not { } figure || figure == null ||
+            HeroController.SilentInstance is { } own && figure == own.gameObject) {
+            return;
         }
 
-        var place = OwnCreatures.PlaceOf(fsm.GameObject);
-        if (OwnCreatures.PlaysSceneHostsStep(fsm) || _takingTell || _dyingAsTold) {
-            _othersExtracts.Remove(fsm);
-            if (extract.Hero != null) {
-                extract.Hero.Value = HeroController.instance.gameObject;
-            }
-
-            Logger.Info(
-                $"[Own creatures] '{place}' goes out of the extraction of another player's from '{at.Name}' to " +
-                $"'{toState.Name}' of '{fsm.Name}', as the game that extracts tells"
-            );
-            return false;
-        }
-
+        var player = leader == ThrownThings.ThrowersPlayer ? sceneHost.Id : leader;
+        FollowExtract(fsm, states, figure, player, update.PartCount == OwnStruckPart ? update.Sequence : 0);
         Logger.Info(
-            $"[Own creatures] '{place}' would go from '{at.Name}' to '{toState.Name}' of '{fsm.Name}' here, and " +
-            "stays in the extraction of another player's until the game that extracts tells its end"
+            $"[Own creatures] '{update.ObjectPath}' goes into '{update.StateName}' of '{fsm.Name}' in an extraction " +
+            $"by the player {player}, drawn to their character here, as the scene host's game tells"
         );
-        return true;
     }
 
     /// <summary>
     /// Has a state machine of a creature that every game runs by itself, in a game that follows the scene host's, play
-    /// an extraction of this game's player by itself to its end, as it gives way to their blow: the steps of the scene
-    /// host's that come meanwhile wait (see CoopSave.OwnCatches). Whether it does.
+    /// an extraction of this game's player by itself to its end, as it gives way to their blow, telling the scene
+    /// host's game its steps with the number of the blow (see CoopSave.OwnLedMoves): the steps of the scene host's that
+    /// come meanwhile wait (see CoopSave.OwnCatches). Whether it does.
     /// </summary>
     private bool StartsOwnExtract(PlayMakerFSM machine, FsmState toState) {
         var fsm = machine.Fsm;
@@ -181,24 +199,14 @@ internal partial class CoopSave {
 
         var leap = new OwnLeap(OwnCreatures.PlaceOf(machine.gameObject), false, "extraction by the local player") {
             Catch = states,
-            Extract = true
+            Led = true,
+            Move = CoopHits.LocalStrikeNumber
         };
         _ownLeaps[fsm] = leap;
         Logger.Info(
-            $"[Own creatures] '{leap.Place}' gives way to the extracting blow of the local player into " +
+            $"[Own creatures] '{leap.Place}' gives way to extracting blow {leap.Move} of the local player into " +
             $"'{toState.Name}' of '{machine.FsmName}', which it plays here by itself to its end"
         );
         return true;
-    }
-
-    /// <summary>
-    /// Whether a state machine in an extraction of this game's player (see <see cref="StartsOwnExtract"/>) goes out of
-    /// it at what their hero tells it, done or hurt, which the scene host's game is told of as a tell from outside it
-    /// (see CoopSave.OwnTells): the hurt comes from the game itself, which no tell from outside does.
-    /// </summary>
-    private bool EndsOwnExtract(Fsm fsm, FsmState toState) {
-        return _ownLeaps.TryGetValue(fsm, out var leap) && leap is { Extract: true, Through: false } &&
-               leap.Catch!.Contains(fsm.ActiveState) && !leap.Catch.Contains(toState) &&
-               fsm.LastTransition is { } way && way.ToState == toState.Name && ExtractEnds.Contains(way.EventName);
     }
 }
