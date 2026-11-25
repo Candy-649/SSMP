@@ -38,6 +38,14 @@ internal partial class CoopSave {
     private const int HostSavePartSize = 900;
 
     /// <summary>
+    /// The field of the player data that marks that the opening of the game was played: it shows the new character
+    /// their masks, then their silk, their bind and their tools, which wait for it until it was ('Hud Canvas' of
+    /// '_GameCameras': 'health_display' First Pause, the spool's 'Animate' First?, 'Bind Orb' Display, 'Tool Icons'
+    /// Icons Scale In; 'Tutorial Intro Cutscene' of Tut_01 sends SHOW HP and sets it at its end).
+    /// </summary>
+    private const string BindCutsceneField = "bindCutscenePlayed";
+
+    /// <summary>
     /// How many parts of the host's save go out at a time, and how long, in seconds, the host waits before the next
     /// ones. Paced by time rather than by frame: everything sent between two ticks of the network goes in one packet,
     /// which is written with a 16-bit length, and a packet too long to write loses everything in it, the updates of
@@ -984,9 +992,20 @@ internal partial class CoopSave {
             BackUpSave(slot);
         }
 
+        var opening = !hasSave && GetWakePlace(merged) == newGameWake;
+        if (!hasSave && !opening) {
+            // A new character is shown their masks, silk and tools for the first time in the opening, whose end marks
+            // that it was (see BindCutsceneField), and each part of the display waits for that until then. One who
+            // wakes at the host's place has no opening, so the mark is set as its end sets it: without it the display
+            // stayed without silk and with one mask or none (reported 11-25: "非房主一方血条只显示一个面具，有时完全
+            // 不显示，灵丝条有时没有显示")
+            merged["playerData"]![BindCutsceneField] = true;
+            Logger.Info($"Save slot {slot} wakes at the host's place without the opening, which is marked as played");
+        }
+
         _pendingJoin = new PendingJoin {
             Slot = slot, Merged = merged, Report = report, HostName = hostName, Time = UnityEngine.Time.unscaledTime,
-            Opening = !hasSave && GetWakePlace(merged) == newGameWake
+            Opening = opening
         };
         MarkCoopSave(slot, report.ArrivalsToSee);
         Logger.Info(
