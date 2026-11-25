@@ -71,8 +71,8 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// Whether the local player is on the trip of /2 and still in the room it was asked for in. From the room of the
     /// encounter itself, the trip leads into a load of the same room anew, where a player who comes in before them has
-    /// the encounter fresh, which this game is not to tell what the room here has (see CoopSave.IsLeavingOnDebugTrip,
-    /// and the arenas in ClientManager.OnPlayerEnterScene).
+    /// the encounter fresh, which this game is not to tell what the room here has (see CoopSave.IsLeavingOnDebugTrip
+    /// and ArenaCoop.IsLeavingOnDebugTrip).
     /// </summary>
     public bool IsLeavingOnDebugTrip =>
         (_debugTravelling || _debugPlacing) && SceneManager.GetActiveScene().handle == _debugTravelScene;
@@ -100,6 +100,13 @@ internal partial class BossRoomCoop {
     /// </summary>
     /// <param name="by">The username of the player who typed it, or null for the local player.</param>
     private void CarryOutDebugTrip(string? by) {
+        // Both players typing it at once, each game hears the other's word while its own trip is on its way, which,
+        // carried out, said once they were there that they had gone to another room first (review of ae5ae80)
+        if (_debugTravelling || _debugPlacing) {
+            Logger.Info("Debug: the local player is already on the way to the encounter");
+            return;
+        }
+
         UiManager.InternalChatBox.AddMessage(by == null
             ? Lang.Pick(
                 "Debug: sending everyone to the encounter, which starts anew.",

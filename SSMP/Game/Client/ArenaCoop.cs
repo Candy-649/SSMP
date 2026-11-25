@@ -294,6 +294,15 @@ internal partial class ArenaCoop {
     /// </summary>
     private BattleScene? _startingArena;
 
+    /// <summary>
+    /// TEMPORARY debug (see BossRoomCoop.DebugCommands): whether the local player is on the trip of /2 and still in the
+    /// room it was asked for in, whose arenas this game says nothing of: from the room of the encounter itself, the
+    /// trip leads into a load of the same room anew, where a player who came in before them has the encounter fresh,
+    /// and would take the word of a battle that runs here as the scene host's, which has it follow that battle at the
+    /// wave it is at here (review of ae5ae80). Given by the client manager.
+    /// </summary>
+    public Func<bool>? IsLeavingOnDebugTrip { get; set; }
+
     public ArenaCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -1553,7 +1562,7 @@ internal partial class ArenaCoop {
     /// Sends the state of an arena to the other players in the scene.
     /// </summary>
     private void Send(string path, BattleSceneStatus status, int wave = -1, int enemies = 0) {
-        if (!_netClient.IsConnected || !IsOtherPlayerInScene()) {
+        if (!_netClient.IsConnected || !IsOtherPlayerInScene() || IsLeavingOnDebugTrip?.Invoke() == true) {
             return;
         }
 

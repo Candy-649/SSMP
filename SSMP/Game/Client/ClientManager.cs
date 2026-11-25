@@ -438,7 +438,9 @@ internal class ClientManager : IClientManager {
             () => _coopSave!.CheckedMemberIds.Count > 0,
             () => _coopSave!.IsPartnerMissing(),
             () => _bossRoomCoop!.TellTeammatesWaiting()
-        );
+        ) {
+            IsLeavingOnDebugTrip = () => _bossRoomCoop!.IsLeavingOnDebugTrip
+        };
         _bossRoomCoop = new BossRoomCoop(
             netClient,
             _playerData,
@@ -1556,12 +1558,7 @@ internal class ClientManager : IClientManager {
         HeroHidden.SayAgainSoon();
         HeroRoomFigure.SayAgainSoon();
 
-        // TEMPORARY debug: a game on the trip of /2 out of the room of the encounter, which leads into a load of the
-        // same room anew, does not tell a player who came into that load before it that the encounter is won here
-        if (!_bossRoomCoop.IsLeavingOnDebugTrip) {
-            _arenaCoop.OnPlayerEnterScene();
-        }
-
+        _arenaCoop.OnPlayerEnterScene();
         _bossRoomCoop.OnPlayerEnterScene();
         _entityManager.OnPlayerEnterScene();
         _coopSave.OnPlayerEnterScene(playerData, cameIn);
