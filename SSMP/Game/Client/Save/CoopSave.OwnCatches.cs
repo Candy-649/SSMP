@@ -47,7 +47,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// itself, tells it of as it feels the player of its game, goes on by what befalls the player held, like a hurt that
 /// lets them drop, which only their own game has: their game leads it, the scene host's game takes its every step
 /// from there, and every other game takes those of the scene host's (see CoopSave.OwnLedMoves; USER 11-25 "套现有规
-/// 则"). The creature grabs only the player it goes after, as any catch of its own.
+/// 则"). The creature grabs only the player it goes after, as any catch of its own, but for one that grabs whoever
+/// touches what it watches, like the tendril of the maw that hangs from the ceiling (see
+/// <see cref="CatchesWhoeverTouches"/>). Another player's strike may free the player held (see
+/// CoopSave.OwnStruckFree).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -138,6 +141,17 @@ internal partial class CoopSave {
     private static bool GoesAfterLocalPlayer(GameObject creature) {
         return GamePatcher.TargetOf(creature) is not { } target ||
                HeroController.SilentInstance is { } hero && target == hero.gameObject;
+    }
+
+    /// <summary>
+    /// Whether a creature catches by an event whoever touches what it watches, whomever it goes after, as its entry
+    /// lists the event (see EntityRegistryEntry.CatchEvents): the tendril of the maw that hangs from the ceiling grabs
+    /// whichever player walks into it, as in a game of one, and as it did as a copy. Held to whom it goes after, it
+    /// would go after the first player it grabbed from then on, as the grab has it (see GamePatcher.GoAfterGrabbed),
+    /// and never grab another.
+    /// </summary>
+    private static bool CatchesWhoeverTouches(GameObject creature, string eventName) {
+        return EntityRegistry.TryGetEntry(creature, out var entry) && entry.CatchEvents?.Contains(eventName) == true;
     }
 
     /// <summary>

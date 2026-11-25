@@ -2091,6 +2091,7 @@
   {
     "base_object_name": "Swamp Barnacle",
     "type": "Barnak",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2098,6 +2099,10 @@
     "internal_name": "Swamp Barnacle",
     "fsm_names": [
       "Control"
+    ],
+    "each_game_fsms": [
+      "Detect Grab",
+      "Detect Attack"
     ],
     "runs_here": {
       "Control": {
