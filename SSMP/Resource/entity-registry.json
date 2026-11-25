@@ -1915,6 +1915,7 @@
   {
     "base_object_name": "Farmer Catcher",
     "type": "DregCatcher",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
