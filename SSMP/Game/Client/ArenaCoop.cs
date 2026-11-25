@@ -26,7 +26,9 @@ namespace SSMP.Game.Client;
 /// A battle that the scene host had already won before is not fought again, so other players can walk through it. In a
 /// two-player save the world is one, so an arena that one player won is won for both, wherever the other one was: the
 /// saves share the win, and an arena that the partner won a moment ago shows as won right away. Arenas that count as
-/// bosses are fought together instead (<see cref="BossArenaScenes"/>).
+/// bosses are fought together instead (<see cref="BossArenaScenes"/>). An arena whose every enemy is a creature that
+/// every game runs by itself is run by every game by itself, started by whoever walks in (see
+/// <see cref="IsOwnArena"/>).
 /// </summary>
 internal partial class ArenaCoop {
     /// <summary>
@@ -416,6 +418,11 @@ internal partial class ArenaCoop {
             return;
         }
 
+        // The word of whoever started the battle of an arena that every game runs by itself, the scene host's game too
+        if (TakeOwnArenaWord(battleScene, update)) {
+            return;
+        }
+
         // Only players who follow the scene host take its state
         if (battleScene == null || (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost)) {
             return;
@@ -536,7 +543,7 @@ internal partial class ArenaCoop {
             return;
         }
 
-        if (isRemote || !IsFollower()) {
+        if (isRemote || !FollowsHostIn(self)) {
             // The battle only starts once. Players who walk in after it started are locked in by OnTriggerEnter2D.
             if (state.Started) {
                 return;
@@ -597,7 +604,7 @@ internal partial class ArenaCoop {
             return;
         }
 
-        var isRunning = IsFollower() ? state.HostUpdate?.Status == BattleSceneStatus.Running : state.Started;
+        var isRunning = FollowsHostIn(self) ? state.HostUpdate?.Status == BattleSceneStatus.Running : state.Started;
         if (isRunning) {
             LockIn(self, state);
         }
@@ -681,14 +688,14 @@ internal partial class ArenaCoop {
     private IEnumerator OnStartWave(Func<BattleScene, int, IEnumerator> orig, BattleScene self, int waveNumber) {
         var state = GetState(self);
         var isRemote = IsRemoteTarget(self);
-        if ((!isRemote && IsFollower()) || waveNumber <= state.Wave) {
+        if ((!isRemote && FollowsHostIn(self)) || waveNumber <= state.Wave) {
             return NoRoutine();
         }
 
         state.Wave = waveNumber;
         var routine = orig(self, waveNumber);
 
-        if (!isRemote) {
+        if (!isRemote && SendsHowItGoes(self)) {
             SendRunning(self, state);
         }
 
@@ -701,7 +708,7 @@ internal partial class ArenaCoop {
     /// </summary>
     private IEnumerator OnEndBattle(Func<BattleScene, bool, IEnumerator> orig, BattleScene self, bool waitExtra) {
         var isRemote = IsRemoteTarget(self);
-        if (!isRemote && IsFollower()) {
+        if (!isRemote && FollowsHostIn(self)) {
             return NoRoutine();
         }
 
@@ -710,7 +717,7 @@ internal partial class ArenaCoop {
             state.Ended = true;
             state.LockedIn = false;
 
-            if (!isRemote) {
+            if (!isRemote && SendsHowItGoes(self)) {
                 Logger.Info($"Won arena '{state.Path}'");
                 Send(state.Path, BattleSceneStatus.Won);
             }
@@ -750,7 +757,7 @@ internal partial class ArenaCoop {
     /// Counts enemies or ends a wave, except for a player who follows the scene host, which sends them instead.
     /// </summary>
     private void OnProgress(Action<BattleScene> orig, BattleScene self) {
-        if (IsFollower()) {
+        if (FollowsHostIn(self)) {
             return;
         }
 
@@ -764,12 +771,15 @@ internal partial class ArenaCoop {
     private void OnWaveStarted(WaveStartedOrig orig, BattleWave self, bool activateEnemies, ref int currentEnemies) {
         NoteTheEnemiesThatCannotHearTheirWave(self);
 
-        if (!IsFollower()) {
+        var arena = self.GetComponentInParent<BattleScene>(true);
+        if (!(arena != null ? FollowsHostIn(arena) : IsFollower())) {
             orig(self, activateEnemies, ref currentEnemies);
         } else {
             var ignoredEnemies = currentEnemies;
             orig(self, activateEnemies, ref ignoredEnemies);
         }
+
+        NoteCalledOut(self);
 
         TakeTheRewardsOffTheCopiesOfAWave(self);
     }
@@ -910,6 +920,8 @@ internal partial class ArenaCoop {
             PayTheWaveStartsThatAreOwed();
         }
 
+        StartOwnArena(self, state);
+
         ReleaseHeldTriggerStart(self, state);
         ReleaseHeldBossEvents(self, state);
         UpdateLiveEnd(self, state);
@@ -920,11 +932,12 @@ internal partial class ArenaCoop {
             return;
         }
 
-        if (IsFollower()) {
+        if (FollowsHostIn(self)) {
             if (state.HostUpdatePending || state.RequestTime != null) {
                 ApplyHostUpdate(self, state);
             }
-        } else if (state.Started && !state.Ended && GetCurrentEnemies(self) != state.SentEnemies) {
+        } else if (state.Started && !state.Ended && GetCurrentEnemies(self) != state.SentEnemies &&
+                   SendsHowItGoes(self)) {
             SendRunning(self, state);
         }
     }
@@ -1126,6 +1139,7 @@ internal partial class ArenaCoop {
             for (var i = state.Wave + 1; i < waveNumber && i < waves.Count; i++) {
                 if (waves[i] is BattleWave wave && wave != null) {
                     CallArenaMethod(WaveSetActiveMethod!, wave, true);
+                    NoteCalledOut(wave);
                 }
             }
         }
@@ -1684,6 +1698,7 @@ internal partial class ArenaCoop {
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _arenas.Clear();
+        CalledOutWaves.Clear();
         _lockingHatches.Clear();
         _heldBossEvents.Clear();
         OnRescueSceneChanged(newScene.name);
@@ -1707,6 +1722,24 @@ internal partial class ArenaCoop {
         /// Whether this game started the battle, for the local player or for another player.
         /// </summary>
         public bool Started;
+
+        /// <summary>
+        /// Whether every enemy of its waves is a creature that every game runs by itself, as found (see
+        /// <see cref="ArenaCoop.IsOwnArena"/>).
+        /// </summary>
+        public bool Own;
+
+        /// <summary>
+        /// Whether this game follows the scene host's battle of such an arena, which ran already as the local player
+        /// came into it (see <see cref="ArenaCoop.TakeOwnArenaWord"/>).
+        /// </summary>
+        public bool FollowsTheHost;
+
+        /// <summary>
+        /// Whether such an arena is to start here by itself, as another player's game started it (see
+        /// <see cref="ArenaCoop.StartOwnArena"/>).
+        /// </summary>
+        public bool OwnStartPending;
 
         /// <summary>
         /// Whether the gates are closed for the local player.

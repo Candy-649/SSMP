@@ -554,11 +554,6 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        // TEMPORARY debug: the win of the fight that /1 goes to leads back to its challenge, not on to its end
-        if (SkipsDebugEnd(self, eventName)) {
-            return;
-        }
-
         NoteOutOfStepEvent(self, eventName);
         if (IsCatchUpDelivery(self, eventName)) {
             orig(self, fsmEvent, eventData);

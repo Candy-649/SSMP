@@ -752,10 +752,10 @@ internal partial class CoopSave {
     /// Tells a member who has come into the room where each creature that every game runs by itself is here and what
     /// it does, or that it is dead, if this game is the scene host's. Their game has them where the room starts them.
     /// Not while the local player is on the debug trip out of the room (see IsLeavingOnDebugTrip), in which a member
-    /// came into the new start of the fight first: the silk boss, won here, was told dead to them, died once more in
-    /// their game, and as the local player came in, their game told it dead to them in turn, which made the fight won
-    /// twice (the user's log of 11-22, 20:50:14.756 and 17.140; USER "我们打了第二次，好诡异，丝母在左下角苏醒，然后最后打
-    /// 死了莫名其妙判赢两次（").
+    /// came into the new load of the room first: on the trip before, the silk boss, won here, was told dead to them,
+    /// died once more in their game, and as the local player came in, their game told it dead to them in turn, which
+    /// made the fight won twice (the user's log of 11-22, 20:50:14.756 and 17.140; USER "我们打了第二次，好诡异，丝母在左下
+    /// 角苏醒，然后最后打死了莫名其妙判赢两次（").
     /// </summary>
     /// <param name="player">The member.</param>
     private void SendOwnCreaturesTo(ClientPlayerData player) {
@@ -766,7 +766,7 @@ internal partial class CoopSave {
         if (IsLeavingOnDebugTrip?.Invoke() == true) {
             Logger.Info(
                 $"[Own creatures] {player.Username} is told nothing of the creatures here: the local player is on " +
-                "the debug trip out of the room, to the new start of the fight that they came into"
+                "the debug trip out of the room, to the new load of it that they came into"
             );
             return;
         }
@@ -851,6 +851,34 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The creatures that every game runs by itself which died in another player's game, or were dead there as the
+    /// local player came in, while they were not out here, with the word of it (see <see cref="UpdateDeathsOwed"/>).
+    /// </summary>
+    private readonly Dictionary<GameObject, (ClientPlayerData Player, CoopSaveUpdate Word)> _deathsOwed = new();
+
+    /// <summary>
+    /// Has the creatures that died in another player's game while they were not out here die here as they come out,
+    /// by the word that told of it (see <see cref="OnOwnCreature"/>).
+    /// </summary>
+    private void UpdateDeathsOwed() {
+        if (_deathsOwed.Count == 0) {
+            return;
+        }
+
+        foreach (var pair in _deathsOwed.ToList()) {
+            var creature = pair.Key;
+            if (creature != null && (!creature.activeInHierarchy || ArenaCoop.WaitsForItsWave(creature))) {
+                continue;
+            }
+
+            _deathsOwed.Remove(creature!);
+            if (creature != null) {
+                OnOwnCreature(pair.Value.Player, pair.Value.Word);
+            }
+        }
+    }
+
+    /// <summary>
     /// Keeps a creature that every game runs by itself to a step that the scene host's took, or to its death there.
     /// </summary>
     /// <param name="player">The player whose game is the scene host's.</param>
@@ -871,6 +899,24 @@ internal partial class CoopSave {
 
         // The rocks that a fight lets fall have no health, and never die (see OwnCreatures)
         var hasHealth = creature.TryGetComponent<HealthManager>(out var health);
+
+        // One that is not out here yet dies here as it comes out, and one of a wave of an arena once the wave called
+        // it out here, which counts it then (see UpdateDeathsOwed): let go of, it came out alive later and fought on
+        // in this game alone, as a member came in after it died there, or as the wave that lets it out started there
+        // a moment before it did here (11-24 review; USER 11-25 "做吧")
+        if (update.PartCount is 1 or 2 && hasHealth && !health.isDead &&
+            (!creature.activeInHierarchy || ArenaCoop.WaitsForItsWave(creature))) {
+            if (_deathsOwed.TryAdd(creature, (player, update))) {
+                var told = update.PartCount == 1 ? "is dead" : "died";
+                Logger.Info(
+                    $"[Own creatures] '{place}' {told} in {player.Username}'s game, and is not out here yet: it dies " +
+                    "here as it comes out"
+                );
+            }
+
+            return;
+        }
+
         if (!creature.activeInHierarchy || hasHealth && health.isDead) {
             Logger.Info(
                 $"[Own creatures] {player.Username}'s game told of '{place}', which is dead or not out here" +

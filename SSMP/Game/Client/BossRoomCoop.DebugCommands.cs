@@ -9,18 +9,14 @@ using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
 
-// SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
-using Fsm = HutongGames.PlayMaker.Fsm;
-
 /// <summary>
-/// TEMPORARY debug, to try the fight with the silk boss, which every game runs by itself now (USER 11-21 "说起来这个丝母
-/// 能不能让我们测一下，还是调试命令/0开启调试，/1传送到丝母", "需要把之前那个打完丝母之后不进结局，直接回到丝母这个开战这里的
-/// 功能恢复一下"), as /2 did before (15c0337, taken out b7db833). It takes the place of /0 and /1 for the knight (71a1119),
-/// and is to be taken out again once it is tried.
+/// TEMPORARY debug, to try an encounter of creatures that every game runs by itself, whose battle every game runs by
+/// itself too now (see ArenaCoop.OwnArenas; USER 11-25 "能不能指定一个遭遇战房间我们测一下这个", "做吧，/1传送丝母也可以删
+/// 掉了？"). It takes the place of /0 and /1 for the silk boss (26c1307), and is to be taken out again once it is tried.
 ///
-/// /0 with the key turns the commands on (see DebugFightCommand). /1, which one player types, every player's game
-/// carries out for its own player: it takes them to the challenge of the fight, and from then on until the game is
-/// closed, winning the fight takes every player back there instead of on to the end that follows it.
+/// /0 with the key turns the commands on (see DebugFightCommand). /2, which one player types, every player's game
+/// carries out for its own player: it takes them over the arena of the encounter, which their save holds as never
+/// fought by the time they come in.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
@@ -29,28 +25,26 @@ internal partial class BossRoomCoop {
     private const float DebugTravelWaitTime = 20f;
 
     /// <summary>
-    /// How long, in seconds, after the move the player is put at the challenge once they are in its room.
+    /// How long, in seconds, after the move the player is put over the arena once they are in its room.
     /// </summary>
     private const float DebugPlaceWaitTime = 30f;
 
     /// <summary>
-    /// The place of /1: the scene, the door to come in through, and the object of the room to be put at once in it.
+    /// The place of /2: the scene, the door to come in through, and the point over the ground to be put on once in it,
+    /// in the passage over the arena, a few steps from the floor that gives way under a player and drops them in.
     /// </summary>
-    private static readonly (string Scene, string Gate, string StandAt) DebugPlace =
-        ("Cradle_03", "left2", "Boss Scene/Intro Sequence/Challenge Region");
+    private static readonly (string Scene, string Gate, Vector2 StandOver) DebugPlace =
+        ("Bone_01", "left2", new Vector2(106f, 51.5f));
 
     /// <summary>
-    /// The objects of the room of /1 whose FSMs play the end that follows the win, one for each way the fight ends.
+    /// What the room of /2 saves of its encounter: its win, the floor that gives way as it starts, and the creature of
+    /// its last wave, which stays dead until a rest.
     /// </summary>
-    private static readonly string[] DebugEndSequences = ["Death Sequence", "Death Sequence Cursed"];
+    private static readonly string[] DebugEncounterSaves =
+        ["Battle Scene", "Collapser Small (1)", "Bone Goomba Large (1)"];
 
     /// <summary>
-    /// The event that the fight of /1 sends to its end as it is won.
-    /// </summary>
-    private const string DebugEndStartEvent = "DEATH START";
-
-    /// <summary>
-    /// Whether the local player is to be sent to the place of /1 once they can go.
+    /// Whether the local player is to be sent to the place of /2 once they can go.
     /// </summary>
     private bool _debugTravelling;
 
@@ -65,39 +59,35 @@ internal partial class BossRoomCoop {
     private float _debugTravelUntil;
 
     /// <summary>
-    /// Whether the local player is on their way to the place of /1, to be put at the challenge once in its room.
+    /// Whether the local player is on their way to the place of /2, to be put over the arena once in its room.
     /// </summary>
     private bool _debugPlacing;
 
     /// <summary>
-    /// Until when, by Time.unscaledTime, the local player is put at the challenge once in its room.
+    /// Until when, by Time.unscaledTime, the local player is put over the arena once in its room.
     /// </summary>
     private float _debugPlaceUntil;
 
     /// <summary>
-    /// Whether this game went to the fight of /1, so that winning it leads back to its challenge.
-    /// </summary>
-    private bool _debugSkipsEnd;
-
-    /// <summary>
-    /// Whether the local player is on the trip of /1 and still in the room it was asked for in. From the fight itself,
-    /// the trip leads into a load of the same room anew, where a player who comes in before them has the fight fresh,
-    /// which this game is not to tell what the room here has (see CoopSave.IsLeavingOnDebugTrip).
+    /// Whether the local player is on the trip of /2 and still in the room it was asked for in. From the room of the
+    /// encounter itself, the trip leads into a load of the same room anew, where a player who comes in before them has
+    /// the encounter fresh, which this game is not to tell what the room here has (see CoopSave.IsLeavingOnDebugTrip,
+    /// and the arenas in ClientManager.OnPlayerEnterScene).
     /// </summary>
     public bool IsLeavingOnDebugTrip =>
         (_debugTravelling || _debugPlacing) && SceneManager.GetActiveScene().handle == _debugTravelScene;
 
     /// <summary>
-    /// Carries out the debug chat command /1 that the local player typed, in every player's game.
+    /// Carries out the debug chat command /2 that the local player typed, in every player's game.
     /// </summary>
     public void RunDebugTrip() {
-        Logger.Info("Debug: the local player typed /1, which every player's game carries out");
-        Send(BossRoomUpdateKind.DebugCommand, "", "", "", "", "1");
+        Logger.Info("Debug: the local player typed /2, which every player's game carries out");
+        Send(BossRoomUpdateKind.DebugCommand, "", "", "", "", "2");
         CarryOutDebugTrip(null);
     }
 
     /// <summary>
-    /// Another player typed the debug chat command /1, which this game carries out for its own player.
+    /// Another player typed the debug chat command /2, which this game carries out for its own player.
     /// </summary>
     private void OnDebugCommand(BossRoomUpdate update) {
         var name = _playerData.TryGetValue(update.PlayerId, out var sender) ? sender.Username : $"#{update.PlayerId}";
@@ -106,49 +96,33 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Sends the local player to the challenge of the fight once they can go, and has its win lead back there.
+    /// Sends the local player over the arena of the encounter once they can go.
     /// </summary>
     /// <param name="by">The username of the player who typed it, or null for the local player.</param>
     private void CarryOutDebugTrip(string? by) {
-        // A trip on its way is not set off again, like by the other game's word of the same win
-        if (_debugTravelling || _debugPlacing) {
-            Logger.Info("Debug: the local player is already on the way to the challenge of the silk boss");
-            return;
-        }
-
-        _debugSkipsEnd = true;
         UiManager.InternalChatBox.AddMessage(by == null
             ? Lang.Pick(
-                "Debug: sending everyone to the silk boss. Winning the fight skips the ending and takes everyone " +
-                "back to its start.",
-                "调试：正在把大家送到丝母那里，打赢了不进结局，直接回到开战的地方。"
+                "Debug: sending everyone to the encounter, which starts anew.",
+                "调试：正在把大家送到遭遇战那里，遭遇战重新开始。"
             )
             : Lang.Pick(
-                $"{by} sent everyone to the silk boss (debug). Winning the fight skips the ending.",
-                $"{by} 用调试命令把大家送到丝母那里，打赢了不进结局。"
+                $"{by} sent everyone to the encounter (debug), which starts anew.",
+                $"{by} 用调试命令把大家送到遭遇战那里，遭遇战重新开始。"
             ));
-        QueueDebugTravel();
-    }
-
-    /// <summary>
-    /// Sends the local player to the place of /1 once they can go.
-    /// </summary>
-    private void QueueDebugTravel() {
         _debugTravelling = true;
         _debugTravelScene = SceneManager.GetActiveScene().handle;
         _debugTravelUntil = Time.unscaledTime + DebugTravelWaitTime;
-        _debugPlacing = false;
     }
 
     /// <summary>
-    /// Sends the local player once they can go, and puts them at the challenge once they are in its room.
+    /// Sends the local player once they can go, and puts them over the arena once they are in its room.
     /// </summary>
     private void UpdateDebugCommands() {
         if (_debugTravelling) {
             // Asked for while busy, a trip that ran once the player was free took them back from where they had gone
             // by then (USER 11-09 chat "怎么又松下来了")
             if (SceneManager.GetActiveScene().handle != _debugTravelScene) {
-                Logger.Info("Debug: the local player left the room before going to the challenge of the silk boss");
+                Logger.Info("Debug: the local player left the room before going to the encounter");
                 UiManager.InternalChatBox.AddMessage(Lang.Pick(
                     "Debug: you went to another room first, so you are not sent. Type the command again to go.",
                     "调试：你先去了别的房间，这次就不传送了，要去的话再输一次命令。"
@@ -156,8 +130,7 @@ internal partial class BossRoomCoop {
                 _debugTravelling = false;
             } else if (Time.unscaledTime > _debugTravelUntil) {
                 Logger.Info(
-                    "Debug: the local player could not go to the challenge of the silk boss in time: " +
-                    DescribeWhyNotFree()
+                    "Debug: the local player could not go to the encounter in time: " + DescribeWhyNotFree()
                 );
                 UiManager.InternalChatBox.AddMessage(Lang.Pick(
                     "Debug: you couldn't be sent, as you were busy. Type the command again.",
@@ -175,26 +148,19 @@ internal partial class BossRoomCoop {
         }
 
         if (Time.unscaledTime > _debugPlaceUntil) {
-            Logger.Info("Debug: the local player never came into the room of the silk boss");
+            Logger.Info("Debug: the local player never came into the room of the encounter");
+            SceneManager.sceneLoaded -= ClearDebugEncounter;
             _debugPlacing = false;
             return;
         }
 
-        var activeScene = SceneManager.GetActiveScene().name;
-        if (!string.Equals(activeScene, DebugPlace.Scene, StringComparison.OrdinalIgnoreCase) || !IsLocalHeroFree()) {
+        if (!string.Equals(SceneManager.GetActiveScene().name, DebugPlace.Scene, StringComparison.OrdinalIgnoreCase) ||
+            !IsLocalHeroFree()) {
             return;
         }
 
         _debugPlacing = false;
-        var spot = ScenePath.Find(DebugPlace.StandAt, activeScene);
-        if (spot == null) {
-            Logger.Warn(
-                $"Debug: '{DebugPlace.StandAt}' was not found in '{activeScene}', so the player stays at the door"
-            );
-            return;
-        }
-
-        PlaceOnGround(HeroController.instance, spot.transform);
+        PlaceOnGround(HeroController.instance, DebugPlace.StandOver);
     }
 
     /// <summary>
@@ -244,17 +210,10 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Sends the local player to the room of the silk boss. The inventory that the room they leave took away, like the
-    /// win of the fight does for its end, comes back with the trip.
+    /// Sends the local player to the room of the encounter, whose save is to hold it as never fought as it loads.
     /// </summary>
     private void DebugTravelNow() {
         var (scene, gate, _) = DebugPlace;
-        var playerData = PlayerData.instance;
-        if (playerData.disableInventory) {
-            playerData.disableInventory = false;
-            Logger.Info("Debug: the inventory, which the room took away, is back for the trip");
-        }
-
         var gameManager = global::GameManager.instance;
         HeroController.instance.RecordLeaveSceneCState();
         gameManager.BeginSceneTransition(new global::GameManager.SceneLoadInfo {
@@ -271,16 +230,44 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        Logger.Info($"Debug: sending the local player to door '{gate}' of '{scene}', the room of the silk boss");
+        Logger.Info($"Debug: sending the local player to door '{gate}' of '{scene}', the room of the encounter");
+        SceneManager.sceneLoaded += ClearDebugEncounter;
         _debugPlacing = true;
         _debugPlaceUntil = Time.unscaledTime + DebugPlaceWaitTime;
     }
 
     /// <summary>
-    /// Puts the hero on the ground under an object of the room.
+    /// Has the save hold the encounter of /2 as never fought, as its room loads for the trip, before the objects of
+    /// the room read what the save holds of them. Not before the trip: a game that leaves that room has its objects
+    /// write into the save what they are as it goes (GameManager.SaveLevelState).
     /// </summary>
-    private static void PlaceOnGround(HeroController hero, Transform spot) {
-        var ground = hero.FindGroundPoint((Vector2) spot.position + Vector2.up, true);
+    private void ClearDebugEncounter(Scene scene, LoadSceneMode mode) {
+        if (!string.Equals(scene.name, DebugPlace.Scene, StringComparison.OrdinalIgnoreCase)) {
+            return;
+        }
+
+        SceneManager.sceneLoaded -= ClearDebugEncounter;
+        var saved = SceneData.instance.PersistentBools;
+        foreach (var id in DebugEncounterSaves) {
+            if (!saved.TryGetValue(scene.name, id, out var item) || !item.Value) {
+                continue;
+            }
+
+            saved.SetValue(new PersistentItemData<bool> {
+                ID = id,
+                SceneName = scene.name,
+                Value = false,
+                IsSemiPersistent = item.IsSemiPersistent
+            });
+            Logger.Info($"Debug: '{id}' in '{scene.name}' is no longer saved as done, for the encounter anew");
+        }
+    }
+
+    /// <summary>
+    /// Puts the hero on the ground under a point of the room.
+    /// </summary>
+    private static void PlaceOnGround(HeroController hero, Vector2 over) {
+        var ground = hero.FindGroundPoint(over, true);
         var position = hero.transform.position;
         position.x = ground.x;
         position.y = ground.y;
@@ -290,35 +277,6 @@ internal partial class BossRoomCoop {
         body.position = position;
         body.linearVelocity = Vector2.zero;
         GameCameras.instance.cameraController.PositionToHeroInstant(true);
-        Logger.Info($"Debug: put the local player at ({position.x:0.0}, {position.y:0.0}) by '{spot.name}'");
-    }
-
-    /// <summary>
-    /// Takes every player back to the challenge of the fight of /1 as it is won, in a game that went there with /1,
-    /// instead of on to the end that follows (USER 11-08 "…打完会进结局，调试能不能不进结局", "结局太长了"; 11-21). The
-    /// inventory that the win took away for that end comes back with the trip (see DebugTravelNow).
-    /// </summary>
-    /// <returns>Whether the end is skipped, so that its FSM is not to hear the event.</returns>
-    private bool SkipsDebugEnd(Fsm fsm, string eventName) {
-        if (!_debugSkipsEnd || eventName != DebugEndStartEvent || fsm.GameObject is not { } owner ||
-            Array.IndexOf(DebugEndSequences, owner.name) < 0 ||
-            !string.Equals(owner.scene.name, DebugPlace.Scene, StringComparison.OrdinalIgnoreCase)) {
-            return false;
-        }
-
-        Logger.Info(
-            $"Debug: '{GetPath(fsm)}' does not hear '{eventName}': the fight with the silk boss is won, so every " +
-            "player goes back to its challenge instead of on to its end"
-        );
-        UiManager.InternalChatBox.AddMessage(Lang.Pick(
-            "Debug: won. The ending is skipped; back to the start of the fight.",
-            "调试：打赢了，跳过结局，回到丝母开战的地方。"
-        ));
-        if (!_debugTravelling && !_debugPlacing) {
-            Send(BossRoomUpdateKind.DebugCommand, "", "", "", "", "1");
-            QueueDebugTravel();
-        }
-
-        return true;
+        Logger.Info($"Debug: put the local player at ({position.x:0.0}, {position.y:0.0}), over the arena");
     }
 }

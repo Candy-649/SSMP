@@ -572,6 +572,14 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a creature that died in their game before it came out here dies here
+        // as it comes out
+        try {
+            UpdateDeathsOwed();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         if (IsGroupComplete(marker, members)) {
             UpdateCheckedPlayTime(marker);
             ReleaseHold(hero);
@@ -800,6 +808,7 @@ internal partial class CoopSave {
         _othersBlowsTaken.Clear();
         _keptOut.Clear();
         _keptOutTold.Clear();
+        _deathsOwed.Clear();
         _catchStates.Clear();
         _ownLeaps.Clear();
         _partStepsInLeap.Clear();
@@ -2273,19 +2282,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// TEMPORARY debug (see BossRoomCoop.DebugCommands): whether the local player is on the trip of /1 and still in the
-    /// room it was asked for in, of which the members are told nothing: from the fight itself, the trip leads into a
-    /// load of the same room anew, where a member who came in before them has the fight fresh. Given by the boss room
-    /// code.
+    /// TEMPORARY debug (see BossRoomCoop.DebugCommands): whether the local player is on the trip of /2 and still in the
+    /// room it was asked for in, of which the members are told nothing: from the room of the encounter itself, the
+    /// trip leads into a load of the same room anew, where a member who came in before them has the encounter fresh.
+    /// Given by the boss room code.
     /// </summary>
     public Func<bool>? IsLeavingOnDebugTrip { get; set; }
 
     /// <summary>
     /// Sends an update to each member that the saves were checked with who is in the room of the local player, and to
     /// nobody else: what only matters in a room doesn't go to the members elsewhere. Nor while the local player is on
-    /// the debug trip out of the room (see IsLeavingOnDebugTrip): the steps of the boss won here, on its way to its
-    /// end, went to a member who had come into the new start of the fight, as the word of where it was did (see
-    /// SendOwnCreaturesTo; the user's log of 11-22, 20:50:15.112).
+    /// the debug trip out of the room (see IsLeavingOnDebugTrip): the steps of a creature here went to a member who had
+    /// come into the new load of the room, as the word of where it was did (see SendOwnCreaturesTo; the silk boss of
+    /// the trip before, the user's log of 11-22, 20:50:15.112).
     /// </summary>
     private void SendToRoomMembers(CoopSaveUpdate update) {
         if (IsLeavingOnDebugTrip?.Invoke() == true) {

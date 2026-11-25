@@ -638,8 +638,8 @@ internal class ClientManager : IClientManager {
         _commandManager.RegisterCommand(new DeleteCommand(_coopSave));
         _commandManager.RegisterCommand(new CurseCommand());
 
-        // TEMPORARY debug commands for trying the fight with the silk boss, to be taken out again once they are tried
-        for (var command = 0; command <= 1; command++) {
+        // TEMPORARY debug commands for trying an encounter, to be taken out again once they are tried
+        foreach (var command in new[] { 0, 2 }) {
             _commandManager.RegisterCommand(new DebugFightCommand(_bossRoomCoop, command));
         }
     }
@@ -1556,7 +1556,12 @@ internal class ClientManager : IClientManager {
         HeroHidden.SayAgainSoon();
         HeroRoomFigure.SayAgainSoon();
 
-        _arenaCoop.OnPlayerEnterScene();
+        // TEMPORARY debug: a game on the trip of /2 out of the room of the encounter, which leads into a load of the
+        // same room anew, does not tell a player who came into that load before it that the encounter is won here
+        if (!_bossRoomCoop.IsLeavingOnDebugTrip) {
+            _arenaCoop.OnPlayerEnterScene();
+        }
+
         _bossRoomCoop.OnPlayerEnterScene();
         _entityManager.OnPlayerEnterScene();
         _coopSave.OnPlayerEnterScene(playerData, cameIn);

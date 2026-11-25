@@ -10,9 +10,9 @@ using SSMP.Util;
 namespace SSMP.Game.Command.Client;
 
 /// <summary>
-/// TEMPORARY debug commands /0 and /1, for trying the fight with the silk boss (see BossRoomCoop.DebugCommands). To be
-/// taken out again once they are tried. /1 works only once /0 came with the key after it in this run of the game,
-/// which only the players who test with them know (see <see cref="KeyHash"/>).
+/// TEMPORARY debug commands /0 and /2, for trying an encounter whose battle every game runs by itself (see
+/// BossRoomCoop.DebugCommands). To be taken out again once they are tried. /2 works only once /0 came with the key
+/// after it in this run of the game, which only the players who test with them know (see <see cref="KeyHash"/>).
 /// </summary>
 internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
     /// <summary>
@@ -24,7 +24,7 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
     private const string KeyHash = "57f87ef6d90c2cfacd36767db1db1735cd832aa266c9543195bf71b8e6d681da";
 
     /// <summary>
-    /// Whether /0 came with the key in this run of the game: from then on until the game is closed, /1 needs no key
+    /// Whether /0 came with the key in this run of the game: from then on until the game is closed, /2 needs no key
     /// (USER 11-09 "要不然改成/0后面要加密钥，/1和/2只有本次游戏输入过/0才能用"; 11-21 "/0开启调试").
     /// </summary>
     private static bool _unlocked;
@@ -35,7 +35,7 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
     private readonly BossRoomCoop _bossRoomCoop;
 
     /// <summary>
-    /// The number of the command, 0 or 1.
+    /// The number of the command, 0 or 2.
     /// </summary>
     private readonly int _command;
 
@@ -53,7 +53,7 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
     /// <inheritdoc />
     public string Description => _command == 0
         ? "Temporary debug, with the key: turn the debug commands on until the game is closed."
-        : "Temporary debug, after /0 with the key: take every player to the silk boss, whose win skips the ending.";
+        : "Temporary debug, after /0 with the key: take every player to an encounter, which starts anew.";
 
     /// <inheritdoc />
     public void Execute(string[] arguments) {
@@ -65,8 +65,8 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
 
             _unlocked = true;
             UiManager.InternalChatBox.AddMessage(Lang.Pick(
-                "Debug: the debug commands are on until the game is closed. Type /1 to go to the silk boss.",
-                "调试：调试命令已打开，关游戏之前一直有效。输入 /1 去丝母那里。"
+                "Debug: the debug commands are on until the game is closed. Type /2 to go to the encounter.",
+                "调试：调试命令已打开，关游戏之前一直有效。输入 /2 去遭遇战那里。"
             ));
             return;
         }
