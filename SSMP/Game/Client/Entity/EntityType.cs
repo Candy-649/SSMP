@@ -356,5 +356,12 @@ internal enum EntityType {
     /// Not a creature: a cocoon hanging in the moss that breaks when struck. It has health but was no entity, so each
     /// game had its own, struck only by its own player, and it broke for one player while it hung on for the other.
     /// </summary>
-    MossBoneCocoon
+    MossBoneCocoon,
+
+    /// <summary>
+    /// Not a creature: a cocoon of the deep, without health, that makes a fly that grabs (Gloomsac) as the room loads
+    /// and lets it out as a player comes near or strikes it. It runs in every game, so that the fly that it makes does
+    /// too: as a part of the room, the scene host's game alone made the fly (RoomCreatures).
+    /// </summary>
+    GloomflyCocoon
 }

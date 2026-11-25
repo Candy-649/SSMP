@@ -2905,6 +2905,7 @@
   {
     "base_object_name": "Gloom Beast",
     "type": "GargantGloom",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3715,6 +3716,7 @@
   {
     "base_object_name": "Gloomfly",
     "type": "Gloomsac",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3727,6 +3729,17 @@
     "each_game_fsms": [
       "Detect Grab"
     ]
+  },
+  {
+    "base_object_name": "Gloomfly Cocoon",
+    "type": "GloomflyCocoon",
+    "own_in_each_game": true,
+    "parent_name": null,
+    "components": [],
+    "fsm_names": [
+      "Control"
+    ],
+    "without_health": true
   },
   {
     "base_object_name": "Tar Slug",

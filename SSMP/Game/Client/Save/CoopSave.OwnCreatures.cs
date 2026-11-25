@@ -877,9 +877,12 @@ internal partial class CoopSave {
 
             // One that has not come out of where the room keeps it, as the save has it, does nothing yet, and a summon
             // that is gone here, like a fly that flies off once the conductor is dead, is taken away there: their game
-            // had made it, and it flew about there, as nothing told it what it does (review of 3653911)
+            // had made it, and it flew about there, as nothing told it what it does (review of 3653911). One that has
+            // not come out yet, which never ran, like the fly that a cocoon keeps until it lets it out, waits there as
+            // here, as their maker made it so too: taken away, it died there as it came out (see UpdateDeathsOwed)
             if (!creature.activeInHierarchy) {
-                if (OwnCreatures.MakerOf(creature) != null) {
+                if (OwnCreatures.MakerOf(creature) != null &&
+                    creature.GetComponents<PlayMakerFSM>().Any(machine => machine.Fsm.Started)) {
                     Logger.Info($"[Own creatures] {player.Username} is told that '{pair.Value.Place}' is gone here");
                     TellTakenAway(player, pair.Value.Scene, pair.Value.Place);
                 }
