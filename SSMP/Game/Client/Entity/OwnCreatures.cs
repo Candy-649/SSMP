@@ -265,6 +265,13 @@ internal static class OwnCreatures {
     private static readonly Dictionary<GameObject, GameObject> SummonedBy = new();
 
     /// <summary>
+    /// The summons made here at the word of the scene host's game for the local player, who came in after their makers
+    /// made them there (see <see cref="MakeSummonAsTold"/>), that no action of their maker has made here since (see
+    /// <see cref="MakesSummon"/>).
+    /// </summary>
+    private static readonly HashSet<GameObject> MadeAsTold = [];
+
+    /// <summary>
     /// Whether two creatures that every game runs by itself are one, or one of them made the other as its summon (see
     /// <see cref="TakeSummon"/>): what one of them tells the other is the creature's own, as what its parts tell one
     /// another (see CoopSave.OwnTells).
@@ -281,8 +288,12 @@ internal static class OwnCreatures {
     /// <see cref="TakeSummon"/>), the way the action makes it (CreateObject.OnEnter): every game makes its own as its
     /// creature runs, under the name that the action gives it there. One of that name that is here already, made at
     /// the word of the scene host's game for the local player, who came in after it was made there (see
-    /// CoopSave.OwnSummons), is the one that the action makes. Before, the scene host's game made it alone and every
-    /// other showed a copy of it (see RoomCreatures). Whether the action is such a one.
+    /// CoopSave.OwnSummons), is the one that the action makes, and so is one made so by the same action of the same
+    /// maker as the maker goes through it on its way into a step of the scene host's: such a player's conductor, still
+    /// in its first wait as they were told of its step, went through the start that makes its flies at the rolls of
+    /// that step, where it made them under other names than there, beside the ones that they were told of (review of
+    /// 3653911). Before, the scene host's game made it alone and every other showed a copy of it (see RoomCreatures).
+    /// Whether the action is such a one.
     /// </summary>
     public static bool MakesSummon(CreateObject action) {
         if (Creatures.Count == 0 || action.Fsm?.FsmComponent is not { } machine || machine == null ||
@@ -294,11 +305,19 @@ internal static class OwnCreatures {
         var maker = machine.gameObject;
         SharedDice.RollByName(maker, RollName(maker));
         var key = SharedDice.NextOwnThrowKey(action)!;
-        var summon = Find(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, SummonStart + key);
+        var made = new SummonMaker(
+            PlaceOf(maker), machine.FsmName, action.State.Name, Array.IndexOf(action.State.Actions, action)
+        );
+        var named = Find(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name, SummonStart + key);
+        var summon = named ?? (PlaysSceneHostsStep(action.Fsm) ? MadeAsToldBy(made) : null);
         if (summon != null) {
+            MadeAsTold.Remove(summon);
             Logger.Info(
-                $"[Own creatures] '{PlaceOf(maker)}' makes '{SummonStart + key}' in '{action.State.Name}' of " +
-                $"'{machine.FsmName}', which is here already"
+                $"[Own creatures] '{made.Place}' makes '{SummonStart + key}' in '{made.State}' of '{made.Fsm}', " +
+                (named != null
+                    ? "which is here already"
+                    : $"which is '{PlaceOf(summon)}', made here as the scene host's game told, on its way into a " +
+                      "step of that game")
             );
         } else {
             summon = MakeAs(action, prefab);
@@ -328,7 +347,22 @@ internal static class OwnCreatures {
 
         var summon = MakeAs(action, prefab);
         TakeSummon(summon, entry.Type, place.Substring(1), by, action);
+        MadeAsTold.Add(summon);
         return summon;
+    }
+
+    /// <summary>
+    /// A summon made here at the word of the scene host's game that the given action of the given maker made there and
+    /// that no action has made here since, or null (see <see cref="MadeAsTold"/>).
+    /// </summary>
+    private static GameObject? MadeAsToldBy(SummonMaker made) {
+        foreach (var summon in MadeAsTold) {
+            if (summon != null && Makers.TryGetValue(summon, out var by) && by == made) {
+                return summon;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -679,6 +713,7 @@ internal static class OwnCreatures {
         Parts.Clear();
         Makers.Clear();
         SummonedBy.Clear();
+        MadeAsTold.Clear();
         EachGame.Clear();
         Dead.Clear();
         Deaths.Clear();

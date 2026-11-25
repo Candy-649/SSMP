@@ -834,24 +834,23 @@ internal partial class CoopSave {
             return;
         }
 
+        // What made each summon that is alive here, before what any creature here does, which their game makes as it
+        // did here (see CoopSave.OwnSummons), and which its maker there takes for its own as the step of its own here
+        // takes it there through the state that made it (see OwnCreatures.MakesSummon; review of 3653911)
+        foreach (var pair in OwnCreatures.All) {
+            var summon = pair.Key;
+            if (summon != null && OwnCreatures.MakerOf(summon) is { } maker &&
+                !(summon.TryGetComponent<HealthManager>(out var health) && health.isDead)) {
+                TellOwnMade(player, pair.Value.Scene, pair.Value.Place, maker);
+            }
+        }
+
         foreach (var pair in OwnCreatures.All) {
             var creature = pair.Key;
             if (creature == null || creature.TryGetComponent<HealthManager>(out var health) && health.isDead) {
                 Logger.Info($"[Own creatures] {player.Username} is told that '{pair.Value.Place}' is dead here");
-                Send(new CoopSaveUpdate {
-                    TargetId = player.Id,
-                    Kind = CoopSaveUpdateKind.OwnCreature,
-                    Scene = pair.Value.Scene,
-                    ObjectPath = pair.Value.Place,
-                    PartCount = 1
-                });
+                TellTakenAway(player, pair.Value.Scene, pair.Value.Place);
                 continue;
-            }
-
-            // What made a summon, which their game makes as it did here before they are told what it does (see
-            // CoopSave.OwnSummons)
-            if (OwnCreatures.MakerOf(creature) is { } maker) {
-                TellOwnMade(player, pair.Value.Scene, pair.Value.Place, maker);
             }
 
             // What the third act does to it, out or not, before its steps: the health that comes with them has what
@@ -861,8 +860,23 @@ internal partial class CoopSave {
                 Send(thread);
             }
 
-            // One that has not come out of where the room keeps it, as the save has it, does nothing yet
+            // One that has not come out of where the room keeps it, as the save has it, does nothing yet, and a summon
+            // that is gone here, like a fly that flies off once the conductor is dead, is taken away there: their game
+            // had made it, and it flew about there, as nothing told it what it does (review of 3653911)
             if (!creature.activeInHierarchy) {
+                if (OwnCreatures.MakerOf(creature) != null) {
+                    Logger.Info($"[Own creatures] {player.Username} is told that '{pair.Value.Place}' is gone here");
+                    TellTakenAway(player, pair.Value.Scene, pair.Value.Place);
+                }
+
+                continue;
+            }
+
+            // One that lies dead here, of a death that it comes back from, like a fly of the conductor's until it is
+            // called back, dies there as it died here: set straight into the state where it lies, it stood there as
+            // the states before had left it, seen and in the way of the players (review of 3653911)
+            if (health != null && OwnCreatures.IsMarkedDead(creature)) {
+                TellLyingDead(player, pair.Value.Scene, pair.Value.Place, creature);
                 continue;
             }
 
@@ -886,6 +900,41 @@ internal partial class CoopSave {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Tells a member who has come into the room that a creature that every game runs by itself is not out here, dead
+    /// or gone, at which their game takes it away (see OnOwnCreature).
+    /// </summary>
+    private void TellTakenAway(ClientPlayerData player, string scene, string place) {
+        Send(new CoopSaveUpdate {
+            TargetId = player.Id,
+            Kind = CoopSaveUpdateKind.OwnCreature,
+            Scene = scene,
+            ObjectPath = place,
+            PartCount = 1
+        });
+    }
+
+    /// <summary>
+    /// Tells a member who has come into the room of the death of a creature that every game runs by itself that lies
+    /// dead here, of a death that it comes back from, where it lies, which their game plays as one that it was just
+    /// told of, by its number here (see OnOwnCreature).
+    /// </summary>
+    private void TellLyingDead(ClientPlayerData player, string scene, string place, GameObject creature) {
+        var lying = creature.transform;
+        var at = lying.position;
+        Logger.Info($"[Own creatures] {player.Username} is told that '{place}' lies dead here, and dies there too");
+        Send(new CoopSaveUpdate {
+            TargetId = player.Id,
+            Kind = CoopSaveUpdateKind.OwnCreature,
+            Scene = scene,
+            ObjectPath = place,
+            PartCount = 2,
+            Sequence = OwnCreatures.DeathsOf(creature),
+            Part = ThrownThings.NoPlayer,
+            Values = [at.x, at.y, lying.localScale.x, lying.eulerAngles.z, 0f, 0f]
+        });
     }
 
     /// <summary>

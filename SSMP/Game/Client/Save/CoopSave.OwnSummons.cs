@@ -18,9 +18,12 @@ namespace SSMP.Game.Client.Save;
 /// A game a moment behind the scene host's makes a summon a moment later: the words of the scene host's game of it
 /// that come before wait for it to be made here and to start, and are taken then, as they came (see
 /// <see cref="KeepsSummonWord"/>). A member who comes in after a summon was made is told by the scene host's game what
-/// made it, and makes it as that action does, before they are told what it does (see <see cref="TakeOwnMade"/>); one
-/// that their own creature makes as it starts, which the scene host's made as it started too, is the same one. With
-/// three or four players, every game makes each summon, and every game that comes in later is told of it.
+/// made it, and makes it as that action does, before they are told what any creature does (see
+/// <see cref="TakeOwnMade"/>); one that their own creature makes as it starts, which the scene host's made as it
+/// started too, is the same one, and so is one that the same action of it makes on its way into a step of the scene
+/// host's (see OwnCreatures.MakesSummon). One that is gone here is taken away there, and one that lies dead here, of a
+/// death that it comes back from, dies there too (see SendOwnCreaturesTo). With three or four players, every game
+/// makes each summon, and every game that comes in later is told of it.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
