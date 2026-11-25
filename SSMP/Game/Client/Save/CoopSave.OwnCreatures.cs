@@ -324,6 +324,12 @@ internal partial class CoopSave {
     private readonly List<string> _wayInStates = [];
 
     /// <summary>
+    /// The player whose game's step of a creature that every game runs by itself this game took last, as the scene
+    /// host's (see OnOwnCreature).
+    /// </summary>
+    private ushort _stepsHost;
+
+    /// <summary>
     /// Watches the creatures that every game runs by itself go from one state to another and die.
     /// </summary>
     private void RegisterOwnCreatureHooks() {
@@ -457,14 +463,16 @@ internal partial class CoopSave {
             _heldOwnSteps.Remove(self);
             _ownWays.Remove(self);
 
-            // The step itself may be a leap at this game's player, which this game plays from there, and never a
-            // talk, which each game's player has with the creature by themselves (see CoopSave.OwnTalks). A state on
-            // the way into it does what it does as it is entered, but on the way into the creature's fight, which may
-            // go through its talk, and to where it waits to be talked to, for a line of the talk or a prompt, which
+            // The step itself may be a leap at this game's player, which this game plays from there, or a look at the
+            // silk of a player, whose game leads the move from it (see CoopSave.OwnSilkLooks), and never a talk,
+            // which each game's player has with the creature by themselves (see CoopSave.OwnTalks). A state on the way
+            // into it does what it does as it is entered, but on the way into the creature's fight, which may go
+            // through its talk, and to where it waits to be talked to, for a line of the talk or a prompt, which
             // would take this game's player into a talk that the way leaves at once (review: a member who came in
             // after the talk went through it on the way, and played every step after it by itself)
             if (isTheStep) {
                 StartsOwnLeap(machine, toState);
+                FollowsSilkLookAsTold(machine, toState, _wayInStep!, _stepsHost);
                 EnterOwnState(orig, self, toState);
                 return;
             }
@@ -500,6 +508,7 @@ internal partial class CoopSave {
             ReachKeptStep(self, toState.Name);
             PutAtSceneHostsStep(self, through, KeepsItsPlace(self, through));
             StartsOwnLeap(machine, toState);
+            FollowsSilkLookAsTold(machine, toState, through, _stepsHost);
             EnterOwnState(orig, self, toState);
             return;
         }
@@ -645,8 +654,14 @@ internal partial class CoopSave {
                 update.PartCount = OwnStruckPart;
                 update.Key = CoopHits.ReplayedStriker;
                 update.Sequence = CoopHits.ReplayedStrikeNumber;
-            } else if (struck || CoopHits.TakesAnothersBlow) {
-                update.PartCount = OwnHostStruckPart;
+            } else {
+                if (struck || CoopHits.TakesAnothersBlow) {
+                    update.PartCount = OwnHostStruckPart;
+                }
+
+                // A look at the silk of another player, whose game leads the move from it under this number (see
+                // CoopSave.OwnSilkLooks)
+                update.Sequence = StartsOthersSilkLook(self, toState, creature);
             }
 
             SendToRoomMembers(update);
@@ -1426,6 +1441,7 @@ internal partial class CoopSave {
         FollowExtractAsTold(player, fsm, update);
         PutAtSceneHostsStep(fsm, update, keepsPlace);
         OwnCreatures.SceneHostsStep = (fsm, update.StateName);
+        _stepsHost = player.Id;
 
         // Where it turns to the player that it goes after and how far it has them is the scene host's game's too: where
         // the scene host's had them, where its move takes it to a place of its own as there

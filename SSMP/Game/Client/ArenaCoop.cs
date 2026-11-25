@@ -547,6 +547,15 @@ internal partial class ArenaCoop {
             return;
         }
 
+        // Nor is one that the scene host's game won already or has no battle in, which a player who follows the scene
+        // host walks into, whether their game follows the scene host's battle there or runs its own (see IsOwnArena):
+        // the end of a memory's arena that the scene host won is played as they walk in
+        if (!isRemote && IsFollower() &&
+            state.HostUpdate is { Status: BattleSceneStatus.AlreadyWon or BattleSceneStatus.Unavailable }) {
+            TryPlayMemoryEnd(self, state, false);
+            return;
+        }
+
         // A boss arena starts once every player is in it
         if (TryHoldBossTriggerStart(self, state)) {
             return;
@@ -576,10 +585,7 @@ internal partial class ArenaCoop {
             return;
         }
 
-        if (IsCompleted(self) ||
-            state.HostUpdate is { Status: BattleSceneStatus.AlreadyWon or BattleSceneStatus.Unavailable }) {
-            // The end of a memory's arena that the scene host won is played as the local player walks in
-            TryPlayMemoryEnd(self, state, false);
+        if (IsCompleted(self)) {
             return;
         }
 

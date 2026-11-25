@@ -282,7 +282,8 @@ internal partial class CoopSave {
     /// Keeps off this game's player what a state machine of a creature that every game runs by itself does to the
     /// player it caught, as it goes into a catch of another player, of which the given state is the first, until it is
     /// through the move of the catch (see Entity.Action.EntityFsmActions.MoveFrom): the knight, as it held another
-    /// player for its blows, pulled this game's player up to it too.
+    /// player for its blows, pulled this game's player up to it too. So is what it does to the player whose silk it
+    /// looks at, in the move from the look (see CoopSave.OwnSilkLooks).
     /// </summary>
     private void KeepOut(Fsm fsm, FsmState toState) {
         var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, toState);
@@ -344,10 +345,13 @@ internal partial class CoopSave {
     /// that puts the player it let go of back inside its arena, at where it has the player it goes after, put
     /// Luminary where it had let the user go, 12 units off, as the scene host's step of it came (her log of 11-19,
     /// 20:39:19.792; USER "还有我朋友有一次角色瞬移了"). Not into a catch of that state machine's own, which keeps itself
-    /// (see <see cref="KeepOut"/>).
+    /// (see <see cref="KeepOut"/>). Every move that the catch tells it into is kept so, as one: the handmaiden's spin
+    /// tells its suck to start and to stop, and only the first of these that came up was kept, which was now the one
+    /// and now the other (see CoopSave.OwnSilkLooks).
     /// </summary>
     private void KeepOutTold(Fsm fsm, FsmState into) {
-        if (_keptOut.ContainsKey(fsm) || _keptOutTold.ContainsKey(fsm) || CatchStateOf(fsm, into) != null) {
+        if (_keptOut.ContainsKey(fsm) || CatchStateOf(fsm, into) != null ||
+            _keptOutTold.TryGetValue(fsm, out var kept) && kept.States.Contains(into)) {
             return;
         }
 
@@ -363,7 +367,13 @@ internal partial class CoopSave {
             action.Enabled = false;
         }
 
-        _keptOutTold[fsm] = (states, muted);
+        if (_keptOutTold.TryGetValue(fsm, out var told)) {
+            told.States.UnionWith(states);
+            told.Muted.AddRange(muted);
+        } else {
+            _keptOutTold[fsm] = (states, muted);
+        }
+
         Logger.Info(
             $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' may be told into '{into.Name}' of " +
             $"'{fsm.Name}' by a catch of another player, with {muted.Count} of what it does there kept off the local " +

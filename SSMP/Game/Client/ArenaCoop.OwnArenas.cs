@@ -16,7 +16,9 @@ namespace SSMP.Game.Client;
 /// CoopSave.OnOwnCreature). Whoever walks in starts the battle in their own game at once and tells the others, whose
 /// games start it too, with their gates left open until they walk in (USER 11-25 "就本地先演"). A member who comes
 /// into the room while the battle runs follows the scene host's waves, count and win for this battle, as they do in
-/// an arena of copies, and their creatures are their own all the same.
+/// an arena of copies, and their creatures are their own all the same. One who walks into an arena that the scene
+/// host's game won already, or has no battle in, does not fight it, as in an arena of copies (see OnStartBattle): in
+/// one whose win is not shared, like a boss arena's, they would have fought it alone.
 /// </summary>
 internal partial class ArenaCoop {
     /// <summary>
