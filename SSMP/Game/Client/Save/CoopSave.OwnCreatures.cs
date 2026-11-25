@@ -728,6 +728,7 @@ internal partial class CoopSave {
         using (var writer = new BinaryWriter(stream)) {
             worked.Write(writer);
             SharedDice.WritePastPicks(writer, fsm);
+            writer.Write(SharedDice.BouncesOf(machine.gameObject));
             GamePatcher.WriteWalk(writer, machine.gameObject);
         }
 
@@ -1164,6 +1165,7 @@ internal partial class CoopSave {
                 using var reader = new BinaryReader(new MemoryStream(update.Bytes));
                 ToldValues.Read(reader);
                 SharedDice.PutPastPicks(reader, fsm);
+                SharedDice.SetBounces(creature, reader.ReadInt32());
                 GamePatcher.PutWalk(reader, creature);
             }
 
@@ -1329,6 +1331,7 @@ internal partial class CoopSave {
         var worked = ToldValues.Read(reader);
         SharedDice.PutPastPicks(reader, fsm);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
+        SharedDice.SetBounces(creature, reader.ReadInt32());
         if (MovesAt(fsm, update)) {
             // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts
             // as it was there

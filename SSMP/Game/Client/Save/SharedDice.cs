@@ -655,6 +655,41 @@ internal static partial class SharedDice {
     }
 
     /// <summary>
+    /// Has a creature that every game runs by itself bounce off what it hit, which its ObjectBounce does in the game's
+    /// code with the game's dice, as fast as it flew times a number between 0.8 and 1.2, so that a flyer that bounces
+    /// off the walls flew off another way in each game after its first bounce: now with dice from the creature's name
+    /// and how many times it bounced before, the same in every game that bounced alike (see CoopHits.OnObjectBounce).
+    /// How many goes with each step of the scene host's creature, and a creature that is put to the step goes on from
+    /// there (see CoopSave.PutAtSceneHostsStep): a game that bounced once more at a corner rolls on as the others from
+    /// the next step. As the walk's, it is not among the rolls that tell whether a game took a step already.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="bounce">The bounce, which rolls with the game's dice.</param>
+    public static void RollForBounce(GameObject creature, Action bounce) {
+        RollByName(creature, Entity.OwnCreatures.RollName(creature));
+        var named = NamedRollers[creature];
+        ThrownThings.Rolling(
+            ThrownThings.Seed(named.Name, Identify("", nameof(ObjectBounce), "", 0), named.Bounces++), bounce
+        );
+    }
+
+    /// <summary>
+    /// How many times a creature that every game runs by itself bounced (see <see cref="RollForBounce"/>).
+    /// </summary>
+    public static int BouncesOf(GameObject creature) {
+        return NamedRollers.TryGetValue(creature, out var named) ? named.Bounces : 0;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself go on from how many times the creature of another game bounced
+    /// (see <see cref="RollForBounce"/>), as a member who has just come in, whose creature rolled nothing yet, does.
+    /// </summary>
+    public static void SetBounces(GameObject creature, int bounces) {
+        RollByName(creature, Entity.OwnCreatures.RollName(creature));
+        NamedRollers[creature].Bounces = bounces;
+    }
+
+    /// <summary>
     /// The name an object of the room rolls under now if nothing rolled or was told under it yet, or null: a name
     /// that the object was just given for what it is about to do, like a trap that another one tells to go off.
     /// </summary>
@@ -1224,5 +1259,10 @@ internal static partial class SharedDice {
         /// How many numbers of its walk it rolled (see <see cref="RollForWalk{T}"/>).
         /// </summary>
         public int Walks { get; set; }
+
+        /// <summary>
+        /// How many times it bounced off what it hit (see <see cref="RollForBounce"/>).
+        /// </summary>
+        public int Bounces { get; set; }
     }
 }

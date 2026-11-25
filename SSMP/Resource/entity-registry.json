@@ -2938,6 +2938,7 @@
   {
     "base_object_name": "Bone Flyer",
     "type": "Beastfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2946,6 +2947,18 @@
     "fsm_names": [
       "Control",
       "Flyer"
+    ]
+  },
+  {
+    "base_object_name": "Bone Flyer Smn",
+    "type": "Beastfly",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bone Flyer Smn",
+    "fsm_names": [
+      "Control"
     ]
   },
   {

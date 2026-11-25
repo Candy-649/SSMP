@@ -237,7 +237,8 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Hook for a bounce of a thing that bounces off what it hits, which takes how high it bounces from the name of a
-    /// thrown thing, the same in every game.
+    /// thrown thing, or of a creature that every game runs by itself (see SharedDice.RollForBounce), the same in every
+    /// game.
     /// </summary>
     private static void OnObjectBounce(
         Action<ObjectBounce, Collision2D> orig,
@@ -246,6 +247,11 @@ internal partial class CoopHits {
     ) {
         if (ThrownThings.Count > 0 && ThrownThings.TryGetMark(self.gameObject, out var mark)) {
             ThrownThings.Rolling(mark.NextBounce(), () => orig(self, collision));
+            return;
+        }
+
+        if (Entity.OwnCreatures.Owning(self.gameObject) is { } creature) {
+            SharedDice.RollForBounce(creature, () => orig(self, collision));
             return;
         }
 
