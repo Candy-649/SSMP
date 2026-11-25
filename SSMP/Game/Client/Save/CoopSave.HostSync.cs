@@ -933,9 +933,10 @@ internal partial class CoopSave {
         }
 
         var hasSave = HasSave(button);
-        JObject client;
+        JObject client, newSave;
         try {
-            client = hasSave ? ReadSave(button) : NewSave(hostSave);
+            newSave = NewSave(hostSave);
+            client = hasSave ? ReadSave(button) : newSave;
         } catch (Exception e) {
             Logger.Error($"Could not read save slot {slot} to align it with the host's save:\n{e}");
             ShowMessage(GetGameTooOldText(e) ?? Lang.Pick("This save can't be read.", "这个存档读不出来。"));
@@ -943,7 +944,7 @@ internal partial class CoopSave {
         }
 
         // Where a new save wakes, before the alignment gives it the host's place to wake at
-        var newGameWake = hasSave ? default : GetWakePlace(client);
+        var newGameWake = GetWakePlace(newSave);
         var (version, revisionBreak) = GetGameSaveVersion();
         var merged = CoopHostSync.Merge(hostSave, client, data, out var report, version, revisionBreak);
         if (merged == null) {
@@ -992,20 +993,24 @@ internal partial class CoopSave {
             BackUpSave(slot);
         }
 
-        var opening = !hasSave && GetWakePlace(merged) == newGameWake;
-        if (!hasSave && !opening) {
-            // A new character is shown their masks, silk and tools for the first time in the opening, whose end marks
-            // that it was (see BindCutsceneField), and each part of the display waits for that until then. One who
-            // wakes at the host's place has no opening, so the mark is set as its end sets it: without it the display
-            // stayed without silk and with one mask or none (reported 11-25: "非房主一方血条只显示一个面具，有时完全
-            // 不显示，灵丝条有时没有显示")
-            merged["playerData"]![BindCutsceneField] = true;
-            Logger.Info($"Save slot {slot} wakes at the host's place without the opening, which is marked as played");
+        // A character is shown their masks, silk, bind and tools for the first time in the opening, whose end marks
+        // that it was (see BindCutsceneField), and each part of the display waits for that until then, as it does
+        // again in the last act until its first scene (GameManager.StartAct3 clears the mark, the scene sets it again:
+        // PlayerData.IsAct3IntroQueued). A save without the mark that wakes elsewhere, at the host's place, gets
+        // neither scene, so the mark is set as the opening's end sets it. Without it the display stayed without silk
+        // and with one mask or none, for a new character who woke at the host's place and for their save each time it
+        // joined again (reported 11-25: "非房主一方血条只显示一个面具，有时完全不显示，灵丝条有时没有显示")
+        var playerData = merged["playerData"]!;
+        var wakesAsNewGame = GetWakePlace(merged) == newGameWake;
+        if (!wakesAsNewGame && (bool?) playerData[BindCutsceneField] != true &&
+            !((bool?) playerData["blackThreadWorld"] == true && (bool?) playerData["act3_wokeUp"] != true)) {
+            playerData[BindCutsceneField] = true;
+            Logger.Info($"Save slot {slot} wakes where no opening is played, which is marked as played for it");
         }
 
         _pendingJoin = new PendingJoin {
             Slot = slot, Merged = merged, Report = report, HostName = hostName, Time = UnityEngine.Time.unscaledTime,
-            Opening = opening
+            Opening = !hasSave && wakesAsNewGame
         };
         MarkCoopSave(slot, report.ArrivalsToSee);
         Logger.Info(
