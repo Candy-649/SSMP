@@ -689,6 +689,13 @@ internal partial class CoopSave {
         // Nobody stands on a trap plate of a room they left, should their getting off it never have come
         ForgetTrapPlatesOf(player.Id);
 
+        // A move of a creature that their game led goes on without them (see CoopSave.OwnLedMoves)
+        try {
+            ForgetLedMovesOf(player.Id);
+        } catch (Exception e) {
+            Logger.Warn($"Could not end the moves that {player.Username}'s game led: {e.Message}");
+        }
+
         // The heat lamps are whole for them when they come back, as the room loads anew (see CoopSave.HeatLamps)
         try {
             RestoreHeatLamps(player, false);

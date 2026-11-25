@@ -88,6 +88,26 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The state that an extraction ends in when the hero who extracts is gone from the room (see
+    /// CoopSave.OwnLedMoves): the one that it goes to as that hero is hurt, where it lets go of them so, or else the
+    /// one that it goes to as that hero is done.
+    /// </summary>
+    private static string? ExtractEndOf(HashSet<FsmState> states) {
+        string[] ends = ["HERO DAMAGED", "EXTRACT FINISH"];
+        foreach (var end in ends) {
+            foreach (var state in states) {
+                foreach (var way in state.Transitions) {
+                    if (way.EventName == end) {
+                        return way.ToState;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Has a state machine of a creature that every game runs by itself follow an extraction by another player, drawn
     /// to their character here: its variable of the hero holds that character, with the places under it that a
     /// creature is drawn to (see HeroChildEffects.GetFigurePart), until it is out of the extraction (see

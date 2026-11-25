@@ -316,14 +316,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Has a state machine of a creature that every game runs by itself here follow a grab of another player's as it
-    /// goes into it, with what it does to the player held kept off this game's (see <see cref="KeepOut"/>): the game of
-    /// the player that it goes after leads it (see CoopSave.OwnLedMoves), and a hurt of this game's player would let
-    /// that player drop here. The scene host's game follows a grab of another player's as it plays it (see
-    /// <see cref="PlayOthersCatch"/>).
+    /// Has a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
+    /// follow a grab of another player's as it goes into it, with what it does to the player held kept off this
+    /// game's (see <see cref="KeepOut"/>): the game of the player that it goes after leads it (see
+    /// CoopSave.OwnLedMoves), and a hurt of this game's player would let that player drop here. The scene host's game
+    /// follows a grab of another player's as it plays it, by the number that their game gave it (see
+    /// <see cref="PlayOthersCatch"/>), and plays one that their game told it of with no number as a catch that it does
+    /// not lead by itself (review of 4aae450: it followed it by no number, whose steps never came).
     /// </summary>
     private void FollowGrab(Fsm fsm, FsmState grabState) {
-        if (_ledMoves.ContainsKey(fsm) || !IsGrabState(fsm, grabState) ||
+        if (IsSceneHost?.Invoke() == true || _ledMoves.ContainsKey(fsm) || !IsGrabState(fsm, grabState) ||
             ThrownThings.CodeOf?.Invoke(GamePatcher.TargetOf(fsm.GameObject)) is not { } leader ||
             leader is ThrownThings.NoPlayer or ThrownThings.ThrowersPlayer) {
             return;
@@ -424,8 +426,11 @@ internal partial class CoopSave {
     private bool PlaysOwnLeap(PlayMakerFSM machine, FsmState toState) {
         var fsm = machine.Fsm;
         var creature = machine.gameObject;
+        // A catch that the leap plays, not one after it, which waits for the scene host's step here, nor one within a
+        // move that this game leads, whose every step is told (review of 4aae450: the scene host's game played a grab
+        // that this one did not, and waited for good for steps of it)
         _ownLeaps.TryGetValue(fsm, out var leap);
-        if (leap is { Talk: false } && CatchesLocalPlayer(fsm, toState, creature)) {
+        if (leap is { Talk: false, Through: false, Led: false } && CatchesLocalPlayer(fsm, toState, creature)) {
             TellOwnCatch(machine);
         }
 
@@ -449,7 +454,7 @@ internal partial class CoopSave {
         // by where the players are. Every step of a move that this game leads is told, and so is the one out of it,
         // which is this game's too
         if (leap.Led) {
-            TellLedStep(machine, toState, leap.Move);
+            TellLedStep(machine, toState, leap.Move, ++leap.Told);
         }
 
         if (leap.Talk ? !Entity.Entity.EndsTalk(fsm, toState)
@@ -967,9 +972,15 @@ internal partial class CoopSave {
 
         /// <summary>
         /// The number that this game gave a move that it leads (see <see cref="Led"/>), which its steps carry: the
-        /// number of the blow of this game's player that set off an extraction.
+        /// number of the blow of this game's player that set off an extraction, and of the grab, for a grab.
         /// </summary>
         public ulong Move;
+
+        /// <summary>
+        /// How many steps of a move that this game leads it told, whose numbers the scene host's game takes them in
+        /// the order of (see CoopSave.TakeLedStep).
+        /// </summary>
+        public ulong Told;
 
         /// <summary>
         /// The latest step of the scene host's creature that came meanwhile, which the creature here goes on from once

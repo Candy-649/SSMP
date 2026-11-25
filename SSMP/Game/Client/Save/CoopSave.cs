@@ -541,6 +541,14 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a creature in a move that another game led, which this game followed
+        // the scene host's steps of, goes on when the scene host left and this game runs the room
+        try {
+            UpdateLedMoves();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // A state machine set off here by a blow of this game's player, which the scene host's game did not answer
         try {
             UpdateAwaitedBlows();
@@ -889,6 +897,13 @@ internal partial class CoopSave {
         // comes back with the same number would have their old round started again from it, and the next round
         // exchanges their world anyway.
         _updatesOutOfRoom.RemoveAll(update => update.PlayerId == id);
+
+        // A move of a creature that their game led goes on without them (see CoopSave.OwnLedMoves)
+        try {
+            ForgetLedMovesOf(id);
+        } catch (Exception e) {
+            Logger.Warn($"Could not end the moves that {username}'s game led: {e.Message}");
+        }
 
         if (_memberChecks.ContainsKey(id) || _checkedMembers.Contains(id)) {
             PartnerLeft(id, Lang.Pick("left", "离开了"), username);

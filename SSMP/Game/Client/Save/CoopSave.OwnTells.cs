@@ -22,14 +22,19 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 ///
 /// What tells it in every game, like another creature that every game runs by itself, comes to the scene host's game
 /// both by itself and at the word of each other game, and is played there once: whichever comes first (see
-/// <see cref="TellTakenAlready"/>). What its own state machines and parts tell one another stays as before, the scene
-/// host's step: what one of them tells another there may go by where the players are.
+/// <see cref="TellTakenAlready"/>). Not what a state machine of its own that each game runs by itself tells it, like
+/// the one that sees the harpoon of that game's player coming, which each game tells it of its own player: one of two
+/// players a moment after another's went nowhere (review of 4aae450; see <see cref="ToldByEachGame"/>). What its own
+/// state machines and parts tell one another stays as before, the scene host's step: what one of them tells another
+/// there may go by where the players are.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
     /// What an update of a creature that every game runs by itself is when a game that follows the scene host's tells
     /// that game that something outside the creature told a state machine of it to go on there, with the event (see
     /// <see cref="TellOwnTell"/>): the scene host's game takes it (see <see cref="TakeOwnTell"/>).
+    /// <see cref="CoopSaveUpdate.Key"/> is 1 for a tell of a state machine that each game runs by itself (see
+    /// <see cref="ToldByEachGame"/>), and 0 for any other.
     /// </summary>
     private const ushort OwnTellPart = 16;
 
@@ -60,6 +65,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether what tells a state machine to go on now is a state machine that each game runs by itself for its own
+    /// player (see OwnCreatures.RunsInEachGame), whose tell is of that player and comes from no other game.
+    /// </summary>
+    private static bool ToldByEachGame() {
+        return Fsm.EventData?.SentByFsm?.FsmComponent is { } teller && OwnCreatures.RunsInEachGame(teller);
+    }
+
+    /// <summary>
     /// Tells the scene host's game that something outside a creature that every game runs by itself told a state
     /// machine of it here to go on, from the state it was in, by the event (see <see cref="TakeOwnTell"/>).
     /// </summary>
@@ -75,6 +88,7 @@ internal partial class CoopSave {
             )
         );
         word.PartCount = OwnTellPart;
+        word.Key = ToldByEachGame() ? 1UL : 0UL;
         var teller = Fsm.EventData?.SentByFsm;
         word.Names = [fsm.LastTransition!.EventName, toState.Name];
         Logger.Info(
@@ -107,7 +121,8 @@ internal partial class CoopSave {
     /// Takes the word of a game that follows the scene host's that something outside a creature that every game runs by
     /// itself told it to go on there (see <see cref="TellOwnTell"/>): in the scene host's game, the creature is told
     /// the same where it is, as if what told it there told it here now, and goes on as the game has it, which every
-    /// other game takes as a step of the scene host's. Not where it took the same tell a moment before.
+    /// other game takes as a step of the scene host's. Not where it took the same tell a moment before, but for one of
+    /// a state machine that each game runs by itself, which is of that game's player.
     /// </summary>
     private void TakeOwnTell(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
         var place = update.ObjectPath;
@@ -120,7 +135,7 @@ internal partial class CoopSave {
         }
 
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
-        if (TellTakenAlready(fsm, by, true)) {
+        if (update.Key == 0 && TellTakenAlready(fsm, by, true)) {
             Logger.Info($"[Own creatures] {told}, which it was told here too a moment before");
             return;
         }

@@ -529,8 +529,9 @@ internal partial class CoopSave {
         var picks = PicksAPart(toState);
 
         // A tell from outside that the scene host's game played at the word of another game a moment before, which
-        // every game had, is played once
-        if (setOffHere && IsSceneHost?.Invoke() == true &&
+        // every game had, is played once, but one of a state machine that each game runs by itself, which is of this
+        // game's player (see ToldByEachGame)
+        if (setOffHere && IsSceneHost?.Invoke() == true && !ToldByEachGame() &&
             TellTakenAlready(self, self.LastTransition!.EventName, false)) {
             MachineSwitchToStateField?.SetValue(self, null);
             Logger.Info(
@@ -1208,9 +1209,10 @@ internal partial class CoopSave {
         // tells whom it goes after and that its fight is on, and one that it played here already is past them (see
         // TakeKeptSteps; review of a0d1558: whom the last kept step went after stood, and the first step into the
         // fight, kept, ran the talk on the way), but while it is still on its way to them, as it plays its move
-        // through, which this one waits for (see KeepsForAfterMove)
+        // through, which this one waits for (see KeepsForAfterMove). Not in a move that another player's game leads,
+        // where it goes on by the scene host's steps only (see HoldsInLedMove)
         var keeps = found == null && update.PartCount != OwnToldPart && !_takingKeptSteps && !_settingOntoLatest &&
-                    ReachesByItself(fsm, update.StateName);
+                    !_ledMoves.ContainsKey(fsm) && ReachesByItself(fsm, update.StateName);
         if (found != null && !_takingKeptSteps) {
             _keptOwnSteps.Remove(fsm);
         } else if (found == null && !keeps) {
