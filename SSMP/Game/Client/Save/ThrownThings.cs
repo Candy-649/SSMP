@@ -314,6 +314,27 @@ internal static class ThrownThings {
     }
 
     /// <summary>
+    /// Has what an action of a creature that every game runs by itself throws as it starts named alike in every game,
+    /// each game naming its own throw, with no word between them (see SharedDice.NextOwnThrowKey): a player that one
+    /// of them hurts or strikes is told to the others by the name, as of the things that a copy throws.
+    /// </summary>
+    /// <param name="key">The name of the thing (see SharedDice.NextOwnThrowKey).</param>
+    /// <param name="prefab">What it throws.</param>
+    /// <param name="target">The player the creature goes after.</param>
+    /// <returns>What stops the naming once the thing is out.</returns>
+    public static IDisposable ExpectOwnThrow(string key, GameObject prefab, GameObject? target) {
+        var named = false;
+        return Begin(new Pending(prefab, target, () => {
+            if (named) {
+                return null;
+            }
+
+            named = true;
+            return $"{key}/{prefab.name}";
+        }, null));
+    }
+
+    /// <summary>
     /// Has what a named thrown thing throws in turn named after it, which both games do alike.
     /// </summary>
     /// <param name="parent">The mark of the thing that throws.</param>

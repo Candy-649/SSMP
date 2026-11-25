@@ -315,6 +315,22 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// Whether the death of a creature that every game runs by itself was told or taken (see <see cref="MarkDead"/>).
+    /// </summary>
+    public static bool IsMarkedDead(GameObject creature) {
+        return Dead.Count > 0 && Dead.Contains(creature);
+    }
+
+    /// <summary>
+    /// Notes that a creature that every game runs by itself that died has health again, as its state machines play a
+    /// death that it comes back from, like the bell creature that sinks into the ground and comes up again, whose next
+    /// death is told or taken once more (see <see cref="MarkDead"/>).
+    /// </summary>
+    public static void MarkAlive(GameObject creature) {
+        Dead.Remove(creature);
+    }
+
+    /// <summary>
     /// The creature at a place of a scene as the room loaded it, if it is one that every game runs by itself, or the
     /// part with state machines of its own of one there.
     /// </summary>

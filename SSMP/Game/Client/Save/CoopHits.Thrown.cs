@@ -206,12 +206,21 @@ internal partial class CoopHits {
             return ThrownThings.ExpectRoundThrow(round, prefab);
         }
 
+        // The player the creature goes after, which its own actions are pointed at, and otherwise this game's player
+        var hero = HeroController.SilentInstance;
+
+        // What a creature that every game runs by itself throws is named alike in every game, each naming its own
+        if (SharedDice.NextOwnThrowKey(action) is { } ownKey) {
+            var ownCreature = Entity.OwnCreatures.Owning(action.Fsm.GameObject);
+            var goesAfter = (ownCreature != null ? GamePatcher.TargetOf(ownCreature) : null) ??
+                            (hero != null ? hero.gameObject : null);
+            return ThrownThings.ExpectOwnThrow(ownKey, prefab, goesAfter);
+        }
+
         if (!Entity.Entity.TryGetThrower(action, out var thrower)) {
             return null;
         }
 
-        // The player the creature goes after, which its own actions are pointed at, and otherwise this game's player
-        var hero = HeroController.SilentInstance;
         var target = GamePatcher.TargetOf(thrower) ?? (hero != null ? hero.gameObject : null);
         return ThrownThings.ExpectHostThrow(action, prefab, target);
     }

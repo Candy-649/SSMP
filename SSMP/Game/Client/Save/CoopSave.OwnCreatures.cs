@@ -389,6 +389,18 @@ internal partial class CoopSave {
         // The creature, or the part of it that takes its steps as it does
         var creature = machine.gameObject;
 
+        // One that played a death that it comes back from has health again, and its next death is told again: a
+        // death of such a creature was told once, and the creature, back in the game that killed it, was killed there
+        // again with no word of it to the others
+        if (OwnCreatures.IsMarkedDead(creature) && creature.TryGetComponent<HealthManager>(out var lives) &&
+            lives.hp > 0 && !lives.isDead) {
+            OwnCreatures.MarkAlive(creature);
+            Logger.Info(
+                $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' has {lives.hp} health again in " +
+                $"'{toState.Name}' of '{self.Name}', after a death that it comes back from"
+            );
+        }
+
         // The way into a step of the scene host's, which plays as it came: nothing holds it back, and the step itself
         // is that one, which nothing here keeps to be found again (see TakeOwnStep). On a way through the states
         // between, the first state of the part that the step goes round in that it comes to is the step, where it is
@@ -480,10 +492,25 @@ internal partial class CoopSave {
         // strike as it was taken here, and its creature answers it as the game does, which every other game takes as a
         // step of the scene host's (USER 11-17 "如果这个会有反馈，我这边应该先演，然后通知房主，让房主那边的也触发这个弹
         // 开", "本地化就是为了让自己的怪是活的，可以触发各种反应"; a blade of the boss at the end of the second act that the
-        // player tinked did nothing, as it went by where the players are, until the scene host's step came)
+        // player tinked did nothing, as it went by where the players are, until the scene host's step came). So is what
+        // something outside the creature tells it here, like a part of the room that this game's player came into,
+        // which the scene host's game is told of and plays too (see CoopSave.OwnTells)
         var waitedFor = IsWaitedFor(self);
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
+        var setOffHere = ToldFromOutside(self, toState, creature);
         var picks = PicksAPart(toState);
+
+        // A tell from outside that the scene host's game played at the word of another game a moment before, which
+        // every game had, is played once
+        if (setOffHere && IsSceneHost?.Invoke() == true &&
+            TellTakenAlready(self, self.LastTransition!.EventName, false)) {
+            MachineSwitchToStateField?.SetValue(self, null);
+            Logger.Info(
+                $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' is told to go from '{self.ActiveStateName}' to " +
+                $"'{toState.Name}' of '{self.Name}' here, which it was told at the word of another game a moment before"
+            );
+            return;
+        }
 
         // A way that a hurt of a player takes it plays at once where it is. A game that follows the scene host's tells
         // that game of a hurt of its own player, and plays the rest of the move by itself, as it does at the word of
@@ -496,7 +523,7 @@ internal partial class CoopSave {
 
         if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
             !GoesByItselfBeforeFight(self, toState) &&
-            (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike || picks)) {
+            (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike && !setOffHere || picks)) {
             MachineSwitchToStateField?.SetValue(self, null);
             _ownWays.Remove(self);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
@@ -515,8 +542,12 @@ internal partial class CoopSave {
         // after other rolls: the scene host's are found among them by their states (see TakeOwnStep)
         _heldOwnSteps.Remove(self);
         var struck = CoopHits.IsMakingLocalStrike || CoopHits.IsReplayingPartnersStrike;
-        if (struck) {
+        if (struck || setOffHere) {
             _ownWays.Add(self);
+        }
+
+        if (setOffHere && OwnCreatures.FollowsSceneHost(creature)) {
+            TellOwnTell(machine, toState);
         }
 
         // A blow of this game's player sets it off on a way of its own here a round trip before the scene host's game
@@ -1022,6 +1053,12 @@ internal partial class CoopSave {
         // It hurt a player there, which it plays here too, where it is (see CoopSave.OwnHits)
         if (update.PartCount is OwnHitPart or OwnHostHitPart) {
             TakeWhatStepDid(update, () => TakeOwnHit(player, creature, update));
+            return;
+        }
+
+        // Something outside it told it to go on there, which it is told here too (see CoopSave.OwnTells)
+        if (update.PartCount == OwnTellPart) {
+            TakeOwnTell(player, creature, update);
             return;
         }
 

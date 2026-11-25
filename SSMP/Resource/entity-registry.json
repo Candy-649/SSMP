@@ -35,6 +35,7 @@
   {
     "base_object_name": "Farmer Wisp Immolater Variant",
     "type": "Wisp",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -72,6 +73,7 @@
   {
     "base_object_name": "Coral Conch Shooter Heavy",
     "type": "Driznarga",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -85,6 +87,7 @@
   {
     "base_object_name": "Pilgrim Staff Understore",
     "type": "Undersweep",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -125,6 +128,7 @@
   {
     "base_object_name": "Pilgrim Bellthrower Fly",
     "type": "WingedPilgrimBellbearer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -148,6 +152,7 @@
   {
     "base_object_name": "Understore Automaton EX",
     "type": "CogworkHauler",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -185,6 +190,7 @@
   {
     "base_object_name": "Shellwood Goomba Flyer",
     "type": "ShellwoodGnat",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -226,6 +232,7 @@
   {
     "base_object_name": "Crystal Drifter Giant",
     "type": "Mnemonord",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -238,6 +245,7 @@
   {
     "base_object_name": "Pilgrim 03 Understore",
     "type": "Underscrub",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -264,6 +272,7 @@
   {
     "base_object_name": "Slab Prisoner Fly New",
     "type": "PunyPenitent",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -305,6 +314,7 @@
   {
     "base_object_name": "Swamp Mosquito Skinny",
     "type": "SpitSquit",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -392,6 +402,7 @@
   {
     "base_object_name": "Pilgrim Fisher Enemy",
     "type": "Pondcatcher",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -405,6 +416,7 @@
   {
     "base_object_name": "Pilgrim Moss Spitter",
     "type": "OvergrownPilgrim",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -417,6 +429,7 @@
   {
     "base_object_name": "Pilgrim StaffWielder",
     "type": "PilgrimGuide",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -490,6 +503,7 @@
   {
     "base_object_name": "Song Scholar Acolyte",
     "type": "Vaultborn",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -515,6 +529,7 @@
   {
     "base_object_name": "Understore Automaton",
     "type": "CogworkUnderfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -641,6 +656,7 @@
   {
     "base_object_name": "Coral Conch Shooter",
     "type": "Driznit",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -654,6 +670,7 @@
   {
     "base_object_name": "Coral Conch Stabber",
     "type": "Pokenabbin",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -692,6 +709,7 @@
   {
     "base_object_name": "Pilgrim BellThrower",
     "type": "PilgrimBellbearer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -772,6 +790,7 @@
   {
     "base_object_name": "Bone Hunter Buzzer",
     "type": "Skarrwing",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -972,6 +991,7 @@
   {
     "base_object_name": "Swamp Muckman Tall",
     "type": "StilkinTrapper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1188,6 +1208,7 @@
   {
     "base_object_name": "Roachfeeder Short",
     "type": "Roachcatcher",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1201,6 +1222,19 @@
   {
     "base_object_name": "Shield Dockworker",
     "type": "SmokerockSifter",
+    "parent_name": "Minions",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Shield Dock Worker",
+    "fsm_names": [
+      "Behaviour"
+    ]
+  },
+  {
+    "base_object_name": "Shield Dockworker",
+    "type": "SmokerockSifter",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1240,6 +1274,7 @@
   {
     "base_object_name": "Song Heavy Sentry",
     "type": "ChoirClapper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1324,6 +1359,7 @@
   {
     "base_object_name": "Farmer Centipede",
     "type": "ThreadRaker",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1409,6 +1445,7 @@
   {
     "base_object_name": "Surface Scuttler",
     "type": "Skrill",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1435,6 +1472,7 @@
   {
     "base_object_name": "Understore Heavy",
     "type": "Undercrank",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1447,6 +1485,7 @@
   {
     "base_object_name": "Understore Poker",
     "type": "Underpoke",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1459,6 +1498,7 @@
   {
     "base_object_name": "Understore Small",
     "type": "Underworker",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1484,6 +1524,7 @@
   {
     "base_object_name": "Shellwood Goomba",
     "type": "ShellwoodGnat",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1496,6 +1537,7 @@
   {
     "base_object_name": "Arborium Keeper",
     "type": "Memoria",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1521,6 +1563,7 @@
   {
     "base_object_name": "Bone Hunter Fly",
     "type": "SpearSkarr",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1642,6 +1685,7 @@
   {
     "base_object_name": "Pilgrim 03 Song",
     "type": "ChoirBellbearer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1655,6 +1699,7 @@
   {
     "base_object_name": "Pilgrim 04 Song",
     "type": "ChoirFlyer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1826,6 +1871,7 @@
   {
     "base_object_name": "Crowman Dagger",
     "type": "Squatcraw",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1907,6 +1953,7 @@
   {
     "base_object_name": "Shellwood Gnat",
     "type": "ShellwoodGnat",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2158,6 +2205,7 @@
   {
     "base_object_name": "Bloom Shooter",
     "type": "Pollenica",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2286,6 +2334,7 @@
   {
     "base_object_name": "Swamp Muckman",
     "type": "Stilkin",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2323,6 +2372,7 @@
   {
     "base_object_name": "Bone Circler",
     "type": "Caranid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2372,6 +2422,7 @@
   {
     "base_object_name": "Coral Hunter",
     "type": "Alita",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2401,6 +2452,7 @@
   {
     "base_object_name": "Fields Flyer",
     "type": "FlappingFertid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2480,6 +2532,7 @@
   {
     "base_object_name": "Song Creeper",
     "type": "Mortician",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2624,6 +2677,7 @@
   {
     "base_object_name": "Bell Goomba",
     "type": "Furm",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2636,6 +2690,7 @@
   {
     "base_object_name": "Bloat Roach",
     "type": "Bloatroach",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2661,6 +2716,7 @@
   {
     "base_object_name": "Bone Hunter",
     "type": "SkarrStalker",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2719,6 +2775,7 @@
   {
     "base_object_name": "Coral Judge",
     "type": "Judge",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2744,6 +2801,7 @@
   {
     "base_object_name": "Dock Bomber",
     "type": "FlintflameFlyer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2758,6 +2816,20 @@
   {
     "base_object_name": "Dock Worker",
     "type": "SmeltShoveller",
+    "parent_name": "Minions",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Dock Worker",
+    "fsm_names": [
+      "Control",
+      "Behaviour"
+    ]
+  },
+  {
+    "base_object_name": "Dock Worker",
+    "type": "SmeltShoveller",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2771,6 +2843,7 @@
   {
     "base_object_name": "Farmer Wisp",
     "type": "BurningBug",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2796,6 +2869,7 @@
   {
     "base_object_name": "Lightbearer",
     "type": "Lampbearer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2832,6 +2906,7 @@
   {
     "base_object_name": "Pond Skater",
     "type": "PondSkipper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2857,6 +2932,7 @@
   {
     "base_object_name": "Rock Roller",
     "type": "Flintbeetle",
+    "own_in_each_game": true,
     "parent_name": "Rock Roller Scene",
     "components": [
       "Rotation"
@@ -3037,6 +3113,21 @@
   {
     "base_object_name": "Dock Flyer",
     "type": "FlintstoneFlyer",
+    "parent_name": "Minions",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Dock Flyer",
+    "fsm_names": [
+      "Behaviour",
+      "FSM",
+      "Go Direction Velocity"
+    ]
+  },
+  {
+    "base_object_name": "Dock Flyer",
+    "type": "FlintstoneFlyer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3110,6 +3201,7 @@
   {
     "base_object_name": "Pilgrim 01",
     "type": "PilgrimPouncer",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3123,6 +3215,7 @@
   {
     "base_object_name": "Pilgrim 02",
     "type": "PilgrimHulk",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3136,6 +3229,7 @@
   {
     "base_object_name": "Pilgrim 03",
     "type": "PilgrimGroveller",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3162,6 +3256,7 @@
   {
     "base_object_name": "Pilgrim 05",
     "type": "ElderPilgrim",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3526,6 +3621,7 @@
   {
     "base_object_name": "Bell Fly",
     "type": "WingedFurm",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3583,6 +3679,7 @@
   {
     "base_object_name": "Tar Slug",
     "type": "Lavalug",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

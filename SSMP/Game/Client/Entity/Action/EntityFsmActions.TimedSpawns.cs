@@ -226,6 +226,19 @@ internal static partial class EntityFsmActions {
 
         if (SharedDice.NextSeedByName(action) is { } seed) {
             SetTimedRun(action, new TimedRun(seed, null, false) { ByName = true, Visit = visit });
+            return;
+        }
+
+        // A creature that every game runs by itself, or a part of it, throws from a seed of the run that every game
+        // makes alike, and names what it throws after it, each game its own (see SharedDice.NextOwnRunSeed)
+        if (SharedDice.NextOwnRunSeed(action) is { } ownSeed) {
+            var creature = OwnCreatures.Owning(action.Fsm.GameObject);
+            var target = creature != null ? GamePatcher.TargetOf(creature) : null;
+            var names = new ThrownThings.Series(
+                "o." + ownSeed.ToString("x8", System.Globalization.CultureInfo.InvariantCulture), 0,
+                ThrownThings.CodeOf?.Invoke(target) ?? ThrownThings.NoPlayer, target
+            );
+            SetTimedRun(action, new TimedRun(ownSeed, names, false) { ByName = true, Visit = visit });
         }
     }
 

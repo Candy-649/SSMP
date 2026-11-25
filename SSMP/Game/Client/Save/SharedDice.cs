@@ -206,6 +206,10 @@ internal static partial class SharedDice {
             yield return (onEnter, new Action<Action<FsmStateAction>, FsmStateAction>(OnRollingActionEnter));
         }
 
+        foreach (var buzz in GetBuzzHooks()) {
+            yield return buzz;
+        }
+
         foreach (var type in JudgingActionTypes) {
             var isTrue = type.GetMethod("get_IsTrue", flags);
             if (isTrue == null || isTrue.DeclaringType != type) {
@@ -774,6 +778,8 @@ internal static partial class SharedDice {
     /// </summary>
     public static void ForgetRollNames() {
         NamedRollers.Clear();
+        OwnThrows.Clear();
+        BuzzDice.Clear();
         FoundMachines.Clear();
         PastPickers.Clear();
         ForgetTables();
@@ -1194,6 +1200,73 @@ internal static partial class SharedDice {
         named.Times.TryGetValue(roller, out var times);
         named.Times[roller] = times + 1;
         return SeedFor(named.Name, named.Table, roller, times, thing);
+    }
+
+    /// <summary>
+    /// For each creature that every game runs by itself, or part of it, that threw something: the roll counts it had
+    /// at its last throw (see <see cref="RollCounts"/>), and how many times each of its actions threw at those counts.
+    /// </summary>
+    private static readonly Dictionary<GameObject, (uint Counts, Dictionary<int, int> Throws)> OwnThrows = new();
+
+    /// <summary>
+    /// The name of the next thing that an action of a creature that every game runs by itself, or of a part of it,
+    /// throws as it starts, the same in every game, with no word between them: from the name it rolls under, the number
+    /// of the action, the roll counts of the creature, which every game has alike, a step of the scene host's setting
+    /// them as that game had them (see CoopSave.TakeOwnStep), and how many times the action threw at those counts, as
+    /// most throws roll nothing and do not count. With no '|' in it, which starts the path of a part of a thrown thing
+    /// (see ThrownThings.Find). Null for any other action.
+    /// </summary>
+    public static string? NextOwnThrowKey(FsmStateAction action) {
+        return NextOwnThrow(action) is { } thrown
+            ? "o." + thrown.Name.ToString("x8", CultureInfo.InvariantCulture) + "." +
+              thrown.Roller.ToString("x8", CultureInfo.InvariantCulture) + "." +
+              thrown.Counts.ToString("x8", CultureInfo.InvariantCulture) + "." +
+              thrown.Times.ToString(CultureInfo.InvariantCulture)
+            : null;
+    }
+
+    /// <summary>
+    /// The seed of the next run of an action of a creature that every game runs by itself, or of a part of it, that
+    /// throws on a clock for as long as its state lasts (EntityFsmActions.TimedSpawns), the same in every game, as the
+    /// name of a throw (see <see cref="NextOwnThrowKey"/>). The run is no roll of its own, as the steps of such a
+    /// creature are found by how many times its actions rolled (CoopSave.TakeOwnStep), which a run that one game left
+    /// out, as its state was left before it updated, would put off. Null for any other action.
+    /// </summary>
+    public static int? NextOwnRunSeed(FsmStateAction action) {
+        return NextOwnThrow(action) is { } thrown
+            ? ThrownThings.Seed(
+                thrown.Name.ToString("x8", CultureInfo.InvariantCulture), thrown.Roller,
+                unchecked((int) StableHash.Add(thrown.Counts, (uint) thrown.Times))
+            )
+            : null;
+    }
+
+    /// <summary>
+    /// Counts a throw of an action of a creature that every game runs by itself, or of a part of it (see
+    /// <see cref="NextOwnThrowKey"/>): the hash of the name it rolls under, the number of the action, the hash of its
+    /// roll counts, and how many times the action threw at them before. Null for any other action.
+    /// </summary>
+    private static (uint Name, int Roller, uint Counts, int Times)? NextOwnThrow(FsmStateAction action) {
+        if (Entity.OwnCreatures.Count == 0 || action.Fsm?.FsmComponent is not { } fsm || fsm == null ||
+            !Entity.OwnCreatures.RollsUnderPlace(fsm.gameObject) ||
+            !NamedRollers.TryGetValue(fsm.gameObject, out var named)) {
+            return null;
+        }
+
+        var counts = StableHash.Start;
+        foreach (var count in RollCounts(fsm.gameObject)) {
+            counts = StableHash.Add(counts, (uint) count);
+        }
+
+        if (!OwnThrows.TryGetValue(fsm.gameObject, out var thrown) || thrown.Counts != counts) {
+            thrown = (counts, new Dictionary<int, int>());
+            OwnThrows[fsm.gameObject] = thrown;
+        }
+
+        var roller = Identify(action, fsm);
+        thrown.Throws.TryGetValue(roller, out var times);
+        thrown.Throws[roller] = times + 1;
+        return (StableHash.Add(StableHash.Start, named.Name), roller, counts, times);
     }
 
     /// <summary>
