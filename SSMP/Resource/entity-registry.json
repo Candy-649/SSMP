@@ -61,6 +61,7 @@
   {
     "base_object_name": "White Palace Fly Red Memory",
     "type": "Wingmould",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -203,6 +204,7 @@
   {
     "base_object_name": "Bone Hunter Fly Chief",
     "type": "LastClaw",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -634,6 +636,7 @@
   {
     "base_object_name": "Coral Big Jellyfish",
     "type": "Yumama",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -690,6 +693,7 @@
   {
     "base_object_name": "Coral Swimmer Small",
     "type": "Yuma",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -759,6 +763,7 @@
   {
     "base_object_name": "Coral Spike Swimmer",
     "type": "SteelspineKai",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -917,6 +922,7 @@
   {
     "base_object_name": "Coral Poke Swimmer",
     "type": "SpinebeakKai",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1162,6 +1168,7 @@
   {
     "base_object_name": "Coral Swimmer Fat",
     "type": "Kai",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
