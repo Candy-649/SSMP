@@ -299,6 +299,7 @@
   {
     "base_object_name": "Song Automaton Shield",
     "type": "CogworkDefender",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -341,6 +342,7 @@
   {
     "base_object_name": "Weaver Servitor Large",
     "type": "ServitorBoran",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -443,6 +445,7 @@
   {
     "base_object_name": "Pilgrim Stomper Song",
     "type": "ChoirElder",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -516,6 +519,7 @@
   {
     "base_object_name": "Stick Insect Charger",
     "type": "Splinterhorn",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -803,6 +807,7 @@
   {
     "base_object_name": "Coral Bubble Brute",
     "type": "CorrcrustKaraka",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -829,6 +834,7 @@
   {
     "base_object_name": "Coral Spike Goomba",
     "type": "CoralFurm",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -935,6 +941,7 @@
   {
     "base_object_name": "Song Administrator",
     "type": "Minister",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1005,6 +1012,7 @@
   {
     "base_object_name": "Understore Thrower",
     "type": "Underloft",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1053,6 +1061,7 @@
   {
     "base_object_name": "Blade Spider Hang",
     "type": "PharlidDiver",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1106,6 +1115,7 @@
   {
     "base_object_name": "Bone Hunter Throw",
     "type": "Skarrgard",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1173,6 +1183,7 @@
   {
     "base_object_name": "Grasshopper Child",
     "type": "Kindanir",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1247,6 +1258,7 @@
   {
     "base_object_name": "Song Automaton 01",
     "type": "CogworkChoirbug",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1260,6 +1272,7 @@
   {
     "base_object_name": "Song Automaton 02",
     "type": "CogworkCleanser",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1550,6 +1563,7 @@
   {
     "base_object_name": "Aspid Collector",
     "type": "Aknid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1779,6 +1793,7 @@
   {
     "base_object_name": "Weaver Servitor",
     "type": "ServitorIgnim",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1896,6 +1911,7 @@
   {
     "base_object_name": "Flower Drifter",
     "type": "Phacia",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2193,6 +2209,7 @@
   {
     "base_object_name": "Bloom Puncher",
     "type": "Gahlia",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2218,6 +2235,7 @@
   {
     "base_object_name": "Coral Brawler",
     "type": "KarakGor",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2360,6 +2378,7 @@
   {
     "base_object_name": "Blade Spider",
     "type": "Pharlid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2545,6 +2564,7 @@
   {
     "base_object_name": "Stick Insect",
     "type": "Splinter",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3101,6 +3121,7 @@
   {
     "base_object_name": "Crypt Worm",
     "type": "Gromling",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3693,6 +3714,7 @@
   {
     "base_object_name": "Crowman",
     "type": "Tallcraw",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3705,6 +3727,7 @@
   {
     "base_object_name": "Mitefly",
     "type": "Fluttermite",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3718,6 +3741,7 @@
   {
     "base_object_name": "Scholar",
     "type": "Vaultkeeper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3822,6 +3846,7 @@
   {
     "base_object_name": "Rhino",
     "type": "Rhinogrund",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3835,6 +3860,7 @@
   {
     "base_object_name": "Crow",
     "type": "Craw",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
