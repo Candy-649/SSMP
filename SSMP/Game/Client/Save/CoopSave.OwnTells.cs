@@ -47,13 +47,16 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a state machine of a creature that every game runs by itself goes to a state as something outside the
-    /// creature tells it: another state machine than its own and those of its parts, whose event takes it there.
+    /// creature tells it: another state machine than its own and those of its parts, whose event takes it there, or
+    /// one of them that each game runs by itself for its own player (see OwnCreatures.RunsInEachGame), which hears
+    /// what only this game's player does, like the throw of their harpoon.
     /// </summary>
     private static bool ToldFromOutside(Fsm fsm, FsmState toState, GameObject creature) {
         return Fsm.EventData?.SentByFsm is { } teller && teller != fsm && fsm.LastTransition is { } way &&
                way.ToState == toState.Name &&
                (teller.GameObject is not { } tellerObject ||
-                OwnCreatures.Owning(tellerObject) != OwnCreatures.Owning(creature));
+                OwnCreatures.Owning(tellerObject) != OwnCreatures.Owning(creature) ||
+                teller.FsmComponent is { } heard && OwnCreatures.RunsInEachGame(heard));
     }
 
     /// <summary>

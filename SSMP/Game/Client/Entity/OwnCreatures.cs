@@ -48,6 +48,13 @@ internal static class OwnCreatures {
     private static readonly Dictionary<GameObject, (GameObject Creature, string Scene, string Place)> Parts = new();
 
     /// <summary>
+    /// The state machines of the creatures, and of their parts, that each game runs by itself for its own player alone
+    /// (see EntityRegistryEntry.EachGameFsms), like the one that feels the player that the creature grabs: no game
+    /// takes or tells the steps of another's (see CoopSave.OnOwnCreatureStep).
+    /// </summary>
+    private static readonly HashSet<PlayMakerFSM> EachGame = [];
+
+    /// <summary>
     /// How many there are.
     /// </summary>
     public static int Count => Creatures.Count;
@@ -224,13 +231,18 @@ internal static class OwnCreatures {
         var place = ScenePath.Get(creature.transform);
         Creatures[creature] = (creature.scene.name, place);
 
-        // Its parts with state machines of their own, while they still hang under it
+        // Its parts with state machines of their own, while they still hang under it, and the state machines that each
+        // game runs by itself
         var parts = 0;
         foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
             var part = machine.gameObject;
             if (part != creature && !Parts.ContainsKey(part)) {
                 Parts[part] = (creature, creature.scene.name, ScenePath.Get(part.transform));
                 parts++;
+            }
+
+            if (EntityRegistry.IsEachGameFsm(type, machine.FsmName)) {
+                EachGame.Add(machine);
             }
         }
 
@@ -267,6 +279,14 @@ internal static class OwnCreatures {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether a state machine of a creature that every game runs by itself, or of a part of one, is one that each game
+    /// runs by itself for its own player alone (see <see cref="EachGame"/>).
+    /// </summary>
+    public static bool RunsInEachGame(PlayMakerFSM machine) {
+        return EachGame.Count > 0 && EachGame.Contains(machine);
     }
 
     /// <summary>
@@ -433,6 +453,7 @@ internal static class OwnCreatures {
     public static void Clear() {
         Creatures.Clear();
         Parts.Clear();
+        EachGame.Clear();
         Dead.Clear();
         Deaths.Clear();
         DeathLooks.Clear();

@@ -73,7 +73,8 @@ internal partial class CoopSave {
     /// move is over, if it has one.</param>
     /// <param name="leader">The player.</param>
     /// <param name="number">The number that their game gave the move, which its steps carry (see
-    /// <see cref="TellLedStep"/>): the number of their blow that set it off, for an extraction.</param>
+    /// <see cref="TellLedStep"/>): the number of their blow that set it off, for an extraction, and of the grab, for a
+    /// grab (see CoopSave.OwnCatches).</param>
     private sealed class LedMove(HashSet<FsmState> states, FsmGameObject? hero, ushort leader, ulong number) {
         public readonly HashSet<FsmState> States = states;
         public readonly FsmGameObject? Hero = hero;

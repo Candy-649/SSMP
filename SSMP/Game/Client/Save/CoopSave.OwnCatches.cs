@@ -42,6 +42,12 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// the catch, and the scene host's game plays it as well, but over a catch that it plays already: whenever a
 /// player is caught, the catch is played, and only their own game hurts them (USER 11-09 "只要有玩家被抓了就演抓人，至于
 /// 扣不扣血看本机先前的判定"; see <see cref="StartsOwnRoomCatch"/>).
+///
+/// A grab (see <see cref="GrabEvents"/>), which a part of the creature, or a state machine of it that each game runs by
+/// itself, tells it of as it feels the player of its game, goes on by what befalls the player held, like a hurt that
+/// lets them drop, which only their own game has: their game leads it, the scene host's game takes its every step
+/// from there, and every other game takes those of the scene host's (see CoopSave.OwnLedMoves; USER 11-25 "套现有规
+/// 则"). The creature grabs only the player it goes after, as any catch of its own.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -49,6 +55,17 @@ internal partial class CoopSave {
     /// caught the player of the game that sent it (see <see cref="TellOwnCatch"/>).
     /// </summary>
     private const ushort OwnCatchPart = 4;
+
+    /// <summary>
+    /// The events by which a part of a creature tells it that it grabbed the player, whom the creature then holds in a
+    /// move that goes on by what befalls them, which the game of that player leads (see CoopSave.OwnLedMoves).
+    /// </summary>
+    private static readonly HashSet<string> GrabEvents = ["GRAB HERO"];
+
+    /// <summary>
+    /// How many grabs of this game's player this game led, which numbers each (see OwnLeap.Move).
+    /// </summary>
+    private ulong _grabsLed;
 
     /// <summary>
     /// The state machines of creatures that every game runs by itself that play a catch of another player's, with the
@@ -93,12 +110,20 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, (ClientPlayerData Player, CoopSaveUpdate Word)> _earlyCatches = new();
 
     /// <summary>
+    /// Whether an event is one by which a part of a creature tells it that it caught the player: for a combo of blows
+    /// (see Entity.CatchEvents), or a grab (see <see cref="GrabEvents"/>).
+    /// </summary>
+    private static bool IsCatchEvent(string name) {
+        return Entity.Entity.CatchEvents.Contains(name) || GrabEvents.Contains(name);
+    }
+
+    /// <summary>
     /// Whether a state tells a creature that its part caught the player, by one of the events of a catch (see
-    /// Entity.CatchEvents).
+    /// <see cref="IsCatchEvent"/>).
     /// </summary>
     private static bool TellsACatch(FsmState state) {
         foreach (var action in state.Actions) {
-            if (action is SendEventByName { sendEvent.Value: { } name } && Entity.Entity.CatchEvents.Contains(name)) {
+            if (action is SendEventByName { sendEvent.Value: { } name } && IsCatchEvent(name)) {
                 return true;
             }
         }
@@ -136,7 +161,7 @@ internal partial class CoopSave {
     /// </summary>
     private static bool CatchesLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
         return fsm.LastTransition is { } transition && transition.ToState == toState.Name &&
-               Entity.Entity.CatchEvents.Contains(transition.EventName) && Fsm.EventData?.SentByFsm is { } part &&
+               IsCatchEvent(transition.EventName) && Fsm.EventData?.SentByFsm is { } part &&
                part != fsm && part.GameObject is { } catcher && catcher != null &&
                (OwnCreatures.Owning(catcher) is { } owner
                    ? owner == creature
@@ -148,7 +173,16 @@ internal partial class CoopSave {
     /// </summary>
     private static bool IsCatchState(Fsm fsm, FsmState state) {
         return fsm.GlobalTransitions.Concat(fsm.States.SelectMany(each => each.Transitions)).Any(
-            transition => transition.ToState == state.Name && Entity.Entity.CatchEvents.Contains(transition.EventName)
+            transition => transition.ToState == state.Name && IsCatchEvent(transition.EventName)
+        );
+    }
+
+    /// <summary>
+    /// Whether a grab takes a state machine to a state (see <see cref="GrabEvents"/>).
+    /// </summary>
+    private static bool IsGrabState(Fsm fsm, FsmState state) {
+        return fsm.GlobalTransitions.Concat(fsm.States.SelectMany(each => each.Transitions)).Any(
+            transition => transition.ToState == state.Name && GrabEvents.Contains(transition.EventName)
         );
     }
 
@@ -193,7 +227,7 @@ internal partial class CoopSave {
     /// </summary>
     private static FsmTransition? CatchWay(FsmState state, string into) {
         return state.Transitions.Concat(state.Fsm.GlobalTransitions).FirstOrDefault(
-            transition => transition.ToState == into && Entity.Entity.CatchEvents.Contains(transition.EventName)
+            transition => transition.ToState == into && IsCatchEvent(transition.EventName)
         );
     }
 
@@ -238,6 +272,7 @@ internal partial class CoopSave {
         if (!_keptOut.ContainsKey(fsm) && CatchStateOf(fsm, toState) is { } catchState &&
             CatchStateOf(fsm, fsm.ActiveState) != catchState && !GoesAfterLocalPlayer(fsm.GameObject)) {
             KeepOut(fsm, catchState);
+            FollowGrab(fsm, catchState);
         }
 
         EnterQuietOnTheWay(orig, fsm, toState);
@@ -278,6 +313,27 @@ internal partial class CoopSave {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Has a state machine of a creature that every game runs by itself here follow a grab of another player's as it
+    /// goes into it, with what it does to the player held kept off this game's (see <see cref="KeepOut"/>): the game of
+    /// the player that it goes after leads it (see CoopSave.OwnLedMoves), and a hurt of this game's player would let
+    /// that player drop here. The scene host's game follows a grab of another player's as it plays it (see
+    /// <see cref="PlayOthersCatch"/>).
+    /// </summary>
+    private void FollowGrab(Fsm fsm, FsmState grabState) {
+        if (_ledMoves.ContainsKey(fsm) || !IsGrabState(fsm, grabState) ||
+            ThrownThings.CodeOf?.Invoke(GamePatcher.TargetOf(fsm.GameObject)) is not { } leader ||
+            leader is ThrownThings.NoPlayer or ThrownThings.ThrowersPlayer) {
+            return;
+        }
+
+        FollowLedMove(fsm, Entity.Action.EntityFsmActions.MoveFrom(fsm, grabState), null, leader, 0);
+        Logger.Info(
+            $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' goes into '{grabState.Name}' of '{fsm.Name}', " +
+            $"a grab of the player {leader}, which goes on as their game leads it"
+        );
     }
 
     /// <summary>
@@ -474,15 +530,19 @@ internal partial class CoopSave {
         }
 
         GamePatcher.GoAfterGrabbed(creature, hero.gameObject, machine.Fsm, toState);
-        var leap = new OwnLeap(OwnCreatures.PlaceOf(creature), false, "catch of the local player") {
-            Catch = Entity.Action.EntityFsmActions.MoveFrom(machine.Fsm, toState)
+        var grab = GrabEvents.Contains(machine.Fsm.LastTransition!.EventName);
+        var what = grab ? "grab of the local player" : "catch of the local player";
+        var leap = new OwnLeap(OwnCreatures.PlaceOf(creature), false, what) {
+            Catch = Entity.Action.EntityFsmActions.MoveFrom(machine.Fsm, toState),
+            Led = grab,
+            Move = grab ? ++_grabsLed : 0
         };
         _ownLeaps[machine.Fsm] = leap;
         Logger.Info(
             $"[Own creatures] '{leap.Place}' caught the local player into '{toState.Name}' of '{machine.FsmName}', " +
-            "which it plays here by itself to its end"
+            "which it plays here by itself to its end" + (grab ? $", leading it as move {leap.Move}" : "")
         );
-        TellOwnCatch(machine);
+        TellOwnCatch(machine, leap.Move);
         return true;
     }
 
@@ -620,9 +680,10 @@ internal partial class CoopSave {
     /// <summary>
     /// Tells the scene host's game that a part of a creature that every game runs by itself caught this game's player
     /// in a game that follows it, which plays the catch by itself: the state it caught them from, with the rolls before
-    /// it, where it was and how it went, as a step of the scene host's tells (see <see cref="TakeOwnCatch"/>).
+    /// it, where it was and how it went, as a step of the scene host's tells (see <see cref="TakeOwnCatch"/>), and the
+    /// number of a grab, which this game leads (see CoopSave.OwnLedMoves), or 0.
     /// </summary>
-    private void TellOwnCatch(PlayMakerFSM machine) {
+    private void TellOwnCatch(PlayMakerFSM machine, ulong move = 0) {
         var creature = machine.gameObject;
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         var word = OwnCreatureUpdate(
@@ -634,6 +695,7 @@ internal partial class CoopSave {
         );
         word.PartCount = OwnCatchPart;
         word.Part = ThrownThings.ThrowersPlayer;
+        word.Sequence = move;
         Logger.Info(
             $"[Own creatures] '{word.ObjectPath}' caught the local player from '{word.StateName}' of " +
             $"'{word.FsmName}' and plays the catch here by itself, as the scene host's game is told"
@@ -687,6 +749,7 @@ internal partial class CoopSave {
                 $"[Own creatures] '{place}' caught {player.Username} from '{update.StateName}' in their game, but is " +
                 $"in '{fsm.ActiveStateName}' of '{fsm.Name}' here, through its leap, and plays no catch here"
             );
+            MeetOthersGrab(player, fsm, update);
             return;
         }
 
@@ -699,6 +762,7 @@ internal partial class CoopSave {
                     $"[Own creatures] '{place}' caught {player.Username} in their game, but plays a catch in " +
                     $"'{fsm.ActiveStateName}' of '{fsm.Name}' here already, and plays no other"
                 );
+                MeetOthersGrab(player, fsm, update);
                 return;
             }
         } else if (!AtRollsOf(fsm, update)) {
@@ -706,6 +770,7 @@ internal partial class CoopSave {
                 $"[Own creatures] '{place}' caught {player.Username} from '{update.StateName}' in their game, but is " +
                 $"in '{fsm.ActiveStateName}' of '{fsm.Name}' here in a later leap, and plays no catch here"
             );
+            MeetOthersGrab(player, fsm, update);
             return;
         }
 
@@ -734,6 +799,7 @@ internal partial class CoopSave {
                 $"[Own creatures] '{word.ObjectPath}' went to '{toState.Name}' of '{fsm.Name}' here on its way to " +
                 $"'{word.StateName}', where it caught {early.Player.Username} in their game, and plays no catch here"
             );
+            MeetOthersGrab(early.Player, fsm, word);
             return;
         }
 
@@ -765,6 +831,15 @@ internal partial class CoopSave {
             GamePatcher.GoAfterGrabbed(creature, figure, fsm, fsm.GetState(into));
         }
 
+        // A grab, which their game leads, goes on by their steps from its start (see CoopSave.OwnLedMoves)
+        var grab = update.Sequence > 0;
+        if (grab) {
+            FollowLedMove(
+                fsm, Entity.Action.EntityFsmActions.MoveFrom(fsm, fsm.GetState(into)), null, player.Id,
+                update.Sequence
+            );
+        }
+
         // It turns to the player it caught where their game had them (see SeeTargetAsTold), as every other game then
         // does from here
         SeeTargetAsTold(creature, update);
@@ -773,6 +848,20 @@ internal partial class CoopSave {
         } finally {
             OwnCreatures.SeeTargetHere();
         }
+
+        if (grab) {
+            MeetLedMove(fsm, player.Id, update.Sequence);
+        }
+    }
+
+    /// <summary>
+    /// Has the scene host's game note that it plays none of a grab of another player's (see
+    /// <see cref="TakeOwnCatch"/>), whose steps go nowhere here (see CoopSave.OwnLedMoves).
+    /// </summary>
+    private void MeetOthersGrab(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
+        if (update.Sequence > 0) {
+            MeetLedMove(fsm, player.Id, update.Sequence);
+        }
     }
 
     /// <summary>
@@ -780,7 +869,7 @@ internal partial class CoopSave {
     /// </summary>
     private static string CatchInto(Fsm fsm, CoopSaveUpdate catchWord) {
         return fsm.GetState(catchWord.StateName).Transitions.Concat(fsm.GlobalTransitions).First(
-            transition => Entity.Entity.CatchEvents.Contains(transition.EventName)
+            transition => IsCatchEvent(transition.EventName)
         ).ToState;
     }
 

@@ -3548,6 +3548,7 @@
   {
     "base_object_name": "Dustroach",
     "type": "Muckroach",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

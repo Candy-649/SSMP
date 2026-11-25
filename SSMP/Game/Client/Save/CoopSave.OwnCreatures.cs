@@ -371,6 +371,16 @@ internal partial class CoopSave {
             return;
         }
 
+        // A state machine that each game runs by itself for its own player, like the one that feels the player that the
+        // creature grabs, goes as the game has it, and no game tells another of its steps: what it tells the rest of
+        // the creature is as if something outside it told it (see ToldFromOutside). Taken as the scene host's step, the
+        // one of a game that follows the scene host's told the creature that it grabbed that game's player, who had
+        // been nowhere near it
+        if (OwnCreatures.RunsInEachGame(machine)) {
+            orig(self, toState);
+            return;
+        }
+
         // A part of such a creature catches the local player only while the creature goes after them (see
         // CoopSave.OwnCatches). One that looks at a player takes its steps as the creature does, and the rest of them
         // go as the game has them, with their own dice (see OwnCreatures)
@@ -405,6 +415,16 @@ internal partial class CoopSave {
         // In a move of another player's, which the game of that player leads (see CoopSave.OwnLedMoves)
         if (_ledMoves.Count > 0 && HoldsInLedMove(self, toState)) {
             MachineSwitchToStateField?.SetValue(self, null);
+            return;
+        }
+
+        // A catch of this game's player that something of the creature's own tells it of, as a part that felt them or
+        // a state machine that each game runs by itself does, while it goes after another player: it catches whom it
+        // goes after, as a part of it that tells it so does (see RefuseCatch)
+        if (CatchesLocalPlayer(self, toState, creature) &&
+            OwnCreatures.Owning(Fsm.EventData!.SentByFsm!.GameObject) is { } catching &&
+            !GoesAfterLocalPlayer(catching)) {
+            RefuseCatch(self, catching, toState);
             return;
         }
 
@@ -504,7 +524,8 @@ internal partial class CoopSave {
         // which the scene host's game is told of and plays too (see CoopSave.OwnTells)
         var waitedFor = IsWaitedFor(self);
         var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
-        var setOffHere = !LeadsMove(self) && ToldFromOutside(self, toState, creature);
+        var setOffHere = !LeadsMove(self) && !CatchesLocalPlayer(self, toState, creature) &&
+                         ToldFromOutside(self, toState, creature);
         var picks = PicksAPart(toState);
 
         // A tell from outside that the scene host's game played at the word of another game a moment before, which
@@ -839,7 +860,9 @@ internal partial class CoopSave {
             }
 
             foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
-                TellOwnState(player, machine, health);
+                if (!OwnCreatures.RunsInEachGame(machine)) {
+                    TellOwnState(player, machine, health);
+                }
             }
         }
 
@@ -851,7 +874,7 @@ internal partial class CoopSave {
             }
 
             foreach (var machine in part.GetComponents<PlayMakerFSM>()) {
-                if (TakesOwnSteps(machine)) {
+                if (TakesOwnSteps(machine) && !OwnCreatures.RunsInEachGame(machine)) {
                     TellOwnState(player, machine, null);
                 }
             }
