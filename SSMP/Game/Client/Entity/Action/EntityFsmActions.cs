@@ -1481,6 +1481,7 @@ internal static partial class EntityFsmActions {
     /// <param name="stateName">The name of the state that was changed to.</param>
     public static void RegisterStateChange(HutongGames.PlayMaker.Fsm fsm, string stateName) {
         HostStates[fsm] = stateName;
+        CreatureMoves.NoteShown(fsm, stateName);
 
         for (var i = ActionsInState.Count - 1; i >= 0; i--) {
             var actionInState = ActionsInState[i];

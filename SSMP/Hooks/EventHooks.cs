@@ -381,6 +381,9 @@ public static class EventHooks {
         // The calls in which the character may be moved, for what moved it (see MoveWatch)
         Game.Client.MoveWatch.Initialize();
 
+        // The states that the creatures go through, and where they go in them (see CreatureMoves)
+        Game.Client.CreatureMoves.Initialize();
+
         _heroControllerUseLavaBellHook = new Hook(
             typeof(HeroController).GetMethod(nameof(HeroController.UseLavaBell), BindingFlags),
             OnUseLavaBell
