@@ -1155,9 +1155,10 @@ internal partial class CoopSave {
         // that the scene host's game is through with the blow, which goes at once, went past the steps there from
         // before the blow, which waited behind the move, and these were then taken over what the blow set off here,
         // and its answer played that again from its start (review of 1397e10). Nor the word that another player struck
-        // it free of the local player, which is of the move that it plays here (see CoopSave.OwnStruckFree)
+        // it free of the local player, or that the scene host's game took no grab of them, which is of the move that
+        // it plays here (see CoopSave.OwnStruckFree)
         if (!_takingStepsAfterMove &&
-            update.PartCount is not (OwnEmptiedPart or OwnStrikeDonePart or OwnStruckFreePart) &&
+            update.PartCount is not (OwnEmptiedPart or OwnStrikeDonePart or OwnStruckFreePart or OwnLetGoPart) &&
             PlaysMoveThrough(creature) is { } waiting &&
             (PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName) is not { } its || !AwaitsLocalBlow(its.Fsm))) {
             var afterMove = _stepsAfterMove[waiting];
@@ -1200,9 +1201,9 @@ internal partial class CoopSave {
             return;
         }
 
-        // The player of that game struck it free of the player it holds, whose game lets them go (see
-        // CoopSave.OwnStruckFree)
-        if (update.PartCount == OwnStruckFreePart) {
+        // The player of that game struck it free of the player it holds, or the scene host's game took no grab of
+        // the player it grabbed: their game lets them go (see CoopSave.OwnStruckFree)
+        if (update.PartCount is OwnStruckFreePart or OwnLetGoPart) {
             TakeStruckFree(player, creature, update);
             return;
         }

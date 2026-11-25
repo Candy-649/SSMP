@@ -256,6 +256,7 @@ internal partial class CoopSave {
     /// game's player (see <see cref="KeepOut"/>; review: put into the slash of that boss, they were cut by it).
     /// </summary>
     private void EnterOwnState(Action<Fsm, FsmState> orig, Fsm fsm, FsmState toState) {
+        ForgetFreeOwed(fsm, toState);
         if (_keptOutTold.TryGetValue(fsm, out var told) &&
             (!told.States.Contains(toState) || GoesAfterLocalPlayer(fsm.GameObject))) {
             foreach (var action in told.Muted) {
@@ -885,11 +886,13 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Has the scene host's game note that it plays none of a grab of another player's (see
-    /// <see cref="TakeOwnCatch"/>), whose steps go nowhere here (see CoopSave.OwnLedMoves).
+    /// <see cref="TakeOwnCatch"/>), whose steps go nowhere here (see CoopSave.OwnLedMoves), and tell their game, which
+    /// played it by itself, to let them go, where a strike would free them (see CoopSave.OwnStruckFree).
     /// </summary>
     private void MeetOthersGrab(ClientPlayerData player, Fsm fsm, CoopSaveUpdate update) {
         if (update.Sequence > 0) {
             MeetLedMove(fsm, player.Id, update.Sequence);
+            TellLetGo(player, fsm, update);
         }
     }
 

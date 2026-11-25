@@ -571,6 +571,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // A creature that is to let go of the local player, as another game told, as soon as it is where it can
+        try {
+            UpdateFreesOwed();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also once the partner is gone, so that a creature a second behind the steps of the scene host's that came is
         // set onto the latest, before the creatures through their move here take those that came meanwhile
         try {
@@ -835,6 +842,7 @@ internal partial class CoopSave {
         _ledMoves.Clear();
         _ledMovesMet.Clear();
         _earlyLedSteps.Clear();
+        _freesOwed.Clear();
         _summonWords.Clear();
 
         GrowBackPustulesThePartnerDrew();

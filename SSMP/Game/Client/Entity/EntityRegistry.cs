@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Runtime.Serialization;
 using Newtonsoft.Json;
 using SSMP.Game.Client.Entity.Component;
@@ -147,6 +148,14 @@ internal static class EntityRegistry {
         return StruckFree.TryGetValue(type, out var events) && events.TryGetValue(eventName, out var freeing)
             ? freeing
             : null;
+    }
+
+    /// <summary>
+    /// The event that frees the player whom an entity of the given type holds as another player strikes it free of
+    /// them (see <see cref="StruckFreeBy"/>), the first that its entry gives, or null if no strike frees them.
+    /// </summary>
+    public static string? FreeingOf(EntityType type) {
+        return StruckFree.TryGetValue(type, out var events) ? events.Values.First() : null;
     }
 
     /// <summary>
