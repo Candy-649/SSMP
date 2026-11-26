@@ -457,10 +457,13 @@ internal partial class ArenaCoop {
     /// whose ends the player who comes into the memory later has played as they walk into them (see
     /// TryPlayMemoryEnd). An arena whose battle every game runs by itself is not asked about as they walk in (see
     /// OnStartBattle), and they would fight alone every chamber that the scene host had won, while it waited for them
-    /// at the boss.
+    /// at the boss. Only once it is settled that this game runs the room, and then to those who walked in before
+    /// (EntityManager.SettledAsHostWithOthersIn): the role of the room before stays until then, and a game that had
+    /// run the room before told a member whom it found in this one of its own arenas, which a third player took for
+    /// the scene host's, while the scene host's game, heard of a player before it was settled, told them nothing.
     /// </summary>
     public void OnPlayerEnterScene() {
-        if (!_entityManager.IsSceneHost) {
+        if (!_entityManager.IsSceneRoleDetermined || !_entityManager.IsSceneHost) {
             return;
         }
 

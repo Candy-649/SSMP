@@ -118,6 +118,13 @@ internal class EntityManager {
     public bool IsSceneRoleDetermined => _sceneRoleDetermined;
 
     /// <summary>
+    /// Called once this game is settled as the one that runs the room it is in, after other players walked into it
+    /// while that was not settled yet: what the scene host's game tells a player who walks in, which their walking in
+    /// did not, goes to them now (see <see cref="InitializeSceneHost"/>).
+    /// </summary>
+    public event System.Action? SettledAsHostWithOthersIn;
+
+    /// <summary>
     /// Whether another player is in the room of the given name, as far as this game has heard.
     /// </summary>
     public Func<string, bool>? IsAnyoneElseIn { get; set; }
@@ -279,6 +286,9 @@ internal class EntityManager {
         _roomCreatures.Settle(share: true);
         DrainPendingUpdates();
         OwnThreads.OnRoleSettled();
+        if (someoneIsHere) {
+            SettledAsHostWithOthersIn?.Invoke();
+        }
     }
 
     /// <summary>

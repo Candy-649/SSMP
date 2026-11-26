@@ -578,13 +578,6 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
-        // The members who came in before this game knew whether it runs the room, told once it knows that it does
-        try {
-            UpdateEarlyComers();
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
-
         // Also once the partner is gone, so that a creature a second behind the steps of the scene host's that came is
         // set onto the latest, before the creatures through their move here take those that came meanwhile
         try {
@@ -851,7 +844,6 @@ internal partial class CoopSave {
         _earlyLedSteps.Clear();
         _freesOwed.Clear();
         _roomPicksTold.Clear();
-        _earlyComers.Clear();
         _summonWords.Clear();
 
         GrowBackPustulesThePartnerDrew();

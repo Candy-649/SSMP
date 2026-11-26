@@ -36,13 +36,6 @@ internal partial class CoopSave {
     private readonly Dictionary<(string Scene, string Place), List<(string Name, bool On)>> _roomPicksTold = new();
 
     /// <summary>
-    /// The members who came into the room before this game knew whether it runs it, who are told what a member who
-    /// comes in is told of the creatures that every game runs by itself once it knows that it does (see
-    /// <see cref="UpdateEarlyComers"/>).
-    /// </summary>
-    private readonly List<ClientPlayerData> _earlyComers = [];
-
-    /// <summary>
     /// Takes the pick of a group of the room that lets some of its children out at random, if it holds a creature that
     /// every game runs by itself (see EntityManager.PicksOwnGroup): the scene host's game picks as the game does and
     /// tells the members in the room which are out, a game that follows it picks nothing and has out what the scene
@@ -106,11 +99,10 @@ internal partial class CoopSave {
     /// Tells a member who came into the room what is told of the creatures here that every game runs by itself, if
     /// this game is the scene host's: which of the groups of the room are out, and then where the creatures are and
     /// what they do (see CoopSave.OwnCreatures). A member who comes in before this game knows whether it runs the room
-    /// is told so once it knows that it does (see <see cref="UpdateEarlyComers"/>).
+    /// is told so once it knows that it does (see <see cref="TellEarlyComers"/>).
     /// </summary>
     private void SendOwnRoomTo(ClientPlayerData player) {
         if (OwnCreatures.SceneRole?.Invoke() == null) {
-            _earlyComers.Add(player);
             return;
         }
 
@@ -119,32 +111,26 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the members who came into the room before this game knew whether it runs the room what is told of the
-    /// creatures here that every game runs by itself, once it knows that it does (see <see cref="SendOwnRoomTo"/>):
-    /// as this game is told who is in the room as it comes in, before it is told that it runs it, the members in the
+    /// Tells the members in the room what is told of the creatures here that every game runs by itself, once this
+    /// game is settled as the one that runs the room after they came in (EntityManager.SettledAsHostWithOthersIn):
+    /// as a game is told who is in the room as it comes in, before it is told that it runs it, the members in the
     /// room went untold, and one whose game had out another pattern of the drillers of a room kept it all through the
     /// visit, as the group never picks again there (review of 6db4406). They were not told either where the creatures
     /// are, which the creatures' next steps mend, nor of a creature dead here, which no step mends.
     /// </summary>
-    private void UpdateEarlyComers() {
-        if (_earlyComers.Count == 0 || OwnCreatures.SceneRole?.Invoke() is not { } runs) {
-            return;
-        }
-
-        foreach (var player in _earlyComers) {
-            if (!runs || !player.IsInLocalScene) {
+    public void TellEarlyComers() {
+        foreach (var member in GetCheckedMembers()) {
+            if (!member.IsInLocalScene) {
                 continue;
             }
 
             Logger.Info(
-                $"[Own creatures] {player.Username} came in before this game knew that it runs the room, and is told " +
+                $"[Own creatures] {member.Username} came in before this game knew that it runs the room, and is told " +
                 "now what a member who comes in is told"
             );
-            SendRoomPicksTo(player);
-            SendOwnCreaturesTo(player);
+            SendRoomPicksTo(member);
+            SendOwnCreaturesTo(member);
         }
-
-        _earlyComers.Clear();
     }
 
     /// <summary>

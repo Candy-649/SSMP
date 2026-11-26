@@ -461,6 +461,13 @@ internal class ClientManager : IClientManager {
             IsLeavingOnDebugTrip = () => _bossRoomCoop.IsLeavingOnDebugTrip
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
+
+        // What the scene host's game tells a player who walks in, for those who walked in before it was settled that
+        // this game runs the room (see EntityManager.SettledAsHostWithOthersIn)
+        _entityManager.SettledAsHostWithOthersIn += () => {
+            _arenaCoop.OnPlayerEnterScene();
+            _coopSave.TellEarlyComers();
+        };
         _arenaCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _arenaCoop.BossArenaWonEvent += _coopSave.OnBossArenaWon;
         _arenaCoop.ArenaWonEvent += _coopSave.OnArenaWon;
