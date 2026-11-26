@@ -355,6 +355,13 @@ internal partial class CoopSave {
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnOwnCreatureStep)
         ));
 
+        // Its checks of what a player has on (see CoopSave.OwnToolChecks)
+        _ownCreatureHooks.Add(CreateHook(
+            typeof(HutongGames.PlayMaker.Actions.CheckIfToolEquipped).GetProperty("IsTrue", flags)?.GetGetMethod(true),
+            new Func<Func<HutongGames.PlayMaker.Actions.CheckIfToolEquipped, bool>,
+                HutongGames.PlayMaker.Actions.CheckIfToolEquipped, bool>(OnToolCheck)
+        ));
+
         // The largest of the ways to die, which the others call
         _ownCreatureHooks.Add(CreateHook(
             typeof(HealthManager).GetMethod(
@@ -429,6 +436,10 @@ internal partial class CoopSave {
 
         // The creature, or the part of it that takes its steps as it does
         var creature = machine.gameObject;
+
+        // What the checks of a move found in the game of the player whose thing set it off, as it goes out of the move
+        // (see CoopSave.OwnToolChecks)
+        ForgetToolChecks(self, toState);
 
         // One that played a death that it comes back from has health again, and its next death is told again: a
         // death of such a creature was told once, and the creature, back in the game that killed it, was killed there
@@ -562,6 +573,14 @@ internal partial class CoopSave {
                          ToldFromOutside(self, toState, creature);
         var picks = PicksAPart(toState);
 
+        // A move that a thing of this game's player sets off, which a state machine that each game runs by itself for
+        // its own player tells it of, finds what they have on here, which every other game is told (see
+        // CoopSave.OwnToolChecks)
+        var byLocalThing = setOffHere && ToldByEachGame();
+        if (byLocalThing) {
+            _toolChecks.Remove(self);
+        }
+
         // A tell from outside that the scene host's game played at the word of another game a moment before, which
         // every game had, is played once, but one of a state machine that each game runs by itself, which is of this
         // game's player (see ToldByEachGame)
@@ -687,6 +706,12 @@ internal partial class CoopSave {
                 // A look at the silk of another player, whose game leads the move from it under this number (see
                 // CoopSave.OwnSilkLooks)
                 update.Sequence = StartsOthersSilkLook(self, toState, creature);
+            }
+
+            // What the checks of what the player has on in a move that a thing of this game's player sets off find
+            // here (see CoopSave.OwnToolChecks)
+            if (byLocalThing) {
+                update.Names = ToolChecksOf(self, toState);
             }
 
             SendToRoomMembers(update);
@@ -1178,6 +1203,12 @@ internal partial class CoopSave {
             }
 
             return;
+        }
+
+        // A step into a move that a thing of the scene host's player set off there tells what the checks of what the
+        // player has on in it found there (see CoopSave.OwnToolChecks)
+        if (update.PartCount is 0 or OwnStruckPart or OwnHostStruckPart) {
+            NoteToolChecks(creature, update, update.StateName, 0);
         }
 
         // One that comes while steps of the scene host's before it wait for the creature here to play its move through

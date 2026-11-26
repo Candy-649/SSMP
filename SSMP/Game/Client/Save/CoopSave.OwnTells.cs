@@ -112,7 +112,13 @@ internal partial class CoopSave {
             $"'{toState.Name}' of '{word.FsmName}' by '{word.Names[0]}', and goes at once, as the scene host's game " +
             "is told"
         );
-        word.Sequence = word.Key == 1 ? LeadsMoveByWhatPlayerHas(machine, toState) : 0UL;
+        if (word.Key == 1) {
+            // The move of this game's player's thing, which this game leads where it goes by what they have, and
+            // whose checks of what they have on find in every game what they find here (see CoopSave.OwnToolChecks)
+            word.Sequence = LeadsMoveByWhatPlayerHas(machine, toState);
+            word.Names.AddRange(ToolChecksOf(fsm, toState));
+        }
+
         SendToRoomMembers(word);
     }
 
@@ -179,6 +185,10 @@ internal partial class CoopSave {
         var (by, into) = (update.Names[0], update.Names[1]);
         var told = $"'{place}' was told in {player.Username}'s game to go from '{update.StateName}' to '{into}' of " +
                    $"'{update.FsmName}' by '{by}'";
+
+        // What the checks of what that player has on in the move find, which they find in every game through it (see
+        // CoopSave.OwnToolChecks), where it is the scene host's step that takes it there too
+        NoteToolChecks(creature, update, into, 2);
         if (IsSceneHost?.Invoke() != true) {
             Logger.Info($"[Own creatures] {told}, which comes here with the scene host's step");
             return;
