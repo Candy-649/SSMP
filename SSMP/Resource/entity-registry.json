@@ -3640,6 +3640,7 @@
   {
     "base_object_name": "Bone Worm",
     "type": "Grom",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "OwnMotion",
@@ -3649,6 +3650,9 @@
     "fsm_names": [
       "Control",
       "Detect Silk Dash"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {

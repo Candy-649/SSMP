@@ -188,6 +188,12 @@ internal partial class CoopSave {
         // tells them to in turn as a player comes. The controller has the same name before its own, but no round.
         new(["Zap Worm Lightning"], "Control", ["Antic"]),
 
+        // The nests of the crawl rooms, which drop a bone worm out of the ceiling, picked at random from the room's
+        // pool, after a wait they roll, as long as a player is near. The worms run in every game (D109), so the nests
+        // of each game would drop others at times of their own; a round starts with the wait. Any player near sets the
+        // scene host's nests off, so one here never drops a worm by itself.
+        new(["Bone Worm Nest"], "FSM", ["Extra Pause"], holdLimit: float.PositiveInfinity),
+
         // The lanterns of a room that summon a fireball over and over as long as any player is in their range, one
         // fireball a round, at the rate the game gives one lantern however many players there are; the fireball is the
         // same in every game, named after the round (USER 11-14, D107). Their only dice is the angle it flies out at.
