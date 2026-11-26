@@ -1017,6 +1017,7 @@
   {
     "base_object_name": "Song Automaton Fly",
     "type": "Cogworker",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1030,6 +1031,9 @@
     ],
     "each_game_fsms": [
       "detect_taunt"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
