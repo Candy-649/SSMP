@@ -3319,6 +3319,7 @@
   {
     "base_object_name": "Gnat Giant",
     "type": "Mitemother",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
