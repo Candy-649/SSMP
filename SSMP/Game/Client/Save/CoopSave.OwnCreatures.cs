@@ -2139,9 +2139,9 @@ internal partial class CoopSave {
     /// A value that a machine of the room that runs by the scene host's word sets on its state machine (see
     /// <see cref="MachineSetValues"/>), like the flag by which the foremen of the docks leap out of the way of the lava
     /// that the fall of their fight pours. A game that follows the scene host's starts each round of such a machine at
-    /// the scene host's word, a moment late, and sets the value as late: its foremen, back at their rest in that moment,
-    /// found the lava still coming and leapt away from lava that the scene host's foremen knew was gone, to be put back
-    /// at the scene host's next step (review of 790db7f).
+    /// the scene host's word, a moment late, and sets the value as late: its foremen, back at their rest in that
+    /// moment, found the lava still coming and leapt away from lava that the scene host's foremen knew was gone, to be
+    /// put back at the scene host's next step (review of 790db7f).
     /// </summary>
     private bool ChoosesByOwnValue(FsmState state) {
         var fsm = state.Fsm;
