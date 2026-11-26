@@ -1430,6 +1430,7 @@
   {
     "base_object_name": "Bone Hunter Tiny",
     "type": "Skarrlid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
