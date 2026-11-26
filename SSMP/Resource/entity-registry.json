@@ -1453,6 +1453,7 @@
   {
     "base_object_name": "MossBone Crawler Summon",
     "type": "Mossgrub",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1715,6 +1716,7 @@
   {
     "base_object_name": "Mossbone Mother",
     "type": "MossMother",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1729,6 +1731,7 @@
   {
     "base_object_name": "Mossbone Stalactite",
     "type": "MossboneStalactite",
+    "own_in_each_game": true,
     "parent_name": "Stals",
     "components": [
       "OwnMotion"
