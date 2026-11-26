@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
+using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using Logger = SSMP.Logging.Logger;
@@ -25,7 +26,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 ///   put back: the game that runs the room hears of the others' and does what the game does for its own player.
 /// - A living creature is not sent back to where it started or switched off while another player is in the room, for
 ///   anyone's put-back, just as being caught no longer sends the grinders back.
-/// Both games see the same, as the creatures of the other games follow those of the game that runs the room.
+/// Both games see the same, as the creatures of the other games follow those of the game that runs the room. A
+/// creature that every game runs by itself (see OwnCreatures), like the spiked flyers of the challenge room, has every
+/// game do so for every player's put-back: each counts its health by itself (see CoopSave.OwnHealth), and one that
+/// only the scene host's game filled would show less in the others, and each brings back its own dead one as the word
+/// comes, which the scene host's step of it then finds taken.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -81,9 +86,9 @@ internal partial class CoopSave {
     /// <summary>
     /// A member in the room was put back at the last safe place in their game. The passages of dropping boxes near
     /// there turn to them. If this game runs the room, its creatures that are dead or out come back, and those that
-    /// lost health get it back, as for its own player. A living one that the game would send back to where it started
-    /// or switch off stays as it is (see <see cref="KeepsCreatureInPlace"/>), and gets its health back if the game
-    /// gives it that on the way.
+    /// lost health get it back, as for its own player, and so do those that every game runs by itself in every game. A
+    /// living one that the game would send back to where it started or switch off stays as it is (see
+    /// <see cref="KeepsCreatureInPlace"/>), and gets its health back if the game gives it that on the way.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
@@ -97,12 +102,14 @@ internal partial class CoopSave {
         }
 
         // A stand-up after a rescue brings nothing else back
-        if (IsSceneHost?.Invoke() != true || update.Values.Count > 2 && update.Values[2] != 0f) {
+        if (update.Values.Count > 2 && update.Values[2] != 0f) {
             return;
         }
 
         // Found first and told after, as what they do as they come back can switch objects on and off, which changes
-        // the list of FSMs
+        // the list of FSMs. The game that runs the room sets right its creatures, and every game its own that every
+        // game runs by itself
+        var runsRoom = IsSceneHost?.Invoke() == true;
         var told = new List<(Fsm Fsm, string EventName)>();
         var healed = 0;
         foreach (var playMakerFsm in PlayMakerFSM.FsmList) {
@@ -110,7 +117,8 @@ internal partial class CoopSave {
                 FindPutBackKind(playMakerFsm.gameObject.name, playMakerFsm.FsmName) is not { } kind ||
                 playMakerFsm.Fsm is not { Started: true } fsm ||
                 !IsPartOfRoom(playMakerFsm.gameObject.scene.name, update.Scene) ||
-                PersonalPlaces.Contains(playMakerFsm.gameObject)) {
+                PersonalPlaces.Contains(playMakerFsm.gameObject) ||
+                !runsRoom && !OwnCreatures.Has(playMakerFsm.gameObject)) {
                 continue;
             }
 
@@ -156,8 +164,10 @@ internal partial class CoopSave {
             return false;
         }
 
-        // Health is settled in the game that runs the room alone, which tells the others
-        var healed = kind.HealsHeld && IsSceneHost?.Invoke() == true && HealHeld(fsm.GameObject);
+        // Health is settled in the game that runs the room alone, which tells the others, but for a creature that every
+        // game runs by itself, which each game counts the health of
+        var healed = kind.HealsHeld && (IsSceneHost?.Invoke() == true || OwnCreatures.Has(fsm.GameObject)) &&
+                     HealHeld(fsm.GameObject);
         Logger.Info(
             $"'{fsm.GameObject.name}' stays as it is as a player is put back, since another is in the room" +
             (healed ? ", and gets its health back" : "")

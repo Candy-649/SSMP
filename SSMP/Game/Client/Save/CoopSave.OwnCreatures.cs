@@ -393,6 +393,15 @@ internal partial class CoopSave {
             return;
         }
 
+        // A living creature that a player's put-back would send back to where it started, while another player is in
+        // the room, stays as it is (see CoopSave.PutBack), here before the step is kept or told: passed on, the switch
+        // would be held later, after the scene host's game had told the others of a step that it never took, which
+        // would send their spiked flyer back to its start
+        if (KeepsCreatureInPlace(self, toState)) {
+            MachineSwitchToStateField?.SetValue(self, null);
+            return;
+        }
+
         // A state machine that each game runs by itself for its own player, like the one that feels the player that the
         // creature grabs, goes as the game has it, and no game tells another of its steps: what it tells the rest of
         // the creature is as if something outside it told it (see ToldFromOutside). Taken as the scene host's step, the
