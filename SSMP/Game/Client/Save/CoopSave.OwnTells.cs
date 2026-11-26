@@ -99,24 +99,25 @@ internal partial class CoopSave {
     /// (USER 11-25 "就本地先演，本地的怪本来就是活的"). Before, it went its own way here, which the scene host's game
     /// never heard of, and was put back onto the steps of the scene host's a moment later, or waited for good for a
     /// step of the scene host's where its state goes by where the players are. Not a player leaving what it watches,
-    /// which says nothing of the others; nor a way into a state that does something to the player itself, as each
-    /// game's strand of the silk boss catches its own player and tells the boss so; nor the start of a boss fight,
-    /// which waits for every player in its own way (see BossRoomCoop).
+    /// which says nothing of the others, nor a way into a state that their leaving takes it out of again, which each
+    /// player is in or out of by themselves: told the way in and never the way out, the fog that walks with whoever
+    /// is in it went on in the scene host's game, and in every game that follows it, after this game's player walked
+    /// out. Nor a way into a state that does something to the player itself, as each game's strand of the silk boss
+    /// catches its own player and tells the boss so; nor the start of a boss fight, which waits for every player in
+    /// its own way (see BossRoomCoop).
     /// </summary>
     private bool FeltByLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
         if (Fsm.EventData?.SentByFsm != fsm || fsm.LastTransition is not { } way || way.ToState != toState.Name ||
             fsm.ActiveState is not { } from || HeroController.SilentInstance is not { } hero ||
             !OwnCreatures.FollowsSceneHost(creature) ||
+            toState.Actions.Any(action => FeelsTouch(action, out _) && FeelsLeaving(action)) ||
             Entity.Action.EntityFsmActions.DealsWithThePlayerIn(toState) ||
             StartsBossFight?.Invoke(fsm, from, way.EventName) == true) {
             return false;
         }
 
         foreach (var action in from.Actions) {
-            var kind = action.GetType().Name;
-            var trigger = kind.StartsWith("Trigger", StringComparison.Ordinal);
-            if (!action.Enabled || !trigger && !kind.StartsWith("Collision", StringComparison.Ordinal) ||
-                !SendsAsTouched(action, way.EventName)) {
+            if (!FeelsTouch(action, out var trigger) || FeelsLeaving(action) || !Sends(action, way.EventName)) {
                 continue;
             }
 
@@ -129,10 +130,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether an action that feels what touches it sends an event as a thing comes in or stays, rather than as it
-    /// leaves (see <see cref="FeltByLocalPlayer"/>).
+    /// Whether an action that is on feels what touches it, by a trigger or by a collision, and by which (see
+    /// <see cref="FeltByLocalPlayer"/>).
     /// </summary>
-    private static bool SendsAsTouched(FsmStateAction action, string eventName) {
+    private static bool FeelsTouch(FsmStateAction action, out bool trigger) {
+        var kind = action.GetType().Name;
+        trigger = kind.StartsWith("Trigger", StringComparison.Ordinal);
+        return action.Enabled && (trigger || kind.StartsWith("Collision", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Whether an action that feels what touches it feels a thing leave, rather than come in or stay (see
+    /// <see cref="FeltByLocalPlayer"/>).
+    /// </summary>
+    private static bool FeelsLeaving(FsmStateAction action) {
         var type = action.GetType();
         if (!TouchKindFields.TryGetValue(type, out var kindField)) {
             kindField = type.GetField("trigger", BindingFlags.Instance | BindingFlags.Public) ??
@@ -140,11 +151,14 @@ internal partial class CoopSave {
             TouchKindFields[type] = kindField;
         }
 
-        if (kindField?.GetValue(action)?.ToString()?.Contains("Exit") == true) {
-            return false;
-        }
+        return kindField?.GetValue(action)?.ToString()?.Contains("Exit") == true;
+    }
 
-        foreach (var field in EventFieldsOf(type)) {
+    /// <summary>
+    /// Whether an action can send an event by its name (see <see cref="FeltByLocalPlayer"/>).
+    /// </summary>
+    private static bool Sends(FsmStateAction action, string eventName) {
+        foreach (var field in EventFieldsOf(action.GetType())) {
             if (field.GetValue(action) is FsmEvent sent && sent.Name == eventName) {
                 return true;
             }
