@@ -2225,6 +2225,7 @@
   {
     "base_object_name": "Centipede Trap",
     "type": "Garpid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2235,6 +2236,9 @@
       "Damage Effects",
       "Hazard Cooldown",
       "hornet_multi_wounder"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
