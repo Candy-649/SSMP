@@ -232,6 +232,19 @@ internal partial class CoopSave {
             ]
         ),
 
+        // The controller of the fight with the great centipede, which tells its head and its tail when to come and
+        // go, raises the walls of its body and sends its coils through the ground, and goes from one part of the fight
+        // to the next by the health of head and tail, which each game has a little otherwise. The other game follows
+        // it in every state from the first part of the fight on; the start before that, with the walls coming up, the
+        // roar and the word that sets head and tail going, each game has by itself as its player walks in.
+        new(
+            ["Centipede Control"], "Control", [], sceneName: "Bellway_Centipede_Arena", wholeNames: true,
+            ownStateNames: [
+                "Init", "Briefly Activate Bell Beast NPC", "Dormant", "Set HP", "Body R Up", "Intro Cam",
+                "Body L Down", "Roar Head Up", "Intro Roar", "Intro Roar End", "Start Pause", "Battle Start"
+            ]
+        ),
+
         // The controllers of the fight on the stage, whose parts the other game shows as they go up in the scene host's
         // game, and which it holds past the states where each finds its parts (see CoopSave.ShownParts): the one that
         // sets off flares over the stage and the one that bursts the floor open in a row. Only the objects of these
