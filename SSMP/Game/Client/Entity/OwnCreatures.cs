@@ -51,6 +51,14 @@ internal static class OwnCreatures {
     private static readonly Dictionary<GameObject, (GameObject Creature, string Scene, string Place)> Parts = new();
 
     /// <summary>
+    /// The creatures of their own that hang under a creature that every game runs by itself, as the room loaded them,
+    /// copies too: the bats of a flock, the wasps that a hive keeps, the group of creatures that a black thread core
+    /// lets out. Neither they nor anything under them is of the creature above: taken as its parts, a creature under
+    /// another was both a part of that one and a creature of its own, and what asked whose it was found the one above.
+    /// </summary>
+    private static readonly HashSet<GameObject> CreaturesUnder = new();
+
+    /// <summary>
     /// The state machines of the creatures, and of their parts, that each game runs by itself for its own player alone
     /// (see EntityRegistryEntry.EachGameFsms), like the one that feels the player that the creature grabs: no game
     /// takes or tells the steps of another's (see CoopSave.OnOwnCreatureStep).
@@ -473,6 +481,10 @@ internal static class OwnCreatures {
         var keepsHealth = false;
         foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
             var part = machine.gameObject;
+            if (part != creature && IsOfCreatureUnder(creature, part)) {
+                continue;
+            }
+
             keepsHealth |= machine.FsmName == FsmHealth.PartFsmName;
             if (part != creature && !Parts.ContainsKey(part)) {
                 Parts[part] = (creature, creature.scene.name, partPlace(part));
@@ -495,6 +507,32 @@ internal static class OwnCreatures {
         }
 
         return parts;
+    }
+
+    /// <summary>
+    /// Whether an object under a creature is, or hangs under, a creature of its own between them (see
+    /// <see cref="CreaturesUnder"/>), which is noted as one.
+    /// </summary>
+    private static bool IsOfCreatureUnder(GameObject creature, GameObject part) {
+        for (var current = part.transform; current.gameObject != creature; current = current.parent) {
+            var under = current.gameObject;
+            if (CreaturesUnder.Contains(under) || IsCreatureOfItsOwn(under)) {
+                CreaturesUnder.Add(under);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an object under a creature is a creature of its own: of a kind of the registry (see
+    /// EntityRegistry.TryGetEntry), with health of its own, or of a kind without health or kept by its name. A part
+    /// named after its creature, like a chain of the crow father, has none, and is a part of it.
+    /// </summary>
+    private static bool IsCreatureOfItsOwn(GameObject under) {
+        return EntityRegistry.TryGetEntry(under, out var entry) &&
+               (under.GetComponent<HealthManager>() != null || entry.WithoutHealth || entry.KeepsName(under.name));
     }
 
     /// <summary>
@@ -553,7 +591,8 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
-    /// The creature that every game runs by itself that an object is, or is a part of, or null.
+    /// The creature that every game runs by itself that an object is, or is a part of, or null, as for what is of a
+    /// creature of its own under it (see <see cref="CreaturesUnder"/>).
     /// </summary>
     public static GameObject? Owning(GameObject part) {
         if (Creatures.Count == 0) {
@@ -568,6 +607,10 @@ internal static class OwnCreatures {
         for (var current = part.transform; current != null; current = current.parent) {
             if (Creatures.ContainsKey(current.gameObject)) {
                 return current.gameObject;
+            }
+
+            if (CreaturesUnder.Contains(current.gameObject)) {
+                return null;
             }
         }
 
@@ -810,6 +853,7 @@ internal static class OwnCreatures {
     public static void Clear() {
         Creatures.Clear();
         Parts.Clear();
+        CreaturesUnder.Clear();
         Makers.Clear();
         SummonedBy.Clear();
         MadeAsTold.Clear();
