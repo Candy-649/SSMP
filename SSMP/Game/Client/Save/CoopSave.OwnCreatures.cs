@@ -787,8 +787,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // A death at a blow of another player that is played here is theirs to tell, as their game plays it too, but
+        // for one that a state machine outside the creature deals as it hears of the blow, which their game may hold
+        // for this game's word: the controller of the fight with the two drillers of the coral, which follows the
+        // scene host's (see CoopSave.DirectedFights), kills the last of them as it is struck with no health left
         if (!tells || !self.isDead && !(self.hasSpecialDeath && self.hp <= 0 && HearsNoHealth(self)) ||
-            !OwnCreatures.MarkDead(self.gameObject) || CoopHits.IsReplayingPartnersStrike) {
+            !OwnCreatures.MarkDead(self.gameObject) || CoopHits.IsReplayingPartnersStrike && !DealtFromOutside(self)) {
             return;
         }
 
@@ -806,11 +810,21 @@ internal partial class CoopSave {
             ObjectPath = place,
             PartCount = 2,
             Sequence = death,
+            Key = self.isDead ? 1UL : 0UL,
             Part = ThrownThings.CodeOf?.Invoke(target) ?? ThrownThings.NoPlayer,
             Values = attackDirection is { } direction
                 ? [where.x, where.y, facing, turned, beside.x, beside.y, direction]
                 : [where.x, where.y, facing, turned, beside.x, beside.y]
         });
+    }
+
+    /// <summary>
+    /// Whether the death of a creature is dealt by a state machine that is not of the creature, nor of a part of it,
+    /// which runs now (InstaDeath), like the controller of a fight.
+    /// </summary>
+    private static bool DealtFromOutside(HealthManager health) {
+        return HutongGames.PlayMaker.FsmExecutionStack.ExecutingFsm?.GameObject is { } dealer && dealer != null &&
+               OwnCreatures.Owning(dealer) != health.gameObject;
     }
 
     /// <summary>
@@ -1192,6 +1206,17 @@ internal partial class CoopSave {
             // more (review of cfaf69f)
             health.hp = 0;
             OwnCreatures.AwardJournalKill(health);
+
+            // One that died there for good, not by a death of its own that its state machines play, dies so here too:
+            // the last of the two drillers of the coral, which have such a death, is killed by the controller of
+            // their fight, which takes that death off the one struck with no health left and kills it, and the
+            // controller here, going into that state at the scene host's word, has no one struck to kill, so that
+            // the driller here only took the blow and fought on
+            if (update.Key == 1 && health.hasSpecialDeath) {
+                health.hasSpecialDeath = false;
+                Logger.Info($"[Own creatures] '{place}' died for good there, and so here too");
+            }
+
             _dyingAsTold = true;
             try {
                 health.Die(

@@ -3632,6 +3632,7 @@
   {
     "base_object_name": "Driller A",
     "type": "Conchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3662,6 +3663,7 @@
   {
     "base_object_name": "Driller B",
     "type": "Conchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

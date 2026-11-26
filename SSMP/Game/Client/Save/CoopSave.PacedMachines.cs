@@ -266,6 +266,27 @@ internal partial class CoopSave {
             ]
         ),
 
+        // The state machine of the fight with the two drillers of the coral that picks their moves by the dice as both
+        // are ready, rests them by the health they have left and calls them to sing to a player's song. The other game
+        // follows it in every state from the first move on; before that it waits for the first driller to come out of
+        // the ground, as each game has it.
+        new(["Boss Scene"], "Boss AI", [], sceneName: "Coral_11", wholeNames: true, ownStateNames: ["Init", "Dormant"]),
+
+        // The controller of the same fight, which calls the two drillers up as a player walks in, kills the last of
+        // them as it is struck with no health left, and lets in the giant that mourns it. The drillers run in every
+        // game, and the last one dies in the other game by the scene host's word, not at the blow that this
+        // controller waits for there to kill it: kept apart from the scene host's, it would wait for good, and never
+        // open the gates nor mark the fight won. The other game follows it from the call on, and has the start before
+        // it by itself.
+        new(
+            ["Boss Scene"], "Control", [], sceneName: "Coral_11", wholeNames: true,
+            ownStateNames: [
+                "Pause", "State", "Ready", "Restart Ready", "Arena Start", "Start Pause", "Start Pause S",
+                "All Defeated", "Solo Ready", "Waiting For Pos", "Solo Fight L", "Solo Fight R", "Battle Start S",
+                "Battle End S"
+            ]
+        ),
+
         // The controllers of the fight on the stage, whose parts the other game shows as they go up in the scene host's
         // game, and which it holds past the states where each finds its parts (see CoopSave.ShownParts): the one that
         // sets off flares over the stage and the one that bursts the floor open in a row. Only the objects of these
