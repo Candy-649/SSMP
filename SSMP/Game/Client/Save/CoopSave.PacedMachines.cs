@@ -219,6 +219,13 @@ internal partial class CoopSave {
         // host's, at times of its own; a round starts as it picks.
         new(["Respawn Scene"], "Control", ["Spawn Choice"], sceneName: "Ward_02", wholeNames: true),
 
+        // The summoner of the fights with the giant bone flyer, which sends one of its creatures, picked at random,
+        // where a summoning cage landed or the flyer called them. The creatures run in every game (D109), so the
+        // summoner of each game would pick one of its own, and the scene host's game would play the others' picks
+        // too; a round starts as it picks. The host's word can come before this game's own cage lands, so one here
+        // never summons by itself.
+        new(["Summon Enemies"], "Control", ["Summon"], wholeNames: true, holdLimit: float.PositiveInfinity),
+
         // The controller of the fight with the two dancers, which the other game follows in every state from the first
         // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
         // beat setting off, each game has by itself.

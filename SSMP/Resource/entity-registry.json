@@ -368,6 +368,7 @@
   {
     "base_object_name": "Bone Circler Vicious",
     "type": "ViciousCaranid",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -375,6 +376,9 @@
     "internal_name": "Bone Circler Vicious",
     "fsm_names": [
       "Control"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
@@ -1415,6 +1419,7 @@
   {
     "base_object_name": "Bone Flyer Giant",
     "type": "SavageBeastfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2555,6 +2560,7 @@
   {
     "base_object_name": "Bone Crawler",
     "type": "Kilik",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2567,6 +2573,7 @@
   {
     "base_object_name": "Bone Spitter",
     "type": "Tarmite",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3204,6 +3211,7 @@
   {
     "base_object_name": "Bone Flyer Smn",
     "type": "Beastfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3555,6 +3563,7 @@
   {
     "base_object_name": "Enemy Summon Cage",
     "type": "EnemySummonCage",
+    "own_in_each_game": true,
     "parent_name": "Summon Cages",
     "components": [
       "OwnMotion"
