@@ -1039,6 +1039,7 @@
   {
     "base_object_name": "Stick Insect Flyer",
     "type": "Splinterbark",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2121,6 +2122,7 @@
   {
     "base_object_name": "Splinter Queen",
     "type": "SisterSplinter",
+    "own_in_each_game": true,
     "parent_name": "Boss Scene",
     "components": [
       "Rotation"
@@ -2136,6 +2138,7 @@
   {
     "base_object_name": "Splinter Queen Spike",
     "type": "SisterSplinter",
+    "own_in_each_game": true,
     "parent_name": "Spikes",
     "components": [
       "Rotation"
