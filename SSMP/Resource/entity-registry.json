@@ -1864,6 +1864,7 @@
   {
     "base_object_name": "Song Pilgrim 02",
     "type": "Surgeon",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1872,6 +1873,9 @@
     "fsm_names": [
       "Attack",
       "Pull Hero"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
