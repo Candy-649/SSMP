@@ -118,11 +118,14 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// The player that a state machine that reads of the player what is known of every player reads now, in the game
-    /// that runs it, or null for none, as nobody is near it, or for any other state machine. A creature that lies
-    /// hidden reads the first player near it whose own reads set it off now, and else the one who came near it first:
-    /// whoever has what calls it up calls it up. Once it shows itself, it keeps to the player it read as it did, while
-    /// they are near, as the game keeps to one player: as each player went by what they were each frame, it rose at
-    /// one, went down at the other and rose again, over and over. Near is in one of its ranges.
+    /// that runs it, or null for none, or for any other state machine. A creature that lies hidden reads the first
+    /// player near it whose own reads set it off now: whoever has what calls it up calls it up; else it keeps to the
+    /// one it read while they are near, and else reads the one who came near it first. Once it shows itself, it keeps
+    /// to the player it read as it did, while they are near, as the game keeps to one player: as each player went by
+    /// what they were each frame, it rose at one, went down at the other and rose again, over and over. While nobody
+    /// is near it, it keeps to the player it read last while they are in the room, as the game reads its player
+    /// wherever they are, and not the player of the game that runs it, who may never have come near it. Near is in
+    /// one of its ranges.
     /// </summary>
     private static GameObject? ReadPlayerOf(Fsm fsm) {
         var read = PlayerReads.GetValue(fsm, NewPlayerRead);
@@ -136,6 +139,10 @@ internal partial class GamePatcher {
         GameObject? player = null;
         if (NearPlayers.Count == 0) {
             read.Holder = null;
+
+            // A tendril that rose for a player who then swam off kept up by the swimming of the player of the game
+            // that ran it, far off (review of 2e84e72)
+            player = read.Player != null && PlayersThere.Contains(read.Player) ? read.Player : null;
         } else if (creature.GetComponent<Renderer>() is { enabled: true }) {
             if (read.Holder == null || !NearPlayers.Contains(read.Holder)) {
                 read.Holder = read.Player != null && NearPlayers.Contains(read.Player) ? read.Player : NearPlayers[0];
@@ -153,7 +160,9 @@ internal partial class GamePatcher {
                 }
             }
 
-            player ??= NearPlayers[0];
+            // One near it only by a range that reaches out past the one that wakes it, read as nobody else set it off,
+            // sent it back down as it woke for the other, every other frame (review of 2e84e72)
+            player ??= read.Player != null && NearPlayers.Contains(read.Player) ? read.Player : NearPlayers[0];
         }
 
         if (player != read.Player) {
