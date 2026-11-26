@@ -89,7 +89,8 @@ internal partial class CoopSave {
     /// step, as it comes before that blow (see MovesAt), and takes without the moment that the game stands still for,
     /// which is this game's player's feel of their blow (see CoopHits.TakesAnothersBlow). So is a step that this game
     /// took as it struck back at a blow of another player at the word of their game, which played it first (see
-    /// CoopSave.OwnStrikeBacks): the step of the knight's parry stood still the game of a third player (review).
+    /// CoopSave.OwnStrikeBacks): the step of the knight's parry stood still the game of a third player (review). The
+    /// number of a blow of this game's player is in <see cref="CoopSaveUpdate.Key"/> (see CoopSave.OwnBlowSteps).
     /// </summary>
     private const ushort OwnHostStruckPart = 11;
 
@@ -707,6 +708,12 @@ internal partial class CoopSave {
             } else {
                 if (struck || CoopHits.TakesAnothersBlow) {
                     update.PartCount = OwnHostStruckPart;
+
+                    // The number of the blow of this game's player, by which every game knows the steps at one blow
+                    // (see CoopSave.OwnBlowSteps)
+                    if (CoopHits.IsMakingLocalStrike) {
+                        update.Key = CoopHits.LocalStrikeNumber;
+                    }
                 }
 
                 // A look at the silk of another player, whose game leads the move from it under this number (see

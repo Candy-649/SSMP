@@ -79,6 +79,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The blow that a step of the scene host's at a blow was at: the player who struck, and the number of the blow in
+    /// their game. A blow sets off more than one step, like the core of the effigy that counts the blow and then turns
+    /// from the player, which the scene host's game tells as it takes the blow.
+    /// </summary>
+    private static (ushort Striker, ulong Strike) BlowOf(ClientPlayerData sceneHost, CoopSaveUpdate update) {
+        return update.PartCount == OwnStruckPart ? ((ushort) update.Key, update.Sequence) : (sceneHost.Id, update.Key);
+    }
+
+    /// <summary>
     /// Whether a state machine of a thing with no health of its own takes blows by itself and counts them (see
     /// HitMachines.CountsHits), and waits for one where it is or comes back to waiting for one by itself. Only one
     /// that has started, whose actions are loaded.
@@ -108,13 +117,15 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Takes the steps of the scene host's of a state machine that waited for the replay of a blow, as they came, up to
-    /// the next one at a blow, which waits for its own.
+    /// the first one at another blow, which waits for its own.
     /// </summary>
     private void TakeStepsForBlow(Fsm fsm, string why) {
         var steps = _stepsForBlows[fsm];
         _stepsForBlows.Remove(fsm);
+        var blow = BlowOf(steps[0].Player, steps[0].Step);
         var count = 1;
-        while (count < steps.Count && !IsAtOthersBlow(steps[count].Player, steps[count].Step)) {
+        while (count < steps.Count && (!IsAtOthersBlow(steps[count].Player, steps[count].Step) ||
+                                       BlowOf(steps[count].Player, steps[count].Step) == blow)) {
             count++;
         }
 
