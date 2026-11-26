@@ -1719,6 +1719,7 @@
   {
     "base_object_name": "Farmer Scissors",
     "type": "SilkSnipper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1728,6 +1729,9 @@
       "Control",
       "Cut Check",
       "Shift Pos"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
@@ -2656,6 +2660,7 @@
   {
     "base_object_name": "Rosary Thief",
     "type": "Snitchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
