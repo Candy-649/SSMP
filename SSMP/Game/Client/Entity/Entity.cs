@@ -831,7 +831,7 @@ internal partial class Entity {
             ProcessClientFsm(fsm);
         }
 
-        KeepSavesOfTheCopy();
+        KeepBoolSavesOfTheCopy();
 
         HandleComponents(types);
 
@@ -1101,10 +1101,10 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether an FSM is one that each game runs by itself, as the registry entry of the entity says (see
-    /// <see cref="EntityRegistryEntry.EachGameFsms"/> and <see cref="EntityRegistryEntry.HitterGameFsms"/>).
+    /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
     /// </summary>
     private bool IsRunByEachGame(PlayMakerFSM fsm) {
-        return EntityRegistry.IsRunByEachGame(Type, fsm.FsmName);
+        return EntityRegistry.IsEachGameFsm(Type, fsm.FsmName);
     }
 
     /// <summary>
@@ -1189,8 +1189,7 @@ internal partial class Entity {
                 _netClient,
                 Id,
                 Object,
-                healthManager,
-                Type
+                healthManager
             ) {
                 CarriedByParent = _hasParent
             };
@@ -3374,8 +3373,6 @@ internal partial class Entity {
             EntityFsmActions.SwitchOffWhatTheCopyLetGo(Object.Client, Object.Host, _madeWithCopy);
         }
 
-        // What the copy kept in the save goes to the room's own creature, which saves it from now on
-        HandSaveToTheRoom();
         SaveWhereItRuns(copyRuns: false);
 
         var clientActive = Object.Client.activeSelf;

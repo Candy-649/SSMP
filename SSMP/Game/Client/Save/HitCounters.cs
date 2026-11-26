@@ -60,8 +60,7 @@ internal static class HitCounters {
     /// (HealthManagerComponent). That usually comes in the same packet as this, and a thorn that counted it then waits
     /// a moment in which it hears nothing.
     /// A state machine that each game runs by itself is left out: one that shows the hits hears of the partner's
-    /// elsewhere, and one that pays the player who struck, like the shards a creature flings, never hears of them, or
-    /// the scene host's player was paid for the partner's blows.
+    /// elsewhere.
     /// A hit that the creature is immune to, or one that extracts from it, never comes here (see
     /// <see cref="CoopHits"/>).
     /// </summary>
@@ -152,7 +151,7 @@ internal static class HitCounters {
     private static void Tell(HealthManager healthManager, EntityType type, string eventName) {
         var outcome = OutcomeEvents.Contains(eventName);
         foreach (var fsm in healthManager.GetComponents<PlayMakerFSM>()) {
-            if (!EntityRegistry.IsRunByEachGame(type, fsm.FsmName) &&
+            if (!EntityRegistry.IsEachGameFsm(type, fsm.FsmName) &&
                 (outcome ? GoesOn(fsm, eventName) is not null : CountsOn(fsm, eventName))) {
                 fsm.SendEvent(eventName);
             }

@@ -993,6 +993,7 @@
   {
     "base_object_name": "Shell Fossil Mimic",
     "type": "Shardillard",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1000,9 +1001,6 @@
     "internal_name": "Shell Fossil Mimic",
     "fsm_names": [
       "Control",
-      "Drop Shards"
-    ],
-    "hitter_game_fsms": [
       "Drop Shards"
     ]
   },
@@ -2082,6 +2080,7 @@
   {
     "base_object_name": "Rosary Pilgrim",
     "type": "CovetousPilgrim",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2089,9 +2088,6 @@
     "internal_name": "Rosary Pilgrim",
     "fsm_names": [
       "Control",
-      "Drop Rosaries"
-    ],
-    "hitter_game_fsms": [
       "Drop Rosaries"
     ]
   },

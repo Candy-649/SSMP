@@ -3878,8 +3878,7 @@ internal partial class CoopHits {
 
         // A state machine that each game runs by itself to show the enemy being hit, like the shaking and the sparks of
         // a nest, hears of the partner's hit the way it heard of the local player's as that landed (see
-        // EntityRegistryEntry.EachGameFsms). One that pays the player who struck hears of their own hits only
-        // (EntityRegistryEntry.HitterGameFsms)
+        // EntityRegistryEntry.EachGameFsms)
         foreach (var eventName in HitCounters.EventsOf(healthManager, hit)) {
             foreach (var fsm in healthManager.GetComponents<PlayMakerFSM>()) {
                 if (EntityRegistry.IsEachGameFsm(type, fsm.FsmName)) {

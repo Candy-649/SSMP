@@ -415,7 +415,7 @@ internal class EntityProcessor {
         foreach (var npc in gameObject.GetComponentsInChildren<PlayMakerNPC>(true)) {
             var target = npc.CustomEventTarget != null ? npc.CustomEventTarget : GetDialogueFsm(npc);
             if (target != null && target.gameObject == gameObject && entry.ContainsFsmName(target.FsmName) &&
-                !EntityRegistry.IsRunByEachGame(entry.Type, target.FsmName)) {
+                !EntityRegistry.IsEachGameFsm(entry.Type, target.FsmName)) {
                 return true;
             }
         }
