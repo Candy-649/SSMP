@@ -2,6 +2,7 @@ using System;
 using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
 using SSMP.Animation.Effects;
+using SSMP.Game.Client.Entity;
 using SSMP.Game.Client.Skin;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -21,6 +22,12 @@ namespace SSMP.Game.Client;
 /// of them is (see <see cref="HeldLook.EndingFigure"/>). It shows and moves again once that player has control again,
 /// or has left the room.
 ///
+/// A creature that every game runs by itself (see <see cref="OwnCreatures"/>) plays its end in each game, on that
+/// game's own player's character, so each player plays it with their own (USER 11-26 "各演各的，把本机外的别的人藏起来"):
+/// while such an end has the local player's character, the other players' characters and their attacks are hidden
+/// here, those of a player who comes in meanwhile too, and nothing is drawn in their look; they show again once the
+/// local player has control again, or the room changes. Nobody is told: each game hides the others by itself.
+///
 /// An end is an action of a creature's FSM that takes the character's control once the creature has no health left.
 /// The game gives control back at the end, and a hit gives it back too, as when the player did not parry in time.
 /// </summary>
@@ -29,6 +36,23 @@ internal partial class BossRoomCoop {
     /// Whether a creature's end has the local player's character, which the other players in the room were told.
     /// </summary>
     private bool _endingHasLocalPlayer;
+
+    /// <summary>
+    /// Whether the end of a creature that every game runs by itself has the local player's character, so that the
+    /// other players are hidden here.
+    /// </summary>
+    private bool _ownEndingHasLocalPlayer;
+
+    /// <summary>
+    /// The characters of the other players and their attacks, hidden while the end of a creature that every game runs
+    /// by itself has the local player's character.
+    /// </summary>
+    private readonly KeptFromDrawing _othersHidden = new();
+
+    /// <summary>
+    /// The handler that hides the other players every frame while such an end lasts, made once.
+    /// </summary>
+    private Action? _hideOthers;
 
     /// <summary>
     /// The ID of the player whose character a creature's end has, whom the local player watches, or null.
@@ -87,14 +111,30 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Takes control from the local player's character, and tells the other players in the room when a creature's end
-    /// takes it: an action of the FSM of a creature that has no health left.
+    /// takes it: an action of the FSM of a creature that has no health left. The end of a creature that every game
+    /// runs by itself hides the other players here instead.
     /// </summary>
     private void OnRelinquishControl(Action<HeroController> orig, HeroController self) {
         orig(self);
 
-        if (_endingHasLocalPlayer || FsmExecutionStack.ExecutingAction == null ||
+        if (_endingHasLocalPlayer || _ownEndingHasLocalPlayer || FsmExecutionStack.ExecutingAction == null ||
             FsmExecutionStack.ExecutingFsm is not { GameObject: { } owner } fsm ||
             owner.GetComponentInParent<HealthManager>() is not { } creature || creature.hp > 0) {
+            return;
+        }
+
+        if (OwnCreatures.Owning(creature.gameObject) != null) {
+            _ownEndingHasLocalPlayer = true;
+            HeldLook.StopAll();
+            HeldLook.LocalEnding = true;
+            _hideOthers ??= HideOthers;
+            MonoBehaviourUtil.Instance.OnUpdateEvent += _hideOthers;
+            HideOthers();
+            Logger.Info(
+                $"[Ending] '{creature.name}', which every game runs by itself, with no health left, took this " +
+                $"player's character in '{fsm.ActiveStateName}' of '{fsm.Name}' to play its end, so the other " +
+                "players hide here until it is over"
+            );
             return;
         }
 
@@ -107,10 +147,47 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Tells the other players in the room that the game gave control back to the local player's character, if a
-    /// creature's end had it, so that they stop watching it.
+    /// Hides the characters of the other players in the room and their attacks this frame, those of a player who came
+    /// in meanwhile too, while the end of a creature that every game runs by itself has the local player's character.
     /// </summary>
-    private void TellEndingGaveBack() {
+    private void HideOthers() {
+        _othersHidden.Gather();
+        foreach (var player in _playerData.Values) {
+            if (player.IsInLocalScene && player.PlayerContainer is { } container) {
+                _othersHidden.KeepOff(container, true);
+            }
+        }
+
+        foreach (var attack in RemoteAttackComponent.Active) {
+            _othersHidden.KeepOff(attack.gameObject, true);
+        }
+
+        _othersHidden.Apply();
+    }
+
+    /// <summary>
+    /// Shows the other players again once the end of a creature that every game runs by itself no longer has the local
+    /// player's character.
+    /// </summary>
+    private void StopHidingOthers(string why) {
+        if (!_ownEndingHasLocalPlayer) {
+            return;
+        }
+
+        _ownEndingHasLocalPlayer = false;
+        HeldLook.LocalEnding = false;
+        MonoBehaviourUtil.Instance.OnUpdateEvent -= _hideOthers;
+        _othersHidden.ShowEverything();
+        Logger.Info($"[Ending] The other players show again here: {why}");
+    }
+
+    /// <summary>
+    /// Notes that the game gave control back to the local player's character: if a creature's end had it, the other
+    /// players show again here, or are told so that they stop watching it.
+    /// </summary>
+    private void NoteControlGivenBack() {
+        StopHidingOthers("this player's character has control again");
+
         if (!_endingHasLocalPlayer) {
             return;
         }
@@ -163,7 +240,7 @@ internal partial class BossRoomCoop {
             }
         }
 
-        HeldLook.EndingFigure = player.PlayerContainer;
+        HeldLook.EndingFigure = player.PlayerObject;
         _checkWatched ??= CheckWatched;
         MonoBehaviourUtil.Instance.OnUpdateEvent += _checkWatched;
         Logger.Info(
@@ -193,10 +270,11 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Forgets a creature's end as the room changes: the local player's character shows and moves again if it watched
-    /// one, and one that an end had is no longer had by it.
+    /// one, the other players show again if it played one of its own, and one that an end had is no longer had by it.
     /// </summary>
     private void ForgetEnding() {
         _endingHasLocalPlayer = false;
+        StopHidingOthers("the room changed");
         EndWatch("the room changed");
     }
 

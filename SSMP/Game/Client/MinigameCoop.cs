@@ -588,7 +588,7 @@ internal partial class MinigameCoop {
     private void OnHeroControllerUpdate(HeroController hero) {
         var members = _getMembers();
         if (members.Count == 0) {
-            if (_watchedId != null || _localGame != null || _keptOff.Count > 0) {
+            if (_watchedId != null || _localGame != null || _hidden.Any) {
                 StopWatching("no other member is left", tell: false);
                 _localGame = null;
                 _mirror.StopSending();

@@ -120,7 +120,7 @@ internal partial class BossRoomCoop {
 
         orig(self, allowInput);
         ForgetTakenControl();
-        TellEndingGaveBack();
+        NoteControlGivenBack();
     }
 
     /// <summary>
@@ -134,7 +134,7 @@ internal partial class BossRoomCoop {
 
         orig(self);
         ForgetTakenControl();
-        TellEndingGaveBack();
+        NoteControlGivenBack();
     }
 
     /// <summary>

@@ -52,6 +52,13 @@ internal static class HeldLook {
     internal static GameObject? EndingFigure;
 
     /// <summary>
+    /// Whether the end of a creature that every game runs by itself has the local player's character (see
+    /// BossRoomCoop.Endings). What creatures draw of a player meanwhile is the local one, as each game's end has its
+    /// own player's, so nothing is drawn in another player's look, however the game of that player hides them.
+    /// </summary>
+    internal static bool LocalEnding;
+
+    /// <summary>
     /// Gives the copy of a sheet of sprites that the character of another player draws from, made if there is none
     /// yet, or null (see <see cref="PlayerManager.FigureSheet"/>).
     /// </summary>
@@ -113,7 +120,7 @@ internal static class HeldLook {
     /// <param name="figure">The character of the player.</param>
     /// <param name="lookThrough">Whether to look through all the sprites of the room first.</param>
     public static void Look(GameObject figure, bool lookThrough) {
-        if (SheetOf == null) {
+        if (SheetOf == null || LocalEnding) {
             return;
         }
 
@@ -188,6 +195,16 @@ internal static class HeldLook {
     /// <param name="figure">The character of the player.</param>
     public static void Stop(GameObject figure) {
         if (Drawing.Remove(figure)) {
+            Watch();
+        }
+    }
+
+    /// <summary>
+    /// Stops drawing anything in the look of any other player.
+    /// </summary>
+    public static void StopAll() {
+        if (Drawing.Count > 0) {
+            Drawing.Clear();
             Watch();
         }
     }
