@@ -171,13 +171,15 @@ internal partial class CoopSave {
     /// (see CoopHits.ReplayedStrike): one on the health of a creature that every game runs by itself is kept, and the
     /// scene host's word that its health came to none there at it counts from now on (see
     /// <see cref="TakeOwnEmptied"/>). A word of one of theirs before it is let go of, as that blow never played here:
-    /// counted at a later one, a held blow played after it as the next one (review of 1655e30). The scene host's game
-    /// tells the others that it is through with it (see TellStrikeDone).
+    /// counted at a later one, a held blow played after it as the next one (review of 1655e30). The steps of the scene
+    /// host's that waited for it are taken (see CoopSave.OwnBlowSteps). The scene host's game tells the others that it
+    /// is through with it (see TellStrikeDone).
     /// </summary>
     /// <param name="struck">What the blow or touch reached.</param>
     /// <param name="striker">The player who struck.</param>
     /// <param name="strike">The number of the strike in the game of that player.</param>
     private void TookOthersBlow(GameObject struck, ushort striker, uint strike) {
+        TakeStepsForBlow(struck);
         if (struck.TryGetComponent<HealthManager>(out var health) && OwnCreatures.Has(struck)) {
             _othersBlowsTaken[(health, striker)] = strike;
             if (_emptiedAtBlows.TryGetValue(health, out var at) && at.Striker == striker && at.Strike <= strike) {

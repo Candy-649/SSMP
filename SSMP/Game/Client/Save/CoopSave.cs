@@ -602,6 +602,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a step at a blow whose replay never came here is taken
+        try {
+            UpdateStepsForBlows();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also once the partner is gone, so that a creature that died in their game before it came out here dies here
         // as it comes out
         try {
@@ -830,6 +837,7 @@ internal partial class CoopSave {
         _ownWays.Clear();
         _keptOwnSteps.Clear();
         _stepsAfterMove.Clear();
+        _stepsForBlows.Clear();
         _waysThrough.Clear();
         _awaitedBlows.Clear();
         _stepsBeforeBlow.Clear();

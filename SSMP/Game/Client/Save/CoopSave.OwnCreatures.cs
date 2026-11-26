@@ -1412,6 +1412,12 @@ internal partial class CoopSave {
             );
         }
 
+        // A step at a blow of another player on a thing that takes blows by itself waits for the replay of the blow
+        // here, and so does every one after it (see CoopSave.OwnBlowSteps)
+        if (update.PartCount != OwnToldPart && !_settingOntoLatest && WaitsForReplayedBlow(player, fsm, update)) {
+            return;
+        }
+
         var transform = creature.transform;
         var there = new Vector3(update.Values[0], update.Values[1], transform.position.z);
         var found = TakeOwnStep(fsm, update, out var newest);
