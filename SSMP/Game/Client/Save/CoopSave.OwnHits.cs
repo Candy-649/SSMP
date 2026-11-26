@@ -91,7 +91,7 @@ internal partial class CoopSave {
     /// get to by itself, as those of a blow of its player do (see OnOwnCreatureStep).
     /// </summary>
     private void StartOwnHit(Fsm fsm, FsmState from) {
-        var move = Entity.Action.EntityFsmActions.MoveFrom(fsm, from);
+        var move = MoveOf(fsm, from);
         var hit = new OwnLeap(OwnCreatures.PlaceOf(fsm.GameObject), false, "move after the hurt") {
             Catch = move,
             Hit = true
@@ -107,11 +107,11 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The states of the rest of a move of a state machine after a hurt of a player took it out of a state on a way of
-    /// its own: the states of the move from that state (see Entity.Action.EntityFsmActions.MoveFrom), which its way and
+    /// its own: the states of the move from that state (see CoopSave.MoveOf), which its way and
     /// its other ways go on into, but that state itself.
     /// </summary>
     private static HashSet<FsmState> HitMove(Fsm fsm, FsmState from) {
-        var move = Entity.Action.EntityFsmActions.MoveFrom(fsm, from);
+        var move = MoveOf(fsm, from);
         move.Remove(from);
         return move;
     }
@@ -282,7 +282,7 @@ internal partial class CoopSave {
     /// </summary>
     private static List<SetBoolValue> HitMarks(Fsm fsm, FsmState into) {
         var marks = new List<SetBoolValue>();
-        foreach (var state in Entity.Action.EntityFsmActions.MoveFrom(fsm, into)) {
+        foreach (var state in MoveOf(fsm, into)) {
             marks.AddRange(state.Actions.OfType<SetBoolValue>().Where(mark => mark.Enabled));
         }
 

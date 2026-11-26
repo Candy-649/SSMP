@@ -955,7 +955,7 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// The moves that creatures make at one player - a strike back at their blow, a catch of them - each with the
-    /// creature, the player, the state machine of the move and its states (see EntityFsmActions.MoveFrom). The creature
+    /// creature, the player, the state machine of the move and its states (see CoopSave.MoveOf). The creature
     /// goes after that player until its state machine goes into a state outside those (see <see cref="FollowMoves"/>):
     /// whoever asks whom it goes after meanwhile is told that player (see <see cref="GetApprovedEnemyTarget"/>,
     /// GetFsmActionTarget), whatever would turn it, like the wound of another player (see <see cref="AnswerWound"/>),
@@ -1000,11 +1000,11 @@ internal partial class GamePatcher {
         GameObject owner,
         GameObject player,
         HutongGames.PlayMaker.Fsm fsm,
-        FsmState first
+        HashSet<FsmState> move
     ) {
         var id = owner.GetInstanceID();
         MovesAtPlayers.RemoveAll(move => move.Owner == id && move.Fsm == fsm);
-        MovesAtPlayers.Add(new MoveAtPlayer(id, owner.name, player, fsm, EntityFsmActions.MoveFrom(fsm, first)));
+        MovesAtPlayers.Add(new MoveAtPlayer(id, owner.name, player, fsm, move));
     }
 
     /// <summary>
@@ -1073,12 +1073,12 @@ internal partial class GamePatcher {
     /// <param name="player">The player it grabbed.</param>
     /// <param name="fsm">For a creature that every game runs by itself, the state machine of the catch, by which it is
     /// held to them until the catch is through (see <see cref="HoldForMove"/>); otherwise null.</param>
-    /// <param name="first">The first state of the catch, with <paramref name="fsm"/>.</param>
+    /// <param name="move">The states of the catch (see CoopSave.MoveOf), with <paramref name="fsm"/>.</param>
     public static void GoAfterGrabbed(
         GameObject creature,
         GameObject player,
         HutongGames.PlayMaker.Fsm? fsm = null,
-        FsmState? first = null
+        HashSet<FsmState>? move = null
     ) {
         var owner = GetEnemyTargetOwner(creature);
         if (owner == null) {
@@ -1086,8 +1086,8 @@ internal partial class GamePatcher {
         }
 
         Logger.Info($"{owner.name} grabbed {DescribePlayer(player)} and goes after them through the catch");
-        if (fsm != null && first != null) {
-            HoldForMove(owner, player, fsm, first);
+        if (fsm != null && move != null) {
+            HoldForMove(owner, player, fsm, move);
         }
 
         if (GetApprovedEnemyTarget(owner) == player) {
@@ -1113,12 +1113,12 @@ internal partial class GamePatcher {
     /// <param name="creature">The creature.</param>
     /// <param name="player">The player who struck: this game's, or the figure of another.</param>
     /// <param name="fsm">The state machine of the strike back.</param>
-    /// <param name="first">The first state of the strike back.</param>
+    /// <param name="move">The states of the strike back (see CoopSave.MoveOf).</param>
     public static void GoAfterStriker(
         GameObject creature,
         GameObject player,
         HutongGames.PlayMaker.Fsm fsm,
-        FsmState first
+        HashSet<FsmState> move
     ) {
         var owner = GetEnemyTargetOwner(creature);
         if (owner == null) {
@@ -1126,7 +1126,7 @@ internal partial class GamePatcher {
         }
 
         Logger.Info($"{owner.name} strikes back at the blow of {DescribePlayer(player)} and goes after them");
-        HoldForMove(owner, player, fsm, first);
+        HoldForMove(owner, player, fsm, move);
         if (GetApprovedEnemyTarget(owner) == player) {
             NoteTurn(owner.GetInstanceID(), null);
             return;

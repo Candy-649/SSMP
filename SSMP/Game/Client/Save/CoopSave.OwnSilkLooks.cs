@@ -62,7 +62,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The state that looks at silk whose move a state is of (see Entity.Action.EntityFsmActions.MoveFrom), the look
+    /// The state that looks at silk whose move a state is of (see CoopSave.MoveOf), the look
     /// itself for one, or null.
     /// </summary>
     private FsmState? LookStateOf(Fsm fsm, FsmState state) {
@@ -75,7 +75,7 @@ internal partial class CoopSave {
             }
 
             foreach (var look in firsts.Values.ToList()) {
-                foreach (var inMove in Entity.Action.EntityFsmActions.MoveFrom(fsm, look)) {
+                foreach (var inMove in MoveOf(fsm, look)) {
                     firsts.TryAdd(inMove, look);
                 }
             }
@@ -113,7 +113,7 @@ internal partial class CoopSave {
         }
 
         var number = ++_silkLooks;
-        FollowLedMove(fsm, Entity.Action.EntityFsmActions.MoveFrom(fsm, toState), null, leader, number);
+        FollowLedMove(fsm, MoveOf(fsm, toState), null, leader, number);
         MeetLedMove(fsm, leader, number);
         if (!_keptOut.ContainsKey(fsm)) {
             KeepOut(fsm, toState);
@@ -143,7 +143,7 @@ internal partial class CoopSave {
 
         var creature = machine.gameObject;
         var place = OwnCreatures.PlaceOf(creature);
-        var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, look);
+        var states = MoveOf(fsm, look);
 
         // The number comes with the step into the look itself. One into the move after it, which a member who has just
         // come in is put into, has none, and the move is followed as the scene host's game tells it all the same:

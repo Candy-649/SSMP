@@ -40,7 +40,7 @@ internal partial class CoopSave {
     /// </summary>
     private static List<string> ToolChecksOf(Fsm fsm, FsmState first) {
         var words = new List<string>();
-        foreach (var state in Entity.Action.EntityFsmActions.MoveFrom(fsm, first)) {
+        foreach (var state in MoveOf(fsm, first)) {
             for (var i = 0; i < state.Actions.Length; i++) {
                 if (state.Actions[i] is CheckIfToolEquipped { Enabled: true } check) {
                     words.Add($"{i}:{(check.IsTrue ? 1 : 0)}:{state.Name}");
@@ -68,7 +68,7 @@ internal partial class CoopSave {
             found[(CheckIfToolEquipped) fsm.GetState(word[2]).Actions[int.Parse(word[0])]] = word[1] == "1";
         }
 
-        _toolChecks[fsm] = (Entity.Action.EntityFsmActions.MoveFrom(fsm, fsm.GetState(first)), found);
+        _toolChecks[fsm] = (MoveOf(fsm, fsm.GetState(first)), found);
         Logger.Info(
             $"[Own creatures] '{update.ObjectPath}' goes into '{first}' of '{fsm.Name}' by a thing of another " +
             $"player's, and its {found.Count} check(s) of what the player has on find through the move what they " +

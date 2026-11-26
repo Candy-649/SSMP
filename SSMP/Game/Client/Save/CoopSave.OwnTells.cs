@@ -137,7 +137,7 @@ internal partial class CoopSave {
             return 0;
         }
 
-        var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, toState);
+        var states = MoveOf(fsm, toState);
         if (!states.Any(ChoosesByWhatPlayerHas)) {
             return 0;
         }
@@ -245,7 +245,7 @@ internal partial class CoopSave {
         PutAtSceneHostsStep(fsm, update);
         if (move > 0) {
             FollowLedMove(
-                fsm, Entity.Action.EntityFsmActions.MoveFrom(fsm, way.ToFsmState ?? fsm.GetState(way.ToState)), null,
+                fsm, MoveOf(fsm, way.ToFsmState ?? fsm.GetState(way.ToState)), null,
                 player.Id, move
             );
         }

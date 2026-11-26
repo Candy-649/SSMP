@@ -70,7 +70,7 @@ internal partial class CoopSave {
         }
 
         var creature = machine.gameObject;
-        GamePatcher.GoAfterStriker(creature, hero.gameObject, fsm, toState);
+        GamePatcher.GoAfterStriker(creature, hero.gameObject, fsm, MoveOf(fsm, toState));
         TellOwnStrikeBack(machine, toState.Name);
         var strikeBack = new OwnLeap(OwnCreatures.PlaceOf(creature), false, "strike back at the local player");
         _ownLeaps[fsm] = strikeBack;
@@ -137,9 +137,9 @@ internal partial class CoopSave {
 
             // From the blocked blow, which came before the word: after them all the same, if it is in it still
             // (review)
-            if (figure != null && Entity.Action.EntityFsmActions.MoveFrom(fsm, fsm.GetState(into))
+            if (figure != null && MoveOf(fsm, fsm.GetState(into))
                     .Contains(fsm.ActiveState)) {
-                GamePatcher.GoAfterStriker(creature, figure, fsm, fsm.GetState(into));
+                GamePatcher.GoAfterStriker(creature, figure, fsm, MoveOf(fsm, fsm.GetState(into)));
             }
 
             return;
@@ -161,7 +161,7 @@ internal partial class CoopSave {
         );
         PutAtSceneHostsStep(fsm, update);
         if (figure != null) {
-            GamePatcher.GoAfterStriker(creature, figure, fsm, fsm.GetState(into));
+            GamePatcher.GoAfterStriker(creature, figure, fsm, MoveOf(fsm, fsm.GetState(into)));
         }
 
         // It plays here as the creature's own, but for the moment that the game stands still, which is the feel of the

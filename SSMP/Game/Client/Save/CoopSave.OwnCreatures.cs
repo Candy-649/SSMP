@@ -399,6 +399,15 @@ internal partial class CoopSave {
             return;
         }
 
+        // The way of a catch of another player's that this game plays is one from outside the state machine, also as
+        // it is taken after the step in which this game played it (see CoopSave.OwnCatches)
+        if (_othersCatchWay is { } othersCatch && othersCatch.Fsm == self) {
+            _othersCatchWay = null;
+            if (self.LastTransition == othersCatch.Way && Fsm.EventData != null) {
+                Fsm.EventData.SentByFsm = null;
+            }
+        }
+
         // A living creature that a player's put-back would send back to where it started, while another player is in
         // the room, stays as it is (see CoopSave.PutBack), here before the step is kept or told: passed on, the switch
         // would be held later, after the scene host's game had told the others of a step that it never took, which
@@ -706,9 +715,9 @@ internal partial class CoopSave {
         // CoopSave.OwnStrikeBacks), which the step tells every game: the move is that player's
         if (!OwnCreatures.FollowsSceneHost(creature) && HeroController.SilentInstance is { } hero) {
             if (CatchesLocalPlayer(self, toState, creature)) {
-                GamePatcher.GoAfterGrabbed(creature, hero.gameObject, self, toState);
+                GamePatcher.GoAfterGrabbed(creature, hero.gameObject, self, MoveOf(self, toState));
             } else if (StrikesBackAtLocalBlow(self, toState)) {
-                GamePatcher.GoAfterStriker(creature, hero.gameObject, self, toState);
+                GamePatcher.GoAfterStriker(creature, hero.gameObject, self, MoveOf(self, toState));
             }
         }
 
