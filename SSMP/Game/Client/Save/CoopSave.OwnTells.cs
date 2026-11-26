@@ -58,13 +58,20 @@ internal partial class CoopSave {
     /// it made, its summon (see OwnCreatures.AreKin), whose orders go by what each game has under it: a conductor
     /// picks the fly that it sends at the player among those under it, whose order each game has otherwise as they
     /// leave and come back, and an order taken at once in every game would send another fly in each.
+    ///
+    /// Nor a machine of the room that runs by the scene host's word, like the controller of a fight (see
+    /// CoopSave.PacedMachines): the scene host's tells the scene host's creature, whose step every other game takes. A
+    /// game that follows has the start of a fight by itself, as its player walks in, and its controller told the great
+    /// centipede to strike at the end of it, which went at once, and went to the scene host's game, whose centipede was
+    /// in the fight long since and was sent into a strike out of turn (review of e499a84).
     /// </summary>
     private static bool ToldFromOutside(Fsm fsm, FsmState toState, GameObject creature) {
         return Fsm.EventData?.SentByFsm is { } teller && teller != fsm && fsm.LastTransition is { } way &&
                way.ToState == toState.Name &&
                (teller.GameObject is not { } tellerObject ||
-                !OwnCreatures.AreKin(OwnCreatures.Owning(tellerObject), OwnCreatures.Owning(creature)) ||
-                teller.FsmComponent is { } heard && OwnCreatures.RunsInEachGame(heard));
+                FindMachineKind(tellerObject, teller.Name) == null &&
+                (!OwnCreatures.AreKin(OwnCreatures.Owning(tellerObject), OwnCreatures.Owning(creature)) ||
+                 teller.FsmComponent is { } heard && OwnCreatures.RunsInEachGame(heard)));
     }
 
     /// <summary>
