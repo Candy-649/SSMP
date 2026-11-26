@@ -42,6 +42,12 @@ internal static class EntityRegistry {
     private static readonly Dictionary<EntityType, HashSet<string>> EachGameFsms = new();
 
     /// <summary>
+    /// Every event that an entry names as one by which a part of its entity tells it that it grabbed the player (see
+    /// <see cref="EntityRegistryEntry.GrabEvents"/>), by which an event that none names is told at once.
+    /// </summary>
+    private static readonly HashSet<string> AnyGrabEvents = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// For each type of entity whose entry names any, the FSMs that each game runs by itself from a state on, with that
     /// state (see <see cref="EntityRegistryEntry.EachGameFrom"/>).
     /// </summary>
@@ -85,6 +91,20 @@ internal static class EntityRegistry {
     /// </summary>
     public static bool IsEachGameFsm(EntityType type, string fsmName) {
         return EachGameFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
+    }
+
+    /// <summary>
+    /// Whether an event is one that the entry of any kind names as one by which a part of its entity tells it that it
+    /// grabbed the player (see <see cref="EntityRegistryEntry.GrabEvents"/>).
+    /// </summary>
+    public static bool IsAnyGrabEvent(string eventName) => AnyGrabEvents.Contains(eventName);
+
+    /// <summary>
+    /// Whether an event is one by which a part of the given creature tells it that it grabbed the player, as the entry
+    /// of its kind names it (see <see cref="EntityRegistryEntry.GrabEvents"/>).
+    /// </summary>
+    public static bool IsGrabEventOf(GameObject creature, string eventName) {
+        return TryGetEntry(creature, out var entry) && entry.GrabEvents?.Contains(eventName) == true;
     }
 
     /// <summary>
@@ -186,6 +206,10 @@ internal static class EntityRegistry {
                 }
 
                 names.UnionWith(eachGameFsms);
+            }
+
+            if (entry.GrabEvents != null) {
+                AnyGrabEvents.UnionWith(entry.GrabEvents);
             }
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
@@ -514,6 +538,17 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("catch_events")]
     public List<string>? CatchEvents { get; set; }
+
+    /// <summary>
+    /// Events by which a part of the entity, of a kind that every game runs by itself (see
+    /// <see cref="OwnInEachGame"/>), tells it that it grabbed the player, under names that other creatures give to
+    /// other things: the ghost of the maze that charges at the player and drains their silk is told GRAB by the part
+    /// of its charge that grabbed them, the name of a move of the large fly of the prison. Its grab goes as the grabs
+    /// of the game's own names do (CoopSave.OwnCatches): the game of the player grabbed leads it, and the creature
+    /// grabs only the player it goes after.
+    /// </summary>
+    [JsonProperty("grab_events")]
+    public List<string>? GrabEvents { get; set; }
 
     /// <summary>
     /// Events that a part of the entity tells it as a player strikes the part, each with the event that frees the

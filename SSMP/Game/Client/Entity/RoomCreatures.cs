@@ -210,10 +210,12 @@ internal class RoomCreatures {
 
     /// <summary>
     /// Makes an object from a prefab, and for a creature that the room makes, does it in the scene host's game only. A
-    /// summon of a creature that every game runs by itself is made by every game (see OwnCreatures.MakesSummon).
+    /// summon of a creature that every game runs by itself is made by every game (see OwnCreatures.MakesSummon), and
+    /// so is a creature of such a kind that a room that lays itself out alike in every game makes, like the ghosts of
+    /// the maze (see OwnCreatures.MakesRoomCreature).
     /// </summary>
     private void OnCreateObject(Action<CreateObject> orig, CreateObject self) {
-        if (OwnCreatures.MakesSummon(self)) {
+        if (OwnCreatures.MakesSummon(self) || OwnCreatures.MakesRoomCreature(self)) {
             return;
         }
 

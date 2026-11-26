@@ -354,6 +354,7 @@ internal partial class CoopSave {
         CoopHits.WaitsForAMove = struck => PlaysMoveThrough(struck) != null;
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
         OwnCreatures.HasNoHealthAsTold = HasNoHealthAsTold;
+        OwnCreatures.MakesAlike = machine => LayoutOf(machine.gameObject) != null;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
         EntityManager.PicksOwnGroup = PickOwnGroup;
@@ -460,11 +461,14 @@ internal partial class CoopSave {
 
         // A part of such a creature catches the local player only while the creature goes after them (see
         // CoopSave.OwnCatches), but for one that catches whoever touches it, like the drill of a driller that sweeps
-        // the room aiming at nobody (see CatchesWhoeverTouches). One that looks at a player takes its steps as the
-        // creature does, and the rest of them go as the game has them, with their own dice (see OwnCreatures)
+        // the room aiming at nobody (see CatchesWhoeverTouches), as it tells the creature of the catch, or as it goes
+        // into a grab of the player that it plays itself, before it tells the creature (see GrabFeltBy). One that
+        // looks at a player takes its steps as the creature does, and the rest of them go as the game has them, with
+        // their own dice (see OwnCreatures)
         if (!OwnCreatures.Has(machine.gameObject)) {
-            if (CatchToldIn(toState) is { } told && OwnCreatures.Owning(machine.gameObject) is { } owner &&
-                !GoesAfterLocalPlayer(owner) && !CatchesWhoeverTouches(owner, told)) {
+            if ((CatchToldIn(toState) ?? GrabFeltBy(self, toState)) is { } told &&
+                OwnCreatures.Owning(machine.gameObject) is { } owner && !GoesAfterLocalPlayer(owner) &&
+                !CatchesWhoeverTouches(owner, told)) {
                 RefuseCatch(self, owner, toState);
                 return;
             }

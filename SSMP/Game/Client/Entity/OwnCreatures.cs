@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Save;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -235,6 +237,19 @@ internal static class OwnCreatures {
     public static Func<HealthManager, bool>? HasNoHealthAsTold { get; set; }
 
     /// <summary>
+    /// Whether a state machine of the room makes what it makes alike in every game, by picks that every game takes
+    /// from the one that laid the room out (see CoopSave.RoomLayouts), like the controller of a room of the maze, which
+    /// makes the ghosts that haunt the room at the places that it picks (see <see cref="MakesRoomCreature"/>).
+    /// </summary>
+    public static Func<PlayMakerFSM, bool>? MakesAlike { get; set; }
+
+    /// <summary>
+    /// How many creatures each action of a state machine of the room that makes them alike in every game made in the
+    /// room so far, by the action (see <see cref="MakesRoomCreature"/>).
+    /// </summary>
+    private static readonly Dictionary<string, int> RoomMakes = new();
+
+    /// <summary>
     /// The state machine of a creature that every game runs by itself that a talk of the local player tells its event
     /// now, as a character tells its FSM about a talk (see Entity.TalkHere and CoopSave.OwnTalks).
     /// </summary>
@@ -363,6 +378,42 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// Makes what an action of a state machine of the room that makes what it makes alike in every game makes as it
+    /// starts (see <see cref="MakesAlike"/>), where that is a creature of a kind that every game runs by itself, the
+    /// way the action makes it (CreateObject.OnEnter): every game makes its own, and takes it as one that every game
+    /// runs by itself under a name made of the action and of how many it made in the room before, the same in every
+    /// game, as a summon is named (see <see cref="TakeSummon"/>). A member who comes in later lays the room out as it
+    /// was laid out for the first one in, and their game makes each one again under the same name, which the words of
+    /// the scene host's game wait for (see CoopSave.OwnSummons). Before, the scene host's game made it alone, as a
+    /// creature that the room makes (see RoomCreatures), and the ghosts of the maze, of a kind that every game runs by
+    /// itself, were in that game only. Whether the action is such a one.
+    /// </summary>
+    public static bool MakesRoomCreature(CreateObject action) {
+        if (MakesAlike == null || action.Fsm?.FsmComponent is not { } machine || machine == null ||
+            !MakesAlike(machine) || action.gameObject.Value is not { } prefab || prefab == null ||
+            !EntityRegistry.TryGetEntry(prefab, out var entry) || !entry.OwnInEachGame) {
+            return false;
+        }
+
+        var made = ScenePath.Get(machine.transform) + "|" + machine.FsmName + "|" + action.State.Name + "|" +
+                   Array.IndexOf(action.State.Actions, action);
+        RoomMakes.TryGetValue(made, out var before);
+        RoomMakes[made] = before + 1;
+        var place = SummonStart + "r." + StableHash.Of(made).ToString("x8", CultureInfo.InvariantCulture) + "." +
+                    before.ToString(CultureInfo.InvariantCulture);
+        var creature = MakeAs(action, prefab);
+        var parts = TakeNamed(creature, entry.Type, place);
+        Logger.Info(
+            $"[Own creatures] '{place}' ({entry.Type}), which '{machine.gameObject.name}' made here in " +
+            $"'{action.State.Name}' of '{machine.FsmName}' as the room laid itself out, runs in each game as the " +
+            $"room's own, made by each, with {parts} part(s) with state machines of their own"
+        );
+        action.storeObject.Value = creature;
+        action.Finish();
+        return true;
+    }
+
+    /// <summary>
     /// Makes a summon that the scene host's game made before the local player came in, as the action that made it there
     /// makes it (see <see cref="MakesSummon"/>), and takes it at its place there.
     /// </summary>
@@ -451,10 +502,7 @@ internal static class OwnCreatures {
         CreateObject action
     ) {
         var place = SummonStart + key;
-        var parts = TakeAt(
-            creature, type, place,
-            part => place + SummonPartStart + Component.PartsComponent.GetPath(creature.transform, part.transform)
-        );
+        var parts = TakeNamed(creature, type, place);
         var made = new SummonMaker(
             PlaceOf(maker), action.Fsm.FsmComponent.FsmName, action.State.Name,
             Array.IndexOf(action.State.Actions, action)
@@ -464,6 +512,19 @@ internal static class OwnCreatures {
         Logger.Info(
             $"[Own creatures] '{place}' ({type}), which '{made.Place}' made here in '{made.State}' of '{made.Fsm}', " +
             $"runs in each game as the room's own, made by each, with {parts} part(s) with state machines of their own"
+        );
+    }
+
+    /// <summary>
+    /// Takes a creature that every game makes by itself as one that every game runs by itself under a name, the same in
+    /// every game (see <see cref="TakeSummon"/>, <see cref="MakesRoomCreature"/>), and its parts under the paths from
+    /// it.
+    /// </summary>
+    /// <returns>How many parts it has.</returns>
+    private static int TakeNamed(GameObject creature, EntityType type, string place) {
+        return TakeAt(
+            creature, type, place,
+            part => place + SummonPartStart + Component.PartsComponent.GetPath(creature.transform, part.transform)
         );
     }
 
@@ -857,6 +918,7 @@ internal static class OwnCreatures {
         Makers.Clear();
         SummonedBy.Clear();
         MadeAsTold.Clear();
+        RoomMakes.Clear();
         EachGame.Clear();
         EachGameFrom.Clear();
         Tries.Clear();

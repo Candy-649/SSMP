@@ -30,9 +30,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// named by one less).
 ///
 /// So goes a child of an object of the room that a creature picks at random and then tells something, like the wasp
-/// that the hive takes out of those that lie in it to send it out (see <see cref="ChildPicks"/>): the scene host's game
-/// picks it as the creature goes into the state, the step tells which, and every game that follows picks that one as
-/// the step comes, and goes into the state only as it comes.
+/// that the hive takes out of those that lie in it to send it out, or goes to, like the place of the maze where the
+/// ghost cut down comes back (see <see cref="ChildPicks"/>): the scene host's game picks it as the creature goes into
+/// the state, the step tells which, and every game that follows picks that one as the step comes, and goes into the
+/// state only as it comes.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -68,16 +69,16 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The children that a state machine of a creature that every game runs by itself, or of a part of it, picks at
-    /// random in a state that it goes into, and then tells something (see <see cref="ChildPicksIn"/>): the state, and
-    /// the child that each action that picks one, by its number in the state, picks there, or null where the object
-    /// had none. Each game has the children of an object of the room in an order of its own, and others than another
-    /// game for a moment, as the creatures that leave it and come back do so at other moments in each, and picked
-    /// another from the same roll, which it then told in every game: the giant bone flyer of the second fight sent its
-    /// own pick and the scene host's out of its pack in every game, and the hive sent out a wasp of those that lay in
-    /// it here and another there, which flew there still lying in it (review of 81641bc and 11b3429). The scene host's
-    /// game picks them as the state machine goes into the state, and the step tells them (see
-    /// <see cref="PickChildren"/>, <see cref="WriteChildPicks"/>); a game that follows picks them as the step comes
-    /// (see <see cref="ReadChildPicks"/>).
+    /// random in a state that it goes into, and then tells something or goes to (see <see cref="ChildPicksIn"/>): the
+    /// state, and the child that each action that picks one, by its number in the state, picks there, or null where
+    /// the object had none. Each game has the children of an object of the room in an order of its own, and others
+    /// than another game for a moment, as the creatures that leave it and come back do so at other moments in each,
+    /// and picked another from the same roll, which it then told in every game: the giant bone flyer of the second
+    /// fight sent its own pick and the scene host's out of its pack in every game, and the hive sent out a wasp of
+    /// those that lay in it here and another there, which flew there still lying in it (review of 81641bc and
+    /// 11b3429). The scene host's game picks them as the state machine goes into the state, and the step tells them
+    /// (see <see cref="PickChildren"/>, <see cref="WriteChildPicks"/>); a game that follows picks them as the step
+    /// comes (see <see cref="ReadChildPicks"/>).
     /// </summary>
     private static readonly Dictionary<Fsm, (string State, Dictionary<int, GameObject?> Picks)> ChildPicks = new();
 
@@ -207,7 +208,10 @@ internal partial class CoopSave {
     /// later action of the state tells it something (see <see cref="ChildPicks"/>), at once or a moment later: the step
     /// tells which child it picked, which a tell a moment later tells as much (review of b48cf5a: the roar of the boss
     /// that sends out spears, which sends one out a moment after it picks it, picked its own in a game that follows,
-    /// and the next state, which took the scene host's pick, sent the same spear out again as another stayed).
+    /// and the next state, which took the scene host's pick, sent the same spear out again as another stayed). So are
+    /// the ones whose pick a later action of the state puts the creature at, or moves (see
+    /// <see cref="PlacedVariable"/>), like the place of the maze where the ghost cut down comes back, which it takes
+    /// out of the places left for the others: each game would have put it at another.
     /// </summary>
     private static IEnumerable<int> ChildPicksIn(FsmState state) {
         var actions = state.Actions;
@@ -219,12 +223,27 @@ internal partial class CoopSave {
             }
 
             for (var j = i + 1; j < actions.Length; j++) {
-                if (actions[j].Enabled && PickedVariable(actions[j], true) == kept.Name) {
+                if (actions[j].Enabled &&
+                    (PickedVariable(actions[j], true) == kept.Name || PlacedVariable(actions[j]) == kept.Name)) {
                     yield return i;
                     break;
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The variable that holds the object which an action puts something at, or puts under another object, or null
+    /// for an action that does neither so (see <see cref="ChildPicksIn"/>).
+    /// </summary>
+    private static string? PlacedVariable(FsmStateAction action) {
+        var held = action switch {
+            SetPositionToObject put => put.targetObject,
+            SetPositionToObject2D put => put.targetObject,
+            SetParent { gameObject.OwnerOption: OwnerDefaultOption.SpecifyGameObject } put => put.gameObject.GameObject,
+            _ => null
+        };
+        return held is { UseVariable: true, Name.Length: > 0 } ? held.Name : null;
     }
 
     /// <summary>

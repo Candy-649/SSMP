@@ -4083,6 +4083,7 @@
   {
     "base_object_name": "Wraith",
     "type": "Wraith",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -4090,6 +4091,12 @@
     "internal_name": "Wraith",
     "fsm_names": [
       "Control",
+      "Particle Control"
+    ],
+    "grab_events": [
+      "GRAB"
+    ],
+    "each_game_fsms": [
       "Particle Control"
     ]
   },
