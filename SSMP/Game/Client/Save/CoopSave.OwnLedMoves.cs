@@ -16,7 +16,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// The moves of a creature that every game runs by itself that act on one player and go by what that player does and
 /// what befalls them, which the game of that player leads: an extraction by them (see CoopSave.OwnExtracts) and a grab
 /// of them (see CoopSave.OwnCatches), like the struggle of the player held in a maw, which that player presses, and
-/// the chewing that goes on until their health is low. No other game can play such a move by itself.
+/// the chewing that goes on until their health is low, and a move that a state machine that each game runs by itself
+/// for its own player sets off and that goes by what that player has, like the swallow of a bomb that they threw,
+/// which goes by whether they have the pouch of poison on (see CoopSave.OwnTells). No other game can play such a move
+/// by itself.
 ///
 /// The game of that player plays it by itself, as the game does, and in a game that follows the scene host's, that is
 /// a move of its own to its end, whose every step, the one out of it too, it tells the scene host's game, with the

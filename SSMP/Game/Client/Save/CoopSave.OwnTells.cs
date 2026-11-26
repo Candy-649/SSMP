@@ -112,7 +112,41 @@ internal partial class CoopSave {
             $"'{toState.Name}' of '{word.FsmName}' by '{word.Names[0]}', and goes at once, as the scene host's game " +
             "is told"
         );
+        word.Sequence = word.Key == 1 ? LeadsMoveByWhatPlayerHas(machine, toState) : 0UL;
         SendToRoomMembers(word);
+    }
+
+    /// <summary>
+    /// Has a state machine of a creature that every game runs by itself, in a game that follows the scene host's, lead
+    /// the move that a state machine that each game runs by itself for its own player told it into, where the move
+    /// goes by what that player has (see ChoosesByWhatPlayerHas), telling every step of it (see CoopSave.OwnLedMoves):
+    /// the shaman of the swamp swallows a bomb into the burst of poison where the player who threw it has the pouch
+    /// on, and the scene host's game, told of the swallow, looked at whether its own player had it (USER 11-26 "肯定得
+    /// 改吧！"). The number of the move, which the word of the tell carries, or 0 for a move that goes by nothing of
+    /// the player's, whose way on stays the scene host's.
+    /// </summary>
+    private ulong LeadsMoveByWhatPlayerHas(PlayMakerFSM machine, FsmState toState) {
+        var fsm = machine.Fsm;
+        if (_ownLeaps.ContainsKey(fsm)) {
+            return 0;
+        }
+
+        var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, toState);
+        if (!states.Any(ChoosesByWhatPlayerHas)) {
+            return 0;
+        }
+
+        var leap = new OwnLeap(OwnCreatures.PlaceOf(machine.gameObject), false, "move by what the local player has") {
+            Catch = states,
+            Led = true,
+            Move = ++_grabsLed
+        };
+        _ownLeaps[fsm] = leap;
+        Logger.Info(
+            $"[Own creatures] '{leap.Place}' goes into '{toState.Name}' of '{fsm.Name}', a move that goes by what " +
+            $"the local player has, which it plays here by itself to its end, leading it as move {leap.Move}"
+        );
+        return leap.Move;
     }
 
     /// <summary>
@@ -161,19 +195,37 @@ internal partial class CoopSave {
             return;
         }
 
+        // The move that it goes into, which goes by what that player has, their game leads (see
+        // LeadsMoveByWhatPlayerHas)
+        var move = update.Key == 1 ? update.Sequence : 0UL;
         var way = fsm.ActiveState?.Transitions.FirstOrDefault(each => each.EventName == by) ??
                   fsm.GlobalTransitions.FirstOrDefault(each => each.EventName == by);
         if (way == null) {
             Logger.Info($"[Own creatures] {told}, and is in '{fsm.ActiveStateName}' here, which that takes nowhere");
+            if (move > 0) {
+                MeetLedMove(fsm, player.Id, move);
+            }
+
             return;
         }
 
         var away = Vector2.Distance(creature.transform.position, new Vector2(update.Values[0], update.Values[1]));
         Logger.Info(
             $"[Own creatures] {told}, and is told the same here, from '{fsm.ActiveStateName}' into '{way.ToState}', " +
-            $"where it was there, {away:F1} away"
+            $"where it was there, {away:F1} away" +
+            (move > 0 ? $", move {move}, which goes on as their game leads" : "")
         );
         PutAtSceneHostsStep(fsm, update);
+        if (move > 0) {
+            FollowLedMove(
+                fsm, Entity.Action.EntityFsmActions.MoveFrom(fsm, way.ToFsmState ?? fsm.GetState(way.ToState)), null,
+                player.Id, move
+            );
+        }
+
         fsm.Event(way.FsmEvent);
+        if (move > 0) {
+            MeetLedMove(fsm, player.Id, move);
+        }
     }
 }

@@ -66,7 +66,8 @@ internal partial class CoopSave {
     private static readonly HashSet<string> GrabEvents = ["GRAB HERO"];
 
     /// <summary>
-    /// How many grabs of this game's player this game led, which numbers each (see OwnLeap.Move).
+    /// How many grabs of this game's player this game led, and moves that go by what its player has (see
+    /// CoopSave.OwnTells), which numbers each (see OwnLeap.Move).
     /// </summary>
     private ulong _grabsLed;
 
