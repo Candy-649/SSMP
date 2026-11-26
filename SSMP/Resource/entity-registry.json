@@ -1256,6 +1256,7 @@
   {
     "base_object_name": "Hunter Queen Boss",
     "type": "SkarrsingerKarmelita",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
