@@ -2479,6 +2479,13 @@ internal class HealthManagerComponent : EntityComponent {
             blows.Add(ReadOwnBlow(data));
         }
 
+        // A creature that is gone here, destroyed as the game had it, takes in nothing: the damage of a copy that came
+        // meanwhile threw out of the handler as the creature's name was asked of the game for the log (a player's log
+        // of 0.5.21, three times in a day of play)
+        if (_healthManager.Host == null) {
+            return;
+        }
+
         // Damage counted against health that another game told, which this game does not go on from. A copy that
         // missed the change of who runs the room is told the health as it is, and counts from there.
         if (epoch != _currentHealthEpoch) {
