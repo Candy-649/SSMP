@@ -2111,6 +2111,7 @@
   {
     "base_object_name": "Shellwood Wasp",
     "type": "WoodWasp",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2123,6 +2124,7 @@
   {
     "base_object_name": "Control",
     "type": "ShellwoodHive",
+    "own_in_each_game": true,
     "parent_name": "Shellwood Hive",
     "components": [],
     "fsm_names": [
@@ -4269,6 +4271,7 @@
   {
     "base_object_name": "Black_Thread_Core",
     "type": "BlackThreadCore",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
