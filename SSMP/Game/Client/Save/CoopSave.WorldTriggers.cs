@@ -96,6 +96,17 @@ internal partial class CoopSave {
         new(["Hunter Trap Plate"], "Control", "STEP", "Cam Check", ["Idle"], ["Idle"]),
         new(["Trapper Barb Trap Landmine"], "Control", "ATTACK", "Throw Out", ["Dormant"], ["Dormant"]),
 
+        // Jaws on the ground that snap shut at a player who walks into them, or at a strike, and hold that player until
+        // they let go, once. Each game has its own, which catches its own player in it, as a game of one does; set off
+        // in one game, they snap in every other at whoever is in them there (the 11-08 verdict). Before, they were the
+        // walking mites' (kept by name), and those of every game but the scene host's never snapped at the player in
+        // them. Set by its state, not by TINK: its gleam takes no event, and one that gleamed as the word came stayed
+        // open. Snapped at a mite that walked in, they snap in every other game too, whose own mite died at the word of
+        // its death on its way there and would never walk in: the jaws there snap on nothing (its InstaDeath of the
+        // mite it holds holds none)
+        new(["Mite Trap"], "Control", "", "Antic", ["Idle", "Mite?"], ["Idle", "Gleam"]),
+        new(["Mite Trap"], "Control", "", "Antic Q", ["Snap Mite"], ["Idle", "Gleam"]),
+
         // Things overhead that a player walking under brings down or wakes
         new(["Drop Bell"], "Control", "DROP", "Drop Antic", ["Idle"], ["Idle"]),
         new(["Zap Worm Lightning"], "Control", "ALERT", "Do Zaps", ["Idle"], ["Idle"]),
