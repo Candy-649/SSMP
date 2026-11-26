@@ -2683,6 +2683,7 @@
   {
     "base_object_name": "Vampire Gnat",
     "type": "Moorwing",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -4020,6 +4021,7 @@
   {
     "base_object_name": "Seth",
     "type": "ShrineGuardianSeth",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
