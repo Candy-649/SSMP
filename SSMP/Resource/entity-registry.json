@@ -2999,6 +2999,7 @@
   {
     "base_object_name": "Lilypad Fly",
     "type": "LeafGlider",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3160,6 +3161,7 @@
   {
     "base_object_name": "Cloverstag",
     "type": "Cloverstag",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
