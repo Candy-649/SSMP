@@ -178,7 +178,8 @@ internal partial class CoopSave {
     /// where it was there as it was told, turned and going as it was, with what told it set on it there (see
     /// PutAtSceneHostsStep), and is told the same, as if what told it there told it here now, and goes on as the game
     /// has it, which every other game takes as a step of the scene host's. Not where it took the same tell a moment
-    /// before, but for one of a state machine that each game runs by itself, which is of that game's player.
+    /// before, but for one of a state machine that each game runs by itself, which is of that game's player, nor where
+    /// it holds a player or plays a move that another player's game leads, which goes on to its end.
     /// </summary>
     private void TakeOwnTell(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
         var place = update.ObjectPath;
@@ -200,14 +201,30 @@ internal partial class CoopSave {
             return;
         }
 
+        // The move that it goes into, which goes by what that player has, their game leads (see
+        // LeadsMoveByWhatPlayerHas)
+        var move = update.Key == 1 ? update.Sequence : 0UL;
+
+        // One that comes as the creature here holds a player, or plays a move that another player's game leads, goes
+        // nowhere, as a catch over a catch that it plays already does (see TakeOwnCatch): the move goes on here to its
+        // end. The shaman of the swamp, holding the scene host's player, would have gone to swallow the bomb of another
+        // player, whose game had it swallow that as it still sucked there, and never come to spit the player out; and
+        // a move of a third player's, set off there as it was in the other's here, would have taken the place of that
+        // one (review of d9dee93)
+        if (_ledMoves.ContainsKey(fsm) || fsm.ActiveState is { } at && CatchStateOf(fsm, at) != null) {
+            Logger.Info($"[Own creatures] {told}, and is in '{fsm.ActiveStateName}' here, in a move that goes on");
+            if (move > 0) {
+                MeetLedMove(fsm, player.Id, move);
+            }
+
+            return;
+        }
+
         if (update.Key == 0 && TellTakenAlready(fsm, by, true)) {
             Logger.Info($"[Own creatures] {told}, which it was told here too a moment before");
             return;
         }
 
-        // The move that it goes into, which goes by what that player has, their game leads (see
-        // LeadsMoveByWhatPlayerHas)
-        var move = update.Key == 1 ? update.Sequence : 0UL;
         var way = fsm.ActiveState?.Transitions.FirstOrDefault(each => each.EventName == by) ??
                   fsm.GlobalTransitions.FirstOrDefault(each => each.EventName == by);
         if (way == null) {
