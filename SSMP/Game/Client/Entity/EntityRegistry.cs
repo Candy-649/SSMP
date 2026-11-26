@@ -54,6 +54,12 @@ internal static class EntityRegistry {
     private static readonly Dictionary<EntityType, Dictionary<string, string>> EachGameFrom = new();
 
     /// <summary>
+    /// For each type of entity whose entry names any, the states of its FSMs where each player has a try of their own,
+    /// by FSM and then by state, with the event of a success (see <see cref="EntityRegistryEntry.Tries"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, Dictionary<string, Dictionary<string, string>>> Tries = new();
+
+    /// <summary>
     /// For each type of entity whose entry names any, the moves that the copy plays by itself, by FSM and then by the
     /// state each starts in, with every state of it, that one too (see <see cref="EntityRegistryEntry.RunsHere"/>).
     /// </summary>
@@ -110,6 +116,19 @@ internal static class EntityRegistry {
     public static bool TryGetEachGameFrom(EntityType type, string fsmName, [NotNullWhen(true)] out string? stateName) {
         stateName = null;
         return EachGameFrom.TryGetValue(type, out var states) && states.TryGetValue(fsmName, out stateName);
+    }
+
+    /// <summary>
+    /// Gets the states of an FSM of an entity of the given type where each player has a try of their own, with the
+    /// event of a success out of each, if it has any (see <see cref="EntityRegistryEntry.Tries"/>).
+    /// </summary>
+    public static bool TryGetTries(
+        EntityType type,
+        string fsmName,
+        [NotNullWhen(true)] out Dictionary<string, string>? states
+    ) {
+        states = null;
+        return Tries.TryGetValue(type, out var machines) && machines.TryGetValue(fsmName, out states);
     }
 
     /// <summary>
@@ -201,6 +220,14 @@ internal static class EntityRegistry {
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
                 EachGameFrom[entry.Type] = new Dictionary<string, string>(eachGameFrom, StringComparer.Ordinal);
+            }
+
+            if (entry.Tries is { Count: > 0 } tries) {
+                Tries[entry.Type] = tries.ToDictionary(
+                    machine => machine.Key,
+                    machine => new Dictionary<string, string>(machine.Value, StringComparer.Ordinal),
+                    StringComparer.Ordinal
+                );
             }
 
             if (entry.StruckFree is { Count: > 0 } struckFree) {
@@ -589,6 +616,16 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("each_game_from")]
     public Dictionary<string, string>? EachGameFrom { get; set; }
+
+    /// <summary>
+    /// States of FSMs of the entity, of a kind that every game runs by itself (see <see cref="OwnInEachGame"/>), where
+    /// each player has a try of their own at what the moment asks of them, by FSM name and then by state, with the
+    /// event by which a success takes the FSM out of the state: the parry at the prompt in the last clash with the boss
+    /// of the organ, which each game plays with its own player's character. One success, in any game, is everyone's,
+    /// and any other way out of the state waits until every player in the room missed (CoopSave.OwnTries).
+    /// </summary>
+    [JsonProperty("tries")]
+    public Dictionary<string, Dictionary<string, string>>? Tries { get; set; }
 
     /// <summary>
     /// Moves of the entity that the copy of a scene client plays by itself, by FSM name and then by the state each

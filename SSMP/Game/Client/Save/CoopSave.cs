@@ -549,6 +549,14 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a miss at a try that waits for theirs goes on once they left (see
+        // CoopSave.OwnTries)
+        try {
+            UpdateTries();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // The words of summons that waited for them to be made here
         try {
             UpdateSummonWords();
@@ -847,6 +855,7 @@ internal partial class CoopSave {
         _freesOwed.Clear();
         _roomPicksTold.Clear();
         _summonWords.Clear();
+        _ownTries.Clear();
 
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);

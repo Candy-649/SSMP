@@ -404,6 +404,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // A try of each player's at a moment of the fight, of which one success is everyone's: a miss here waits for
+        // the tries of the others (see CoopSave.OwnTries)
+        if (HoldsTry(self, toState)) {
+            return;
+        }
+
         // The end of a boss that takes the player's character, which each game plays on its own player from the state
         // where it begins (see OwnCreatures.BeginsEachGamePart): nothing of it is told or taken from then on, and a
         // player lying in their cocoon is stood up for it first, as for the copy's (see Entity.EachGamePartBegan)
@@ -1227,6 +1233,13 @@ internal partial class CoopSave {
                 _dyingAsTold = false;
             }
 
+            return;
+        }
+
+        // How the try of the player of that game went at a moment of the fight where each player has their own, of
+        // which one success is everyone's (see CoopSave.OwnTries)
+        if (update.PartCount == OwnTryPart) {
+            TakeTry(player, creature, update);
             return;
         }
 

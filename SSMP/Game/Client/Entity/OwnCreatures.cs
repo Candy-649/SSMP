@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Save;
 using UnityEngine;
@@ -67,6 +68,12 @@ internal static class OwnCreatures {
     /// <see cref="BeginsEachGamePart"/>).
     /// </summary>
     private static readonly Dictionary<PlayMakerFSM, string> EachGameFrom = new();
+
+    /// <summary>
+    /// The state machines of the creatures that every game runs by itself with states where each player has a try of
+    /// their own (see EntityRegistryEntry.Tries), with those states and the event of a success out of each.
+    /// </summary>
+    private static readonly Dictionary<PlayMakerFSM, Dictionary<string, string>> Tries = new();
 
     /// <summary>
     /// How many there are.
@@ -469,6 +476,10 @@ internal static class OwnCreatures {
             } else if (part == creature && EntityRegistry.TryGetEachGameFrom(type, machine.FsmName, out var from)) {
                 EachGameFrom[machine] = from;
             }
+
+            if (part == creature && EntityRegistry.TryGetTries(type, machine.FsmName, out var tries)) {
+                Tries[machine] = tries;
+            }
         }
 
         return parts;
@@ -583,6 +594,20 @@ internal static class OwnCreatures {
 
         return true;
     }
+
+    /// <summary>
+    /// Whether a state of a state machine of a creature that every game runs by itself is one where each player has a
+    /// try of their own (see <see cref="Tries"/>), with the event of a success out of it.
+    /// </summary>
+    public static bool IsTry(PlayMakerFSM machine, string state, [NotNullWhen(true)] out string? success) {
+        success = null;
+        return Tries.Count > 0 && Tries.TryGetValue(machine, out var states) && states.TryGetValue(state, out success);
+    }
+
+    /// <summary>
+    /// Whether a creature here has states where each player has a try of their own (see <see cref="Tries"/>).
+    /// </summary>
+    public static bool HasTries => Tries.Count > 0;
 
     /// <summary>
     /// Whether a creature that every game runs by itself plays its end in each game by itself (see
@@ -773,6 +798,7 @@ internal static class OwnCreatures {
         MadeAsTold.Clear();
         EachGame.Clear();
         EachGameFrom.Clear();
+        Tries.Clear();
         Dead.Clear();
         Deaths.Clear();
         DeathLooks.Clear();

@@ -3944,6 +3944,7 @@
   {
     "base_object_name": "Phantom",
     "type": "Phantom",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3975,7 +3976,18 @@
           "Parry End"
         ]
       }
-    }
+    },
+    "each_game_from": {
+      "Control": "Parry Facing"
+    },
+    "tries": {
+      "Control": {
+        "Parry Ready": "PARRY"
+      }
+    },
+    "catch_events": [
+      "MULTI HIT CONNECT"
+    ]
   },
   {
     "base_object_name": "Trobbio",
