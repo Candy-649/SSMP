@@ -752,6 +752,7 @@
   {
     "base_object_name": "Grasshopper Slasher",
     "type": "Verdanir",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -761,6 +762,9 @@
       "Control",
       "Enter Water",
       "grasshopper_block_control"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
@@ -1721,6 +1725,7 @@
   {
     "base_object_name": "Grasshopper Fly",
     "type": "Escalion",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1730,6 +1735,9 @@
       "Control",
       "Enter Water",
       "grasshopper_block_control"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
