@@ -554,7 +554,8 @@ internal partial class CoopSave {
         // it strikes from: the step plays as it came, put again where the scene host's was as it gets there (see
         // OnOwnCreature). It waited for the step once more, which had come already, hung where it had moved to for
         // 2.3 s, and was then set straight back into its hand, having struck nothing (the user's log of 11-21,
-        // 21:52:01.581)
+        // 21:52:01.581). What the step looks at the player it goes after for, like a mark that it puts where they are,
+        // looks where the scene host's game had them, as on the way into a step (see SeeTargetAsTold)
         if (_waysThrough.Count > 0 && _waysThrough.Remove(self, out var through) &&
             toState.Name == through.StateName) {
             Logger.Info(
@@ -564,10 +565,20 @@ internal partial class CoopSave {
             _heldOwnSteps.Remove(self);
             _ownWays.Remove(self);
             ReachKeptStep(self, toState.Name);
-            PutAtSceneHostsStep(self, through, KeepsItsPlace(self, through));
+            var keepsPlace = KeepsItsPlace(self, through);
+            PutAtSceneHostsStep(self, through, keepsPlace);
             StartsOwnLeap(machine, toState);
             FollowsSilkLookAsTold(machine, toState, through, _stepsHost);
-            EnterOwnState(orig, self, toState);
+            SeeTargetAsTold(
+                creature, through,
+                keepsPlace ? new Vector3(through.Values[0], through.Values[1], creature.transform.position.z) : null
+            );
+            try {
+                EnterOwnState(orig, self, toState);
+            } finally {
+                OwnCreatures.SeeTargetHere();
+            }
+
             return;
         }
 
@@ -2227,7 +2238,11 @@ internal partial class CoopSave {
     /// Whether a state machine of a creature that every game runs by itself gets by itself from the state it is in to a
     /// state that the scene host's went to: by ways that the states take by what they do themselves, as their actions
     /// finish or as one of them sends them on, through no state whose way on the others wait for (see IsWaitedFor) and
-    /// into none that picks a part of the room. It is a moment behind, and goes the same way as fast.
+    /// into none that picks a part of the room or puts something where the player is, whose way in waits for the scene
+    /// host's step (see PicksAPart, PlacesByPlayer). It is a moment behind, and goes the same way as fast. Kept to get
+    /// to by itself, a step into a state that puts something where the player is would stand where its way in was held,
+    /// as a state finishes only once, until the scene host's next step or a second later, and then jump on through it
+    /// (review of eac9c4f).
     /// </summary>
     private bool ReachesByItself(Fsm fsm, string stateName) {
         if (fsm.ActiveState is not { } from || _heldOwnSteps.ContainsKey(fsm)) {
@@ -2245,7 +2260,7 @@ internal partial class CoopSave {
 
             foreach (var transition in state.Transitions) {
                 if ((transition.ToFsmState ?? fsm.GetState(transition.ToState)) is not { } to || PicksAPart(to) ||
-                    !TakenByItself(state, transition)) {
+                    PlacesByPlayer(to) || !TakenByItself(state, transition)) {
                     continue;
                 }
 
