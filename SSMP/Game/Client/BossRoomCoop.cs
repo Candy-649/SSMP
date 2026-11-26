@@ -1697,6 +1697,16 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether an FSM of a boss room goes from a state into the start of the room's fight by an event, before the
+    /// fight started: such a start waits for every player in the room in its own way (see TryHoldStart,
+    /// TryHoldEventStart).
+    /// </summary>
+    internal bool StartsFight(Fsm fsm, FsmState state, string eventName) {
+        return GetBossRoom(fsm) is { Started: false } room &&
+               (room.StartEventNames.Contains(eventName) || GetStartTrigger(fsm, state, eventName) != null);
+    }
+
+    /// <summary>
     /// Gets the trigger of an FSM that starts its room when it sends the given event in the given state, or null.
     /// </summary>
     private StartTrigger? GetStartTrigger(Fsm fsm, FsmState state, string? eventName) {

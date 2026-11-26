@@ -2354,6 +2354,12 @@ internal partial class CoopSave {
     public Func<bool>? IsLeavingOnDebugTrip { get; set; }
 
     /// <summary>
+    /// Whether a state machine of a boss room goes from a state into the start of the room's fight by an event, before
+    /// the fight started, which waits for every player in its own way. Given by the boss room code.
+    /// </summary>
+    public Func<HutongGames.PlayMaker.Fsm, FsmState, string, bool>? StartsBossFight { get; set; }
+
+    /// <summary>
     /// Sends an update to each member that the saves were checked with who is in the room of the local player, and to
     /// nobody else: what only matters in a room doesn't go to the members elsewhere. Nor while the local player is on
     /// the debug trip out of the room (see IsLeavingOnDebugTrip): the steps of a creature here went to a member who had

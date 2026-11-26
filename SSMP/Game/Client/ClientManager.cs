@@ -458,7 +458,8 @@ internal class ClientManager : IClientManager {
             IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost,
             IsSceneClient = () => _entityManager.IsSceneRoleDetermined && !_entityManager.IsSceneHost,
             IsHosting = () => _isHostingServer,
-            IsLeavingOnDebugTrip = () => _bossRoomCoop.IsLeavingOnDebugTrip
+            IsLeavingOnDebugTrip = () => _bossRoomCoop.IsLeavingOnDebugTrip,
+            StartsBossFight = _bossRoomCoop.StartsFight
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
 

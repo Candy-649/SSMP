@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
@@ -31,6 +33,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// players a moment after another's went nowhere (review of 4aae450; see <see cref="ToldByEachGame"/>). What its own
 /// state machines and parts tell one another stays as before, the scene host's step: what one of them tells another
 /// there may go by where the players are.
+///
+/// So goes a touch of this game's player that a state machine of the creature feels itself, as what it watches feels
+/// them come in, or a strike of theirs (see <see cref="FeltByLocalPlayer"/>).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -79,6 +84,76 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The field of each kind of action that feels what touches it which says whether it feels a thing come in, stay
+    /// or leave, by type, or null for a kind without one (see <see cref="FeltByLocalPlayer"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo?> TouchKindFields = new();
+
+    /// <summary>
+    /// Whether a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
+    /// goes to a state as it feels this game's player touch what it watches itself: a trigger or a collision of an
+    /// action of the state it is in, which this game's player came into, they or a strike of theirs, like the spikes of
+    /// the coral brute, which a strike of theirs breaks, or a creature lying dormant that sets off as they come to it.
+    /// No other game feels them there: the figure of a player in another game touches nothing that waits for one. It
+    /// plays here at once, and the scene host's game is told, as of what something outside the creature tells it here
+    /// (USER 11-25 "就本地先演，本地的怪本来就是活的"). Before, it went its own way here, which the scene host's game
+    /// never heard of, and was put back onto the steps of the scene host's a moment later, or waited for good for a
+    /// step of the scene host's where its state goes by where the players are. Not a player leaving what it watches,
+    /// which says nothing of the others; nor a way into a state that does something to the player itself, as each
+    /// game's strand of the silk boss catches its own player and tells the boss so; nor the start of a boss fight,
+    /// which waits for every player in its own way (see BossRoomCoop).
+    /// </summary>
+    private bool FeltByLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
+        if (Fsm.EventData?.SentByFsm != fsm || fsm.LastTransition is not { } way || way.ToState != toState.Name ||
+            fsm.ActiveState is not { } from || HeroController.SilentInstance is not { } hero ||
+            !OwnCreatures.FollowsSceneHost(creature) ||
+            Entity.Action.EntityFsmActions.DealsWithThePlayerIn(toState) ||
+            StartsBossFight?.Invoke(fsm, from, way.EventName) == true) {
+            return false;
+        }
+
+        foreach (var action in from.Actions) {
+            var kind = action.GetType().Name;
+            var trigger = kind.StartsWith("Trigger", StringComparison.Ordinal);
+            if (!action.Enabled || !trigger && !kind.StartsWith("Collision", StringComparison.Ordinal) ||
+                !SendsAsTouched(action, way.EventName)) {
+                continue;
+            }
+
+            var toucher = trigger ? fsm.TriggerCollider2D : fsm.Collision2DInfo?.collider;
+            return toucher != null &&
+                   (toucher.transform.IsChildOf(hero.transform) || Entity.Entity.IsStrikeOfTheLocalPlayer(toucher));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an action that feels what touches it sends an event as a thing comes in or stays, rather than as it
+    /// leaves (see <see cref="FeltByLocalPlayer"/>).
+    /// </summary>
+    private static bool SendsAsTouched(FsmStateAction action, string eventName) {
+        var type = action.GetType();
+        if (!TouchKindFields.TryGetValue(type, out var kindField)) {
+            kindField = type.GetField("trigger", BindingFlags.Instance | BindingFlags.Public) ??
+                        type.GetField("collision", BindingFlags.Instance | BindingFlags.Public);
+            TouchKindFields[type] = kindField;
+        }
+
+        if (kindField?.GetValue(action)?.ToString()?.Contains("Exit") == true) {
+            return false;
+        }
+
+        foreach (var field in EventFieldsOf(type)) {
+            if (field.GetValue(action) is FsmEvent sent && sent.Name == eventName) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whether what tells a state machine to go on now is a state machine that each game runs by itself for its own
     /// player (see OwnCreatures.RunsInEachGame), whose tell is of that player and comes from no other game.
     /// </summary>
@@ -94,6 +169,10 @@ internal partial class CoopSave {
         var creature = machine.gameObject;
         var fsm = machine.Fsm;
         var teller = Fsm.EventData?.SentByFsm;
+
+        // A touch of this game's player that the state machine feels itself sets nothing on it from outside (see
+        // FeltByLocalPlayer)
+        var felt = teller == fsm;
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         var word = OwnCreatureUpdate(
             machine,
@@ -101,16 +180,17 @@ internal partial class CoopSave {
                 fsm.ActiveStateName, SharedDice.RollCounts(creature), creature.transform.position,
                 creature.transform.localScale.x
             ),
-            teller != null ? ToldValues.SetBy(teller, creature, machine) : null
+            teller != null && !felt ? ToldValues.SetBy(teller, creature, machine) : null
         );
         word.PartCount = OwnTellPart;
         word.Key = ToldByEachGame() ? 1UL : 0UL;
         word.Names = [fsm.LastTransition!.EventName, toState.Name];
+        var by = felt
+            ? "is set off by this game's player"
+            : $"is told by '{teller?.Name}' of '{(teller?.GameObject != null ? teller.GameObject.name : "?")}'";
         Logger.Info(
-            $"[Own creatures] '{word.ObjectPath}' is told by '{teller?.Name}' of " +
-            $"'{(teller?.GameObject != null ? teller.GameObject.name : "?")}' to go from '{word.StateName}' to " +
-            $"'{toState.Name}' of '{word.FsmName}' by '{word.Names[0]}', and goes at once, as the scene host's game " +
-            "is told"
+            $"[Own creatures] '{word.ObjectPath}' {by} to go from '{word.StateName}' to '{toState.Name}' of " +
+            $"'{word.FsmName}' by '{word.Names[0]}', and goes at once, as the scene host's game is told"
         );
         if (word.Key == 1) {
             // The move of this game's player's thing, which this game leads where it goes by what they have, and

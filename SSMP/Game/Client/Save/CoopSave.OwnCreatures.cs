@@ -625,7 +625,7 @@ internal partial class CoopSave {
         var teller = Fsm.EventData?.SentByFsm;
         var setOffByStrike = CoopHits.IsMakingLocalStrike && teller != self;
         var setOffHere = !LeadsMove(self) && !CatchesLocalPlayer(self, toState, creature) &&
-                         ToldFromOutside(self, toState, creature);
+                         (ToldFromOutside(self, toState, creature) || FeltByLocalPlayer(self, toState, creature));
         var picks = PicksAPart(toState);
         var places = PlacesByPlayer(toState);
 

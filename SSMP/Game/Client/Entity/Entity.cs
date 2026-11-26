@@ -4141,7 +4141,7 @@ internal partial class Entity {
     /// theirs struck (see CoopHits.IsLocalAttack).
     /// </summary>
     /// <param name="collider">The collider that set the part's FSM off.</param>
-    private static bool IsStrikeOfTheLocalPlayer(Collider2D? collider) {
+    internal static bool IsStrikeOfTheLocalPlayer(Collider2D? collider) {
         return collider != null && collider.gameObject.layer == (int) GlobalEnums.PhysLayers.HERO_ATTACK &&
                !RemoteAttackComponent.IsRemoteAttack(collider.gameObject) && CoopHits.IsLocalAttack(collider);
     }
