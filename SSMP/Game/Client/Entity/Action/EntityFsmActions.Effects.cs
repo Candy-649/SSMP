@@ -1087,7 +1087,7 @@ internal static partial class EntityFsmActions {
     /// <see cref="DealsWithThePlayer"/>), like the one with which a creature grabs the player, hides them and takes
     /// a mask.
     /// </summary>
-    private static bool RunsSomethingOnThePlayer(FsmStateAction action) {
+    internal static bool RunsSomethingOnThePlayer(FsmStateAction action) {
         if (SubFsmOf(action) is not { States: { } states }) {
             return false;
         }

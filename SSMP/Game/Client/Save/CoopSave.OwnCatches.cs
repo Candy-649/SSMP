@@ -50,7 +50,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// 则"). The creature grabs only the player it goes after, as any catch of its own, but for one that grabs whoever
 /// touches what it watches, like the tendril of the maw that hangs from the ceiling (see
 /// <see cref="CatchesWhoeverTouches"/>). Another player's strike may free the player held (see
-/// CoopSave.OwnStruckFree).
+/// CoopSave.OwnStruckFree). So goes a grab that the creature's state machine feels itself, as it goes into the game's
+/// own grab at what a trigger of its own felt, like the scissors that snap at the player (see
+/// <see cref="IsFeltGrab"/>).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -73,6 +75,12 @@ internal partial class CoopSave {
     /// CoopSave.OwnTells), which numbers each (see OwnLeap.Move).
     /// </summary>
     private ulong _grabsLed;
+
+    /// <summary>
+    /// The latest catch of this game's player that each state machine of a creature that every game runs by itself
+    /// was let go of, by the state that it would have gone to and the frame (see <see cref="RefuseCatch"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, (string Into, int Frame)> _refusedCatches = new();
 
     /// <summary>
     /// The state machines of creatures that every game runs by itself that play a catch of another player's, with the
@@ -125,6 +133,62 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether a way of a state machine of a creature out of a state into another is a grab of the player that it
+    /// feels itself, rather than one that a part of it tells it of (see <see cref="GrabEvents"/>): into a state that
+    /// grabs the player by the game's own grab (see Entity.GrabsThePlayerIn), out of one that does not, at an event
+    /// that an action of that state sends as it feels what touches it, a trigger, a collision or a count of what is in
+    /// a zone, as the scissors that snap at the player feel them in their blades, and the thief of rosaries as it
+    /// lands on them. The partner's figure in this game touches nothing, so what it feels is this game's player, as
+    /// what a part that grabs feels is.
+    /// </summary>
+    private static bool IsFeltGrab(FsmState from, string eventName, FsmState? to) {
+        if (eventName == FsmEvent.Finished.Name || to == null || !Entity.Entity.GrabsThePlayerIn(to) ||
+            Entity.Entity.GrabsThePlayerIn(from)) {
+            return false;
+        }
+
+        foreach (var action in from.Actions) {
+            var kind = action.GetType().Name;
+            var feels = kind.StartsWith("Trigger", StringComparison.Ordinal) ||
+                        kind.StartsWith("Collision", StringComparison.Ordinal) ||
+                        kind.StartsWith("CheckTrackTriggerCount", StringComparison.Ordinal);
+            if (!action.Enabled || !feels) {
+                continue;
+            }
+
+            foreach (var field in EventFieldsOf(action.GetType())) {
+                var value = field.GetValue(action);
+                if (value is FsmEvent sent && sent.Name == eventName ||
+                    value is FsmEvent[] events && Array.Exists(events, each => each?.Name == eventName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a way out of a state of a state machine of a creature takes it into a catch of the player: at an event
+    /// by which a part of the creature tells it (see <see cref="IsCatchEvent"/>), or into a grab that it feels itself
+    /// (see <see cref="IsFeltGrab"/>).
+    /// </summary>
+    private static bool IsCatchWay(FsmState from, FsmTransition transition) {
+        return IsCatchEvent(transition.EventName) ||
+               IsFeltGrab(from, transition.EventName, transition.ToFsmState ?? from.Fsm.GetState(transition.ToState));
+    }
+
+    /// <summary>
+    /// Whether a way out of a state of a state machine of a creature takes it into a grab of the player: at an event by
+    /// which a part of the creature or the state machine itself tells it of one (see <see cref="GrabEvents"/>), or into
+    /// one that it feels itself (see <see cref="IsFeltGrab"/>).
+    /// </summary>
+    private static bool IsGrabWay(FsmState from, FsmTransition transition) {
+        return GrabEvents.Contains(transition.EventName) ||
+               IsFeltGrab(from, transition.EventName, transition.ToFsmState ?? from.Fsm.GetState(transition.ToState));
+    }
+
+    /// <summary>
     /// The event of a catch (see <see cref="IsCatchEvent"/>) by which a state tells a creature that its part caught the
     /// player, or null if it tells none.
     /// </summary>
@@ -163,14 +227,23 @@ internal partial class CoopSave {
     /// <summary>
     /// Lets go of the step of a part of a creature that every game runs by itself into a catch of this game's player,
     /// which the creature does not go after: it catches whom it goes after (USER 11-16 "也不是人能主动被抓的"). The part
-    /// stays where it was, as if it felt nothing, until the player comes into it again.
+    /// stays where it was, as if it felt nothing, until the player comes into it again. One that feels the player in a
+    /// zone every frame, like the scissors that snap at the player, tries again every frame while they stay there,
+    /// which the log tells once (see <see cref="_refusedCatches"/>).
     /// </summary>
     private void RefuseCatch(Fsm part, GameObject creature, FsmState toState) {
         MachineSwitchToStateField?.SetValue(part, null);
-        Logger.Info(
-            $"[Own creatures] '{part.Name}' of '{OwnCreatures.PlaceOf(creature)}' would go to '{toState.Name}' as it " +
-            "touched the local player, whom the creature does not go after, and catches nobody"
-        );
+        var frame = Time.frameCount;
+        var again = _refusedCatches.TryGetValue(part, out var last) && last.Into == toState.Name &&
+                    frame - last.Frame <= 1;
+        _refusedCatches[part] = (toState.Name, frame);
+        if (!again) {
+            Logger.Info(
+                $"[Own creatures] '{part.Name}' of '{OwnCreatures.PlaceOf(creature)}' would go to " +
+                $"'{toState.Name}' as it touched the local player, whom the creature does not go after, and " +
+                "catches nobody"
+            );
+        }
     }
 
     /// <summary>
@@ -180,13 +253,16 @@ internal partial class CoopSave {
     /// Entity.SetsOffRoomPartCatch). So does a grab that it tells itself of, by what a thing of its own that grabbed
     /// the player set, which only this game's player sets off here: the catcher of the lost one of the cocoon, which
     /// grabs whoever touches it, has the game of the player it caught tell the creature so (see
-    /// <see cref="GrabEvents"/>).
+    /// <see cref="GrabEvents"/>), and so does a grab that it feels itself (see <see cref="IsFeltGrab"/>). What sent the
+    /// event is the state machine that was running as it was sent: none as this game plays a step that another game
+    /// took, which it does from outside every state machine, and a step of the scene host's that it plays from within
+    /// the state machine itself is no feel of its own either.
     /// </summary>
     private static bool CatchesLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
         return fsm.LastTransition is { } transition && transition.ToState == toState.Name &&
-               IsCatchEvent(transition.EventName) && Fsm.EventData?.SentByFsm is { } part &&
+               fsm.ActiveState is { } from && IsCatchWay(from, transition) && Fsm.EventData?.SentByFsm is { } part &&
                (part == fsm
-                   ? GrabEvents.Contains(transition.EventName)
+                   ? IsGrabWay(from, transition) && !OwnCreatures.PlaysSceneHostsStep(fsm)
                    : part.GameObject is { } catcher && catcher != null &&
                      (OwnCreatures.Owning(catcher) is { } owner
                          ? owner == creature
@@ -197,18 +273,28 @@ internal partial class CoopSave {
     /// Whether a catch takes a state machine to a state (see Entity.CatchEvents).
     /// </summary>
     private static bool IsCatchState(Fsm fsm, FsmState state) {
-        return fsm.GlobalTransitions.Concat(fsm.States.SelectMany(each => each.Transitions)).Any(
-            transition => transition.ToState == state.Name && IsCatchEvent(transition.EventName)
-        );
+        return fsm.GlobalTransitions.Any(
+                   transition => transition.ToState == state.Name && IsCatchEvent(transition.EventName)
+               ) ||
+               fsm.States.Any(
+                   from => from.Transitions.Any(
+                       transition => transition.ToState == state.Name && IsCatchWay(from, transition)
+                   )
+               );
     }
 
     /// <summary>
     /// Whether a grab takes a state machine to a state (see <see cref="GrabEvents"/>).
     /// </summary>
     private static bool IsGrabState(Fsm fsm, FsmState state) {
-        return fsm.GlobalTransitions.Concat(fsm.States.SelectMany(each => each.Transitions)).Any(
-            transition => transition.ToState == state.Name && GrabEvents.Contains(transition.EventName)
-        );
+        return fsm.GlobalTransitions.Any(
+                   transition => transition.ToState == state.Name && GrabEvents.Contains(transition.EventName)
+               ) ||
+               fsm.States.Any(
+                   from => from.Transitions.Any(
+                       transition => transition.ToState == state.Name && IsGrabWay(from, transition)
+                   )
+               );
     }
 
     /// <summary>
@@ -251,9 +337,12 @@ internal partial class CoopSave {
     /// state machine, or null if none leads there.
     /// </summary>
     private static FsmTransition? CatchWay(FsmState state, string into) {
-        return state.Transitions.Concat(state.Fsm.GlobalTransitions).FirstOrDefault(
-            transition => transition.ToState == into && IsCatchEvent(transition.EventName)
-        );
+        return state.Transitions.FirstOrDefault(
+                   transition => transition.ToState == into && IsCatchWay(state, transition)
+               ) ??
+               state.Fsm.GlobalTransitions.FirstOrDefault(
+                   transition => transition.ToState == into && IsCatchEvent(transition.EventName)
+               );
     }
 
     /// <summary>
@@ -314,9 +403,7 @@ internal partial class CoopSave {
     /// </summary>
     private void KeepOut(Fsm fsm, FsmState toState) {
         var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, toState);
-        var muted = Entity.Action.EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(
-            action => states.Contains(action.State)
-        );
+        var muted = PlayersOwnIn(fsm, states);
         var notes = GrabNotesPutOutIn(fsm, states);
         muted.AddRange(notes);
         foreach (var action in muted) {
@@ -345,6 +432,30 @@ internal partial class CoopSave {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// What a state machine of a creature does to this game's player in the given states (see
+    /// Entity.Action.EntityFsmActions.PlayersOwnActionsOf), and the templates that it runs on the player there and
+    /// waits to end besides, which are left running as actions that may send it on: the scissors that snap at the
+    /// player run the game's grab so, which hurts the player and holds them, and played for another player's grab they
+    /// would have grabbed this game's player too. In a catch of another player where it goes on is the scene host's or
+    /// the leading game's, not the end of a template here.
+    /// </summary>
+    private static List<FsmStateAction> PlayersOwnIn(Fsm fsm, HashSet<FsmState> states) {
+        var found = Entity.Action.EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(
+            action => states.Contains(action.State)
+        );
+        foreach (var state in states) {
+            foreach (var action in state.Actions) {
+                if (action.Enabled && !found.Contains(action) &&
+                    Entity.Action.EntityFsmActions.RunsSomethingOnThePlayer(action)) {
+                    found.Add(action);
+                }
+            }
+        }
+
+        return found;
     }
 
     /// <summary>
@@ -421,9 +532,7 @@ internal partial class CoopSave {
         }
 
         var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, into);
-        var muted = Entity.Action.EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(
-            action => states.Contains(action.State)
-        );
+        var muted = PlayersOwnIn(fsm, states);
         if (muted.Count == 0) {
             return;
         }
@@ -470,9 +579,7 @@ internal partial class CoopSave {
             return false;
         }
 
-        var muted = Entity.Action.EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(
-            action => after.Contains(action.State)
-        );
+        var muted = PlayersOwnIn(fsm, after);
         foreach (var action in muted) {
             action.Enabled = false;
         }
@@ -601,7 +708,9 @@ internal partial class CoopSave {
     /// (see Entity.Action.EntityFsmActions.MoveFrom), and the scene host's game is told, which plays it too (see
     /// <see cref="TakeOwnCatch"/>). Before, it waited for a step of the scene host's that never came, as a step that
     /// another state machine told it does, and the knight held the player it caught for as long, as its catch was over
-    /// at the hold, which its other catch starts at (review of the user's log). Whether it does.
+    /// at the hold, which its other catch starts at (review of the user's log). So does a grab of this game's player
+    /// that a part of it tells it of or that it feels itself (see <see cref="IsFeltGrab"/>), which this game leads.
+    /// Whether it does.
     /// </summary>
     private bool StartsOwnRoomCatch(PlayMakerFSM machine, FsmState toState) {
         var creature = machine.gameObject;
@@ -610,7 +719,7 @@ internal partial class CoopSave {
         }
 
         GamePatcher.GoAfterGrabbed(creature, hero.gameObject, machine.Fsm, toState);
-        var grab = GrabEvents.Contains(machine.Fsm.LastTransition!.EventName);
+        var grab = IsGrabWay(machine.Fsm.ActiveState, machine.Fsm.LastTransition!);
         var what = grab ? "grab of the local player" : "catch of the local player";
         var leap = new OwnLeap(OwnCreatures.PlaceOf(creature), false, what) {
             Catch = Entity.Action.EntityFsmActions.MoveFrom(machine.Fsm, toState),
