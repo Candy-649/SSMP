@@ -192,7 +192,7 @@ internal partial class CoopSave {
     /// The local player is in a cage that takes them to the prison: the others are held.
     /// </summary>
     private void OnCaged() {
-        _ownCatch = new OwnCatch(Time.unscaledTime);
+        _ownCatch = new OwnCatch(Time.unscaledTime, HutongGames.PlayMaker.FsmExecutionStack.ExecutingFsm);
 
         // Their own cage comes first. A catch of a partner's that held them holds them again if it lets go of them.
         if (_partnerCatch is { Frozen: true } held && HeroController.SilentInstance is { } hero && hero != null) {
@@ -645,8 +645,14 @@ internal partial class CoopSave {
     /// A cage that has the local player.
     /// </summary>
     /// <param name="since">When it caught them.</param>
-    private sealed class OwnCatch(float since) {
+    /// <param name="by">The state machine that marked them held in it, of the creature whose cage it is.</param>
+    private sealed class OwnCatch(float since, HutongGames.PlayMaker.Fsm? by) {
         public float Since { get; } = since;
+
+        /// <summary>
+        /// The state machine that marked them held in it (see CoopSave.OwnCatches).
+        /// </summary>
+        public HutongGames.PlayMaker.Fsm? By { get; } = by;
 
         /// <summary>
         /// Whether it blacked out their screen yet.

@@ -139,10 +139,14 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether an event of a state machine of a creature, or of a part of it, is one by which a part of the creature
     /// tells it that it caught the player: for a combo of blows (see Entity.CatchEvents), or a grab (see
-    /// <see cref="IsGrabEvent"/>).
+    /// <see cref="IsGrabEvent"/>), or one with which the creature's kind catches whoever touches what it watches, as
+    /// its entry names it, like the CATCH of the large fly of the prison as its cage falls on the player (see
+    /// EntityRegistry.IsCatchEventOf).
     /// </summary>
     private static bool IsCatchEvent(Fsm fsm, string name) {
-        return Entity.Entity.CatchEvents.Contains(name) || IsGrabEvent(fsm, name);
+        return Entity.Entity.CatchEvents.Contains(name) || IsGrabEvent(fsm, name) ||
+               EntityRegistry.IsAnyCatchEvent(name) && OwnCreatures.Owning(fsm.GameObject) is { } creature &&
+               EntityRegistry.IsCatchEventOf(creature, name);
     }
 
     /// <summary>
@@ -279,7 +283,8 @@ internal partial class CoopSave {
     /// drillers that sweep the room of the fight with the giant driller aiming at nobody, across it at the giant's
     /// word or up and down at its roar. Held to whom it goes after, each would go after the first player it caught
     /// from then on, as the catch has it (see GamePatcher.GoAfterGrabbed), and never catch another: the drill went
-    /// through them unfelt (review of d71f2ce).
+    /// through them unfelt (review of d71f2ce). So does the cage that the large fly of the prison drops, which catches
+    /// whoever is under it as it falls (USER 10-14 "可以吧").
     /// </summary>
     private static bool CatchesWhoeverTouches(GameObject creature, string eventName) {
         return EntityRegistry.TryGetEntry(creature, out var entry) && entry.CatchEvents?.Contains(eventName) == true;
@@ -318,17 +323,47 @@ internal partial class CoopSave {
     /// event is the state machine that was running as it was sent: none as this game plays a step that another game
     /// took, which it does from outside every state machine, as it does a catch of another player's (see
     /// <see cref="_othersCatchWay"/>), and a step of the scene host's that it plays from within the state machine
-    /// itself is no feel of its own either.
+    /// itself is no feel of its own either. So is a catch that the state machine felt through an object of its own that
+    /// it watches, which comes from no state machine (see <see cref="FeltThroughWatched"/>), but for one that this game
+    /// plays from outside.
     /// </summary>
-    private static bool CatchesLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
-        return fsm.LastTransition is { } transition && transition.ToState == toState.Name &&
-               fsm.ActiveState is { } from && IsCatchWay(from, transition) && Fsm.EventData?.SentByFsm is { } part &&
-               (part == fsm
-                   ? IsGrabWay(from, transition) && !OwnCreatures.PlaysSceneHostsStep(fsm)
-                   : part.GameObject is { } catcher && catcher != null &&
-                     (OwnCreatures.Owning(catcher) is { } owner
-                         ? owner == creature
-                         : CoopHits.IsRoomObject(catcher.transform)));
+    private bool CatchesLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
+        if (fsm.LastTransition is not { } transition || transition.ToState != toState.Name ||
+            fsm.ActiveState is not { } from || !IsCatchWay(from, transition)) {
+            return false;
+        }
+
+        if (Fsm.EventData?.SentByFsm is not { } part) {
+            return _othersCatchWay?.Fsm != fsm && !OwnCreatures.PlaysSceneHostsStep(fsm) &&
+                   FeltThroughWatched(fsm, from, transition.EventName);
+        }
+
+        return part == fsm
+            ? IsGrabWay(from, transition) && !OwnCreatures.PlaysSceneHostsStep(fsm)
+            : part.GameObject is { } catcher && catcher != null &&
+              (OwnCreatures.Owning(catcher) is { } owner
+                  ? owner == creature
+                  : CoopHits.IsRoomObject(catcher.transform));
+    }
+
+    /// <summary>
+    /// Whether a state of a state machine of a creature goes on by an event as it feels this game's player touch an
+    /// object other than its own that it watches, like the cage of the large fly of the prison, which its stomp watches
+    /// for the player: the object tells the state machine of the touch through a component of its own, which no state
+    /// machine sends (see TouchedByLocalPlayer), and the partner's figure touches nothing here, so a touch of the
+    /// object now is this game's player's (see Entity.TouchesTheLocalPlayer).
+    /// </summary>
+    private static bool FeltThroughWatched(Fsm fsm, FsmState from, string eventName) {
+        foreach (var action in from.Actions) {
+            if (FeelsTouch(action, out _) && !FeelsLeaving(action) && Sends(action, eventName) &&
+                TouchObjectOf(action) is { OwnerOption: OwnerDefaultOption.SpecifyGameObject } watched &&
+                fsm.GetOwnerDefaultTarget(watched) is { } watchedObject && watchedObject != null &&
+                Entity.Entity.TouchesTheLocalPlayer(watchedObject)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -783,6 +818,17 @@ internal partial class CoopSave {
             $"[Own creatures] '{leap.Place}' is through its {leap.What} in '{fsm.Name}', as it goes to " +
             $"'{toState.Name}'"
         );
+
+        // A cage of the creature's that has this game's player lets go of the others as well, whom it holds, as the
+        // creature goes out of its catch by a way that every state has, like the death that the partner's blow dealt
+        // it in their game, which lets go of this game's player too (see CoopSave.PrisonCapture): the others were held
+        // for as long as the cage could take at the most. The capture is the last state of the catch, where it rests,
+        // which no move counts in, and lets go of nobody
+        if (_ownCatch is { } caged && caged.By == fsm && fsm.LastTransition is { } way &&
+            fsm.GlobalTransitions.Contains(way)) {
+            LetGoOfOwnCatch($"'{leap.Place}' went out of its catch into '{toState.Name}' of '{fsm.Name}'");
+        }
+
         return leap.Led;
     }
 

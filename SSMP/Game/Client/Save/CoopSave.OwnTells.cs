@@ -174,13 +174,21 @@ internal partial class CoopSave {
     /// a field for its object hears of it through a component that it puts on the object.
     /// </summary>
     private static bool FeelsOnOwner(FsmStateAction action) {
+        return TouchObjectOf(action) is { OwnerOption: OwnerDefaultOption.UseOwner };
+    }
+
+    /// <summary>
+    /// The object on which an action that feels what touches it feels it, as the action names it, or null for one
+    /// without a field for it (see <see cref="FeelsOnOwner"/>).
+    /// </summary>
+    private static FsmOwnerDefault? TouchObjectOf(FsmStateAction action) {
         var type = action.GetType();
         if (!TouchObjectFields.TryGetValue(type, out var objectField)) {
             objectField = type.GetField("gameObject", BindingFlags.Instance | BindingFlags.Public);
             TouchObjectFields[type] = objectField;
         }
 
-        return objectField?.GetValue(action) is FsmOwnerDefault { OwnerOption: OwnerDefaultOption.UseOwner };
+        return objectField?.GetValue(action) as FsmOwnerDefault;
     }
 
     /// <summary>

@@ -48,6 +48,12 @@ internal static class EntityRegistry {
     private static readonly HashSet<string> AnyGrabEvents = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Every event that an entry names as one with which its entity catches whoever touches what it watches (see
+    /// <see cref="EntityRegistryEntry.CatchEvents"/>), by which an event that none names is told at once.
+    /// </summary>
+    private static readonly HashSet<string> AnyCatchEvents = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// For each type of entity whose entry names any, the FSMs that each game runs by itself from a state on, with that
     /// state (see <see cref="EntityRegistryEntry.EachGameFrom"/>).
     /// </summary>
@@ -105,6 +111,20 @@ internal static class EntityRegistry {
     /// </summary>
     public static bool IsGrabEventOf(GameObject creature, string eventName) {
         return TryGetEntry(creature, out var entry) && entry.GrabEvents?.Contains(eventName) == true;
+    }
+
+    /// <summary>
+    /// Whether an event is one that the entry of any kind names as one with which its entity catches whoever touches
+    /// what it watches (see <see cref="EntityRegistryEntry.CatchEvents"/>).
+    /// </summary>
+    public static bool IsAnyCatchEvent(string eventName) => AnyCatchEvents.Contains(eventName);
+
+    /// <summary>
+    /// Whether an event is one with which the given creature catches whoever touches what it watches, as the entry of
+    /// its kind names it (see <see cref="EntityRegistryEntry.CatchEvents"/>).
+    /// </summary>
+    public static bool IsCatchEventOf(GameObject creature, string eventName) {
+        return TryGetEntry(creature, out var entry) && entry.CatchEvents?.Contains(eventName) == true;
     }
 
     /// <summary>
@@ -210,6 +230,10 @@ internal static class EntityRegistry {
 
             if (entry.GrabEvents != null) {
                 AnyGrabEvents.UnionWith(entry.GrabEvents);
+            }
+
+            if (entry.CatchEvents != null) {
+                AnyCatchEvents.UnionWith(entry.CatchEvents);
             }
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {

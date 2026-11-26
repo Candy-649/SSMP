@@ -411,12 +411,10 @@ internal partial class CoopSave {
         }
 
         // The way of a catch of another player's that this game plays is one from outside the state machine, which
-        // it takes as it runs (see CoopSave.OwnCatches)
-        if (_othersCatchWay is { } othersCatch && othersCatch.Fsm == self) {
-            _othersCatchWay = null;
-            if (self.LastTransition == othersCatch.Way && Fsm.EventData != null) {
-                Fsm.EventData.SentByFsm = null;
-            }
+        // it takes as it runs (see CoopSave.OwnCatches), and which stays marked as such through the switch
+        if (_othersCatchWay is { } othersCatch && othersCatch.Fsm == self && self.LastTransition == othersCatch.Way &&
+            Fsm.EventData != null) {
+            Fsm.EventData.SentByFsm = null;
         }
 
         // A living creature that a player's put-back would send back to where it started, while another player is in
@@ -509,7 +507,7 @@ internal partial class CoopSave {
         // goes after, as a part of it that tells it so does (see RefuseCatch), but for a catch of whoever touches what
         // it watches (see CatchesWhoeverTouches)
         if (CatchesLocalPlayer(self, toState, creature) &&
-            OwnCreatures.Owning(Fsm.EventData!.SentByFsm!.GameObject) is { } catching &&
+            OwnCreatures.Owning(Fsm.EventData?.SentByFsm?.GameObject ?? creature) is { } catching &&
             !GoesAfterLocalPlayer(catching) && !CatchesWhoeverTouches(catching, self.LastTransition!.EventName)) {
             RefuseCatch(self, catching, toState);
             return;

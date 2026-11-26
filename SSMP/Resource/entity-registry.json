@@ -2150,6 +2150,7 @@
   {
     "base_object_name": "Slab Fly Large Cage",
     "type": "Wardenfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2162,6 +2163,9 @@
     ],
     "catch_events": [
       "CATCH"
+    ],
+    "each_game_fsms": [
+      "Taunt Detect"
     ]
   },
   {

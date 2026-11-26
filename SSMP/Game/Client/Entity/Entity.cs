@@ -4217,7 +4217,7 @@ internal partial class Entity {
     /// <param name="part">The part.</param>
     /// <param name="hitBoxOnly">Whether only the hit box counts, for a part that waits for the hit box by its tag, the
     /// way the game's own trigger of it does: the body of the player does not set it off.</param>
-    private static bool TouchesTheLocalPlayer(GameObject part, bool hitBoxOnly = false) {
+    internal static bool TouchesTheLocalPlayer(GameObject part, bool hitBoxOnly = false) {
         var hero = HeroController.SilentInstance;
         if (hero == null) {
             return false;
