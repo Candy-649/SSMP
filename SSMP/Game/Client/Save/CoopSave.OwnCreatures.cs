@@ -178,6 +178,13 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, HashSet<string>> _countedValues = new();
 
     /// <summary>
+    /// The variables that the machines of each loaded room that run by the scene host's word set on other state
+    /// machines, by the name of the state machine and of the variable, found as a state of a creature that every game
+    /// runs by itself is first looked at in the room (see GoesByMachineValue).
+    /// </summary>
+    private readonly Dictionary<string, HashSet<(string Fsm, string Variable)>> _machineSetValues = new();
+
+    /// <summary>
     /// Whether each state machine of a creature that every game runs by itself whose steps this game has taken makes
     /// moves of it (see MakesMoves).
     /// </summary>
@@ -1789,12 +1796,77 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether the others wait for a step that a state machine of a creature that every game runs by itself takes now,
-    /// in the games that follow the scene host's: one out of a state that goes by where the players are or by a count
-    /// that each game keeps for itself, or one that another state machine told it.
+    /// in the games that follow the scene host's: one out of a state that goes by where the players are, by a count
+    /// that each game keeps for itself or by a value that a machine of the room sets on it, or one that another state
+    /// machine told it.
     /// </summary>
     private bool IsWaitedFor(Fsm fsm) {
-        return fsm.ActiveState is { } from && (GoesByPlayers(from) || ChoosesByCount(from)) ||
+        return fsm.ActiveState is { } from &&
+               (GoesByPlayers(from) || ChoosesByCount(from) || GoesByMachineValue(from)) ||
                Fsm.EventData?.SentByFsm is { } sender && sender != fsm;
+    }
+
+    /// <summary>
+    /// Whether a state chooses its way on by a value that a machine of the room that runs by the scene host's word sets
+    /// on its state machine (see CoopSave.PacedMachines, CoopSave.DirectedFights), like the flag by which the foremen
+    /// of the docks leap out of the way of the lava that the fall of their fight pours. A game that follows the scene
+    /// host's starts each round of such a machine at the scene host's word, a moment late, and sets the value as late:
+    /// its foremen, back at their rest in that moment, found the lava still coming and leapt away from lava that the
+    /// scene host's foremen knew was gone, to be put back at the scene host's next step (review of 790db7f). The scene
+    /// host's step is the one.
+    /// </summary>
+    private bool GoesByMachineValue(FsmState state) {
+        var fsm = state.Fsm;
+        var room = fsm.GameObject.scene;
+        if (!_machineSetValues.TryGetValue(room.name, out var set)) {
+            set = [];
+            foreach (var root in room.GetRootGameObjects()) {
+                foreach (var machine in root.GetComponentsInChildren<PlayMakerFSM>(true)) {
+                    if (FindMachineKind(machine.gameObject, machine.FsmName) == null) {
+                        continue;
+                    }
+
+                    foreach (var each in machine.FsmStates) {
+                        foreach (var action in each.Actions) {
+                            if (VariableSetOnAnother(action) is { } written) {
+                                set.Add(written);
+                            }
+                        }
+                    }
+                }
+            }
+
+            _machineSetValues[room.name] = set;
+        }
+
+        if (set.Count == 0) {
+            return false;
+        }
+
+        foreach (var action in state.Actions) {
+            if (action.Enabled && Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
+                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(name => set.Contains((fsm.Name, name)))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The state machine and the variable of it that an action sets a switch or a number of, on another state machine
+    /// than its own, or null for an action that sets none.
+    /// </summary>
+    private static (string Fsm, string Variable)? VariableSetOnAnother(FsmStateAction action) {
+        var (fsmName, variableName) = action switch {
+            HutongGames.PlayMaker.Actions.SetFsmBool set => (set.fsmName, set.variableName),
+            HutongGames.PlayMaker.Actions.SetFsmInt set => (set.fsmName, set.variableName),
+            HutongGames.PlayMaker.Actions.SetFsmFloat set => (set.fsmName, set.variableName),
+            _ => (null, null)
+        };
+        return fsmName?.Value is { Length: > 0 } fsm && variableName?.Value is { Length: > 0 } variable
+            ? (fsm, variable)
+            : null;
     }
 
     /// <summary>

@@ -813,6 +813,7 @@ internal partial class CoopSave {
         _heldOwnSteps.Clear();
         _playerWayValues.Clear();
         _countedValues.Clear();
+        _machineSetValues.Clear();
         _makesMoves.Clear();
         _putsItself.Clear();
         _fightsOn.Clear();
