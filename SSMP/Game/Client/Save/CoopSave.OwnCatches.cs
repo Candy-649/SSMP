@@ -309,13 +309,16 @@ internal partial class CoopSave {
     /// player it caught, as it goes into a catch of another player, of which the given state is the first, until it is
     /// through the move of the catch (see Entity.Action.EntityFsmActions.MoveFrom): the knight, as it held another
     /// player for its blows, pulled this game's player up to it too. So is what it does to the player whose silk it
-    /// looks at, in the move from the look (see CoopSave.OwnSilkLooks).
+    /// looks at, in the move from the look (see CoopSave.OwnSilkLooks), and its putting out of the note of a grab of
+    /// this game's player that it did not take yet (see <see cref="GrabNotesPutOutIn"/>).
     /// </summary>
     private void KeepOut(Fsm fsm, FsmState toState) {
         var states = Entity.Action.EntityFsmActions.MoveFrom(fsm, toState);
         var muted = Entity.Action.EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(
             action => states.Contains(action.State)
         );
+        var notes = GrabNotesPutOutIn(fsm, states);
+        muted.AddRange(notes);
         foreach (var action in muted) {
             action.Enabled = false;
         }
@@ -324,7 +327,9 @@ internal partial class CoopSave {
         Logger.Info(
             $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' goes into '{toState.Name}' of '{fsm.Name}', a " +
             $"catch of another player, with {muted.Count} of what it does to the player caught kept off the local " +
-            "player"
+            "player" + (notes.Exists(note => ((SetBoolValue) note).boolVariable.Value)
+                ? ", and the note of a grab of the local player that it did not take yet, which it takes after it"
+                : "")
         );
 
         // What it tells its other state machines in the catch, which they go into here too, as it tells them here or
@@ -340,6 +345,40 @@ internal partial class CoopSave {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The actions in the given states of a state machine that put out its note that a thing of the creature's own
+    /// grabbed the player, which it looks at to go into the grab (see <see cref="GrabEvents"/>): only this game's
+    /// player sets the note off here, so in a catch of another player its putting out is this game's player's own,
+    /// kept off them as what the catch does to the player caught (see <see cref="KeepOut"/>). The lost one of the
+    /// cocoon puts it out as its cross slash starts: played for another player caught, the slash put out the note of
+    /// a grab of this game's player by its catcher that it had not looked at yet, and the catcher held them for good,
+    /// as the slash's letting go was kept off them (review of 9159c72: two players caught at once). Kept, the note
+    /// takes the creature into the grab of this game's player at its next look, once it is through the other's.
+    /// </summary>
+    private static List<FsmStateAction> GrabNotesPutOutIn(Fsm fsm, HashSet<FsmState> states) {
+        var notes = new HashSet<string>();
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                if (action is BoolTest { boolVariable.Name: { Length: > 0 } note, isTrue.Name: { } grab } &&
+                    GrabEvents.Contains(grab)) {
+                    notes.Add(note);
+                }
+            }
+        }
+
+        var found = new List<FsmStateAction>();
+        foreach (var state in states) {
+            foreach (var action in state.Actions) {
+                if (action is SetBoolValue { Enabled: true, boolVariable.Name: { } note, boolValue.Value: false } &&
+                    notes.Contains(note)) {
+                    found.Add(action);
+                }
+            }
+        }
+
+        return found;
     }
 
     /// <summary>
