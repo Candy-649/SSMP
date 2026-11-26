@@ -476,6 +476,7 @@
   {
     "base_object_name": "Slab Fly Broodmother",
     "type": "Broodmother",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -498,6 +499,7 @@
   {
     "base_object_name": "Slab Fly Small Fresh",
     "type": "Freshfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2134,6 +2136,7 @@
   {
     "base_object_name": "Slab Fly Large",
     "type": "Wardenfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2141,7 +2144,19 @@
     "internal_name": "Slab Fly Large",
     "fsm_names": [
       "Control",
-      "Place Key Item On Death",
+      "Place Key Item On Death"
+    ]
+  },
+  {
+    "base_object_name": "Slab Fly Large Cage",
+    "type": "Wardenfly",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Slab Fly Large Cage",
+    "fsm_names": [
+      "Control",
       "Take Silk",
       "Taunt Detect"
     ],
@@ -2701,6 +2716,7 @@
   {
     "base_object_name": "Slab Fly Mid",
     "type": "Guardfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
