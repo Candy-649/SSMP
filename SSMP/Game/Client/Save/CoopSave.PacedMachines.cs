@@ -344,6 +344,12 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, (FsmState From, FsmState To, float Since)> _heldMachines = new();
 
     /// <summary>
+    /// How many rounds the scene host's word started on each machine here that waits for the word for as long as it
+    /// takes, before anything here told it into them (see <see cref="HoldMachineRound"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, int> _roundsBeforeTells = new();
+
+    /// <summary>
     /// The scene host's words that came while their machine here was in the middle of a round, the newest for each,
     /// which the machine takes as the round ends.
     /// </summary>
@@ -700,6 +706,21 @@ internal partial class CoopSave {
     /// </summary>
     private void HoldMachineRound(Fsm fsm, FsmState toState) {
         MachineSwitchToStateField?.SetValue(fsm, null);
+
+        // A round that something outside the machine tells it into here after the scene host's word started it ran
+        // already: held, it waited for a word that never came, and set off a round more as this game came to run the
+        // room (review of 81641bc: a cage of the giant bone flyer that landed here after the scene host's word told
+        // the summoner to summon, which, held, summoned once more at its old spot)
+        if (Fsm.EventData?.SentByFsm is { } teller && teller != fsm &&
+            _roundsBeforeTells.TryGetValue(fsm, out var before) && before > 0) {
+            _roundsBeforeTells[fsm] = before - 1;
+            Logger.Info(
+                $"The machine '{fsm.GameObject.name}' is told into '{toState.Name}' by '{teller.Name}' here, a round " +
+                "that the scene host's word started already"
+            );
+            return;
+        }
+
         if (!_heldMachines.TryGetValue(fsm, out var held) || held.From != fsm.ActiveState) {
             _heldMachines[fsm] = (fsm.ActiveState, toState, Time.unscaledTime);
         }
@@ -764,6 +785,11 @@ internal partial class CoopSave {
         // A state that the controller of a fight doesn't have is nothing to go into, and leaves it waiting as it was
         if (kind.IsDirector && fsm.GetState(update.StateName) == null) {
             return true;
+        }
+
+        // A round of one that waits for the word for as long as it takes, which nothing here told it into yet
+        if (!isHeld && kind.HoldLimit is float.PositiveInfinity) {
+            _roundsBeforeTells[fsm] = _roundsBeforeTells.GetValueOrDefault(fsm) + 1;
         }
 
         _heldMachines.Remove(fsm);
@@ -1190,6 +1216,7 @@ internal partial class CoopSave {
     /// </summary>
     private void ResetMachines() {
         _heldMachines.Clear();
+        _roundsBeforeTells.Clear();
         _pendingMachineRounds.Clear();
         _wordsInStart.Clear();
         _takenMachineRounds.Clear();

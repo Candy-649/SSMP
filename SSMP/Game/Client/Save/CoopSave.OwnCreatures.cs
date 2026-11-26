@@ -409,8 +409,8 @@ internal partial class CoopSave {
             return;
         }
 
-        // The way of a catch of another player's that this game plays is one from outside the state machine, also as
-        // it is taken after the step in which this game played it (see CoopSave.OwnCatches)
+        // The way of a catch of another player's that this game plays is one from outside the state machine, which
+        // it takes as it runs (see CoopSave.OwnCatches)
         if (_othersCatchWay is { } othersCatch && othersCatch.Fsm == self) {
             _othersCatchWay = null;
             if (self.LastTransition == othersCatch.Way && Fsm.EventData != null) {

@@ -639,22 +639,26 @@ internal static partial class EntityFsmActions {
     /// end, like the wait for the next move (review of the user's log: as only the states that its first state alone
     /// leads to, the knight's catch for its blows was over at the hold, whose way on waited for a step of the scene
     /// host's that never came, with the player held there). Other states may start moves of their own as these do:
-    /// the move ends at them, and a state that one of them and the move both go on into is the move's too.
+    /// the move ends at them, and a state that one of them and the move both go on into is the move's too, and so is
+    /// one that the move goes on into which the moves of those others lead into otherwise, where those are given.
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="first">The first state of the move.</param>
     /// <param name="startsMove">Whether a state other than those where the FSM rests starts a move of its own, or
     /// null if none does.</param>
+    /// <param name="ofOtherMoves">Whether a state is of the move of a state that starts a move of its own, or null
+    /// for none.</param>
     internal static HashSet<FsmState> MoveFrom(
         HutongGames.PlayMaker.Fsm fsm,
         FsmState first,
-        Func<FsmState, bool>? startsMove = null
+        Func<FsmState, bool>? startsMove = null,
+        Func<FsmState, bool>? ofOtherMoves = null
     ) {
         var move = startsMove == null
             ? StatesOnlyThrough(fsm, [first], Rests, Rests)
             : StatesOnlyThrough(
                 fsm, [first], state => Rests(state) || state != first && startsMove(state),
-                state => Rests(state) || startsMove(state)
+                state => Rests(state) || startsMove(state) || ofOtherMoves?.Invoke(state) == true
             );
         move.RemoveWhere(state => state != first && Rests(state));
         return move;
