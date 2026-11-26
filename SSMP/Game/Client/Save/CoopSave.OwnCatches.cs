@@ -1124,7 +1124,11 @@ internal partial class CoopSave {
         // Taken at once, as the state machine runs: played as the creature gets to the state that the catch came from
         // there (see TakeEarlyCatch), the way waited for the step in which it was taken to end, and the led steps of a
         // grab that came before it were taken first, which let go of the way: the catch never played here, nor in the
-        // games that follow this one (review of 635f0d8)
+        // games that follow this one (review of 635f0d8). A switch that the state set off as it ended at once, as the
+        // creature got there, is let go of: their game took the catch from that state, and the game takes no event
+        // while a switch is to be made, so the catch went nowhere, and the creature went on as the game had it
+        // (review of ec079f9)
+        MachineSwitchToStateField?.SetValue(fsm, null);
         _othersCatchWay = (fsm, way);
         try {
             fsm.DoAsItRuns(() => fsm.Event(way.FsmEvent));

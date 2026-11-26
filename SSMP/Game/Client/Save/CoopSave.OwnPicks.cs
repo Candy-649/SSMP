@@ -204,7 +204,10 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The numbers in a state of the actions that pick a child of an object at random into a variable through which a
-    /// later action of the state tells it something (see <see cref="ChildPicks"/>).
+    /// later action of the state tells it something (see <see cref="ChildPicks"/>), at once or a moment later: the step
+    /// tells which child it picked, which a tell a moment later tells as much (review of b48cf5a: the roar of the boss
+    /// that sends out spears, which sends one out a moment after it picks it, picked its own in a game that follows,
+    /// and the next state, which took the scene host's pick, sent the same spear out again as another stayed).
     /// </summary>
     private static IEnumerable<int> ChildPicksIn(FsmState state) {
         var actions = state.Actions;
@@ -216,7 +219,7 @@ internal partial class CoopSave {
             }
 
             for (var j = i + 1; j < actions.Length; j++) {
-                if (actions[j].Enabled && PickedVariable(actions[j]) == kept.Name) {
+                if (actions[j].Enabled && PickedVariable(actions[j], true) == kept.Name) {
                     yield return i;
                     break;
                 }
@@ -227,20 +230,33 @@ internal partial class CoopSave {
     /// <summary>
     /// Picks, in the scene host's game, the children that a state machine of a creature that every game runs by itself
     /// picks at random in a state that it goes into, for its actions to pick them there and for the step to tell them
-    /// (see <see cref="ChildPicks"/>).
+    /// (see <see cref="ChildPicks"/>). A child that an earlier action of the state picked is not picked again: in the
+    /// game, what the state tells it takes it out of the object before the next pick, as the spike that the boss sends
+    /// out of its folder leaves it at once, and picked twice at the start, the second spike went nowhere, one fewer in
+    /// every game (review of b48cf5a). Of the three of its last phase, the second waits a moment before it leaves,
+    /// which the game may pick again for the third, sending out two: here it sends out three.
     /// </summary>
     private static void PickChildren(Fsm fsm, FsmState state) {
         Dictionary<int, GameObject?>? picks = null;
         foreach (var index in ChildPicksIn(state)) {
             var from = fsm.GetOwnerDefaultTarget(((GetRandomChild) state.Actions[index]).gameObject);
-            var count = from != null ? from.transform.childCount : 0;
+            var left = new List<GameObject>();
+            if (from != null) {
+                foreach (Transform each in from.transform) {
+                    if (picks == null || !picks.ContainsValue(each.gameObject)) {
+                        left.Add(each.gameObject);
+                    }
+                }
+            }
+
             picks ??= new Dictionary<int, GameObject?>();
-            var child = count > 0 ? from!.transform.GetChild(ChildDice.Next(count)).gameObject : null;
+            var child = left.Count > 0 ? left[ChildDice.Next(left.Count)] : null;
             picks[index] = child;
             Logger.Info(
                 $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' picks " +
                 (child != null ? $"'{child.name}'" : "nothing") + $" at '{state.Name}' of '{fsm.Name}', " +
-                $"of {count} child(ren), which the step tells the members in the room"
+                $"of {left.Count} child(ren) that it did not pick there yet, which the step tells the members in " +
+                "the room"
             );
         }
 
@@ -311,6 +327,21 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Reads past the children that the scene host's game picked as its state machine went into the state of a step
+    /// (see <see cref="WriteChildPicks"/>) that this game took already: kept, they were picked again where it went
+    /// through the same state later on its way to another step of the scene host's (review of b48cf5a).
+    /// </summary>
+    private static void SkipChildPicks(BinaryReader reader) {
+        var count = reader.ReadInt32();
+        for (var i = 0; i < count; i++) {
+            reader.ReadInt32();
+            if (reader.ReadByte() != ChildNone) {
+                reader.ReadString();
+            }
+        }
+    }
+
+    /// <summary>
     /// Hook for an action that picks a child of an object at random, which picks the child that the scene host's game
     /// picked, where it has one for it (see <see cref="ChildPicks"/>), and none where the object had none there, as the
     /// game picks none then.
@@ -347,10 +378,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The variable that holds the object which an action tells something once and at once, or null for an action
-    /// that tells nothing so.
+    /// The variable that holds the object which an action tells something once and at once, or, where it may tell it
+    /// at any time, whenever it does, or null for an action that tells nothing so.
     /// </summary>
-    private static string? PickedVariable(FsmStateAction action) {
+    private static string? PickedVariable(FsmStateAction action, bool anyTime = false) {
         return TellOf(action) is (
                    {
                        target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM,
@@ -359,7 +390,7 @@ internal partial class CoopSave {
                            GameObject: { UseVariable: true, Name.Length: > 0 } held
                        }
                    },
-                   { Length: > 0 }, true)
+                   { Length: > 0 }, var once) && (once || anyTime)
             ? held.Name
             : null;
     }

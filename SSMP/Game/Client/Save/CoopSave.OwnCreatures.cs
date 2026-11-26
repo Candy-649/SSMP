@@ -1603,7 +1603,7 @@ internal partial class CoopSave {
                 ToldValues.Read(reader);
                 SharedDice.PutPastPicks(reader, fsm);
                 SharedDice.SetBounces(creature, reader.ReadInt32());
-                ReadChildPicks(reader, fsm, update);
+                SkipChildPicks(reader);
                 GamePatcher.PutWalk(reader, creature);
             }
 
