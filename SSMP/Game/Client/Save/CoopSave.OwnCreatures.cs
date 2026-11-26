@@ -883,12 +883,16 @@ internal partial class CoopSave {
             : GamePatcher.TargetOf(machine.gameObject);
         var beside = target != null ? target.transform.position - step.Place : Vector3.zero;
 
-        // The first step of a state machine leaves no state
+        // The first step of a state machine leaves no state. What it worked out goes, and the objects that it found by
+        // where a player is (see LooksAtPlayersAtTimes)
         var worked = fsm.ActiveState is { } state
             ? ToldValues.Of(
                 fsm,
-                state.Actions.Where(action => action.Enabled)
-                    .SelectMany(Entity.Action.EntityFsmActions.ValueVariablesOf).Concat(setOnIt ?? []).Distinct()
+                state.Actions.Where(action => action.Enabled).SelectMany(
+                    action => Entity.Action.EntityFsmActions.ValueVariablesOf(action).Concat(
+                        LooksAtPlayersAtTimes(action) ? ToldValues.ObjectsStoredBy(action) : []
+                    )
+                ).Concat(setOnIt ?? []).Distinct()
             )
             : ToldValues.None;
         using var stream = new MemoryStream();
@@ -1909,13 +1913,17 @@ internal partial class CoopSave {
     /// lets them go, which reads where they are and puts them back within it. A creature that digs under the ground
     /// bursts out where the player is along it, which each game has a little elsewhere: it would come out in another
     /// place in each game until the scene host's next step put it where the scene host's came out (11-16 survey; USER
-    /// 11-24 "可以把更多的怪本地化吗"). One that only keeps an object, like a player in a variable or the nearest thing
-    /// of a kind, works out no number to tell.
+    /// 11-24 "可以把更多的怪本地化吗"). So does one that finds an object by where that player is, like the platform
+    /// nearest them that the small bone hunter comes up out of, which the step tells (see Entity.ToldValues): each
+    /// game would find its own, by where it has the player, and the hunter would come up out of another platform where
+    /// the player stands between two, until the scene host's next step put it where the scene host's was. One that
+    /// only keeps an object, like a player in a variable, works out nothing to tell.
     /// </summary>
     private static bool LooksAtPlayersAtTimes(FsmStateAction action) {
         return Entity.Action.ActionRegistry.TargetedWherePlayerActionTypes.Contains(action.GetType().Name) &&
                (Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) ||
-                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any()) &&
+                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any() ||
+                ToldValues.ObjectsStoredBy(action).Any()) &&
                GamePatcher.LooksAtAPlayerByMake(action) &&
                !Entity.Action.EntityFsmActions.DealsWithThePlayerIn(action.State);
     }

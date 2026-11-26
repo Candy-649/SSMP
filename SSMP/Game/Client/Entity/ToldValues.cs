@@ -14,7 +14,8 @@ namespace SSMP.Game.Client.Entity;
 /// what the part set on it, and the scene host's FSM needs the same set before it plays the catch too (see
 /// <see cref="Entity.TakeInput"/>). Being there at all, even with nothing in it, says that an input is a catch. The
 /// same carries what the state that a creature that every game runs by itself leaves worked out, with the step of the
-/// scene host's creature (see CoopSave.OwnCreatures).
+/// scene host's creature (see CoopSave.OwnCreatures), and an object placed in the room that it picked, like the
+/// platform nearest the player that a creature comes up out of, by its path there (see <see cref="RoomObject"/>).
 /// </summary>
 internal sealed class ToldValues {
     /// <summary>
@@ -33,6 +34,12 @@ internal sealed class ToldValues {
     /// </summary>
     private static readonly Dictionary<Type, (FieldInfo Target, FieldInfo FsmName, FieldInfo VariableName)?>
         SetterFields = new();
+
+    /// <summary>
+    /// The fields of each kind of action in which it stores an object that it found, by type (see
+    /// <see cref="ObjectsStoredBy"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ObjectStoreFields = new();
 
     /// <summary>
     /// The values, by the name of their variable.
@@ -133,6 +140,32 @@ internal sealed class ToldValues {
                 case Vector3 vector when variables.FindFsmVector3(name) is { } variable:
                     variable.Value = vector;
                     break;
+                case RoomObject thing when variables.FindFsmGameObject(name) is { } variable &&
+                                           ScenePath.Find(thing.Path, thing.Scene) is { } found:
+                    variable.Value = found;
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The names of the variables of its FSM in which an action stores an object that it found, like the nearest of a
+    /// kind (see CoopSave.OwnCreatures).
+    /// </summary>
+    public static IEnumerable<string> ObjectsStoredBy(FsmStateAction action) {
+        var type = action.GetType();
+        if (!ObjectStoreFields.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(
+                type.GetFields(BindingFlags.Instance | BindingFlags.Public),
+                field => field.FieldType == typeof(FsmGameObject) &&
+                         field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase)
+            );
+            ObjectStoreFields[type] = fields;
+        }
+
+        foreach (var field in fields) {
+            if (field.GetValue(action) is FsmGameObject { UseVariable: true, Name.Length: > 0 } variable) {
+                yield return variable.Name;
             }
         }
     }
@@ -172,6 +205,11 @@ internal sealed class ToldValues {
                     writer.Write(vector.y);
                     writer.Write(vector.z);
                     break;
+                case RoomObject thing:
+                    writer.Write((byte) VariableType.GameObject);
+                    writer.Write(thing.Scene);
+                    writer.Write(thing.Path);
+                    break;
             }
         }
     }
@@ -192,6 +230,7 @@ internal sealed class ToldValues {
                 VariableType.String => reader.ReadString(),
                 VariableType.Vector2 => new Vector2(reader.ReadSingle(), reader.ReadSingle()),
                 VariableType.Vector3 => new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                VariableType.GameObject => new RoomObject(reader.ReadString(), reader.ReadString()),
                 var kind => throw new IOException($"A told value of the kind {kind} is never written")
             };
             values.Add((name, value));
@@ -211,8 +250,28 @@ internal sealed class ToldValues {
             FsmString text => text.Value ?? "",
             FsmVector2 vector => vector.Value,
             FsmVector3 vector => vector.Value,
+            FsmGameObject { Value: { } thing } when thing != null => RoomObject.Of(thing),
             _ => null
         };
+    }
+
+    /// <summary>
+    /// An object placed in the room, by its scene and its path there (see ScenePath), which finds the same object in
+    /// every game.
+    /// </summary>
+    private sealed record RoomObject(string Scene, string Path) {
+        /// <summary>
+        /// The object as one placed in the room, or null for one that is not: a player, kept across rooms, or one made
+        /// as the room went on, which each game makes by itself.
+        /// </summary>
+        public static RoomObject? Of(GameObject thing) {
+            if (!thing.scene.IsValid() || thing.scene.name == "DontDestroyOnLoad") {
+                return null;
+            }
+
+            var path = ScenePath.Get(thing.transform);
+            return path.Contains("(Clone)") ? null : new RoomObject(thing.scene.name, path);
+        }
     }
 
     /// <summary>
