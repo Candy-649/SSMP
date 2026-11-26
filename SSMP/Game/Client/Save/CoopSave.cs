@@ -856,6 +856,7 @@ internal partial class CoopSave {
         _partStepsInLeap.Clear();
         _earlyCatches.Clear();
         _othersCatchWay = null;
+        ChildPicks.Clear();
         _earlyHits.Clear();
         _tellsTaken.Clear();
         _toolChecks.Clear();

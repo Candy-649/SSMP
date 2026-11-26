@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
@@ -26,6 +28,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// parts it picks so itself, and tells the one that the scene host's game picked as it is told (review: it went into
 /// the second pick of a move by itself, before or after the word came, and what it told until the word came was
 /// named by one less).
+///
+/// So goes a child of an object of the room that a creature picks at random and then tells something, like the wasp
+/// that the hive takes out of those that lie in it to send it out (see <see cref="ChildPicks"/>): the scene host's game
+/// picks it as the creature goes into the state, the step tells which, and every game that follows picks that one as
+/// the step comes, and goes into the state only as it comes.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -33,6 +40,12 @@ internal partial class CoopSave {
     /// told in the scene host's game, which it picked by where a player is (see <see cref="TellOwnPick"/>).
     /// </summary>
     private const ushort OwnPickPart = 7;
+
+    /// <summary>
+    /// How a child that the scene host's game picked is written (see <see cref="WriteChildPicks"/>): none, by its
+    /// place, or by its path.
+    /// </summary>
+    private const byte ChildNone = 0, ChildByPlace = 1, ChildByPath = 2;
 
     /// <summary>
     /// The fields of each kind of action through which it looks at an object or keeps one (see
@@ -52,6 +65,28 @@ internal partial class CoopSave {
     /// game, from just before the action tells it to just after (see <see cref="OwnPickOf"/>).
     /// </summary>
     private int _pickTells;
+
+    /// <summary>
+    /// The children that a state machine of a creature that every game runs by itself, or of a part of it, picks at
+    /// random in a state that it goes into, and then tells something (see <see cref="ChildPicksIn"/>): the state, and
+    /// the child that each action that picks one, by its number in the state, picks there, or null where the object
+    /// had none. Each game has the children of an object of the room in an order of its own, and others than another
+    /// game for a moment, as the creatures that leave it and come back do so at other moments in each, and picked
+    /// another from the same roll, which it then told in every game: the giant bone flyer of the second fight sent its
+    /// own pick and the scene host's out of its pack in every game, and the hive sent out a wasp of those that lay in
+    /// it here and another there, which flew there still lying in it (review of 81641bc and 11b3429). The scene host's
+    /// game picks them as the state machine goes into the state, and the step tells them (see
+    /// <see cref="PickChildren"/>, <see cref="WriteChildPicks"/>); a game that follows picks them as the step comes
+    /// (see <see cref="ReadChildPicks"/>).
+    /// </summary>
+    private static readonly Dictionary<Fsm, (string State, Dictionary<int, GameObject?> Picks)> ChildPicks = new();
+
+    /// <summary>
+    /// The dice with which the scene host's game picks the children that a creature picks at random (see
+    /// <see cref="ChildPicks"/>), apart from the game's own, which the dice that every game shares may have set as it
+    /// picks them.
+    /// </summary>
+    private static readonly System.Random ChildDice = new();
 
     /// <summary>
     /// Whether an action of a creature that every game runs by itself, or of a part of it, tells a part of the room
@@ -154,7 +189,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a state of a creature that every game runs by itself, or of a part of it, tells a part of the room which
-    /// it picked by where a player is (see <see cref="PickOf"/>).
+    /// it picked by where a player is (see <see cref="PickOf"/>), or a child that it picked at random (see
+    /// <see cref="ChildPicksIn"/>).
     /// </summary>
     private bool PicksAPart(FsmState state) {
         foreach (var action in state.Actions) {
@@ -163,7 +199,137 @@ internal partial class CoopSave {
             }
         }
 
-        return false;
+        return ChildPicksIn(state).Any();
+    }
+
+    /// <summary>
+    /// The numbers in a state of the actions that pick a child of an object at random into a variable through which a
+    /// later action of the state tells it something (see <see cref="ChildPicks"/>).
+    /// </summary>
+    private static IEnumerable<int> ChildPicksIn(FsmState state) {
+        var actions = state.Actions;
+        for (var i = 0; i < actions.Length; i++) {
+            if (actions[i] is not GetRandomChild {
+                    Enabled: true, storeResult: { UseVariable: true, Name.Length: > 0 } kept
+                }) {
+                continue;
+            }
+
+            for (var j = i + 1; j < actions.Length; j++) {
+                if (actions[j].Enabled && PickedVariable(actions[j]) == kept.Name) {
+                    yield return i;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Picks, in the scene host's game, the children that a state machine of a creature that every game runs by itself
+    /// picks at random in a state that it goes into, for its actions to pick them there and for the step to tell them
+    /// (see <see cref="ChildPicks"/>).
+    /// </summary>
+    private static void PickChildren(Fsm fsm, FsmState state) {
+        Dictionary<int, GameObject?>? picks = null;
+        foreach (var index in ChildPicksIn(state)) {
+            var from = fsm.GetOwnerDefaultTarget(((GetRandomChild) state.Actions[index]).gameObject);
+            var count = from != null ? from.transform.childCount : 0;
+            picks ??= new Dictionary<int, GameObject?>();
+            var child = count > 0 ? from!.transform.GetChild(ChildDice.Next(count)).gameObject : null;
+            picks[index] = child;
+            Logger.Info(
+                $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' picks " +
+                (child != null ? $"'{child.name}'" : "nothing") + $" at '{state.Name}' of '{fsm.Name}', " +
+                $"of {count} child(ren), which the step tells the members in the room"
+            );
+        }
+
+        if (picks != null) {
+            ChildPicks[fsm] = (state.Name, picks);
+        }
+    }
+
+    /// <summary>
+    /// Writes the children that the scene host's game picked for a state machine as it went into the state of a step
+    /// (see <see cref="PickChildren"/>): how many, then for each the number of its action and the child, by its place
+    /// for a creature that every game runs by itself or a part of one, and otherwise by its path, or none.
+    /// </summary>
+    private static void WriteChildPicks(BinaryWriter writer, Fsm fsm, string stateName) {
+        if (!ChildPicks.TryGetValue(fsm, out var pending) || pending.State != stateName) {
+            writer.Write(0);
+            return;
+        }
+
+        writer.Write(pending.Picks.Count);
+        foreach (var (index, child) in pending.Picks) {
+            writer.Write(index);
+            if (child == null) {
+                writer.Write(ChildNone);
+            } else if (OwnCreatures.Has(child) || OwnCreatures.IsPart(child)) {
+                writer.Write(ChildByPlace);
+                writer.Write(OwnCreatures.PlaceOf(child));
+            } else {
+                writer.Write(ChildByPath);
+                writer.Write(ScenePath.Get(child.transform));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads the children that the scene host's game picked as its state machine went into the state of a step (see
+    /// <see cref="WriteChildPicks"/>), for the actions of this game's to pick them as it goes into the state. One that
+    /// is not here, it picks by itself.
+    /// </summary>
+    private static void ReadChildPicks(BinaryReader reader, Fsm fsm, CoopSaveUpdate step) {
+        var count = reader.ReadInt32();
+        var picks = new Dictionary<int, GameObject?>();
+        for (var i = 0; i < count; i++) {
+            var index = reader.ReadInt32();
+            var kind = reader.ReadByte();
+            if (kind == ChildNone) {
+                picks[index] = null;
+                continue;
+            }
+
+            var name = reader.ReadString();
+            var child = kind == ChildByPlace ? OwnCreatures.Find(null, name) : ScenePath.Find(name, step.Scene);
+            if (child != null) {
+                picks[index] = child;
+            }
+
+            Logger.Info(
+                $"[Own creatures] '{step.ObjectPath}' picks '{name}' at '{step.StateName}' of '{fsm.Name}', the " +
+                "child that the scene host's game picked" + (child != null ? "" : ", which is not here")
+            );
+        }
+
+        if (picks.Count > 0) {
+            ChildPicks[fsm] = (step.StateName, picks);
+        } else {
+            ChildPicks.Remove(fsm);
+        }
+    }
+
+    /// <summary>
+    /// Hook for an action that picks a child of an object at random, which picks the child that the scene host's game
+    /// picked, where it has one for it (see <see cref="ChildPicks"/>), and none where the object had none there, as the
+    /// game picks none then.
+    /// </summary>
+    private static void OnChildPick(Action<GetRandomChild> orig, GetRandomChild self) {
+        if (ChildPicks.Count == 0 || self.Fsm is not { } fsm || !ChildPicks.TryGetValue(fsm, out var pending) ||
+            pending.State != self.State.Name ||
+            !pending.Picks.Remove(Array.IndexOf(self.State.Actions, self), out var child)) {
+            orig(self);
+            return;
+        }
+
+        if (pending.Picks.Count == 0) {
+            ChildPicks.Remove(fsm);
+        }
+
+        if (child != null) {
+            self.storeResult.Value = child;
+        }
     }
 
     /// <summary>

@@ -362,6 +362,16 @@ internal partial class CoopSave {
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnOwnCreatureStep)
         ));
 
+        // Its picks of a child of an object of the room at random, which go as the scene host's game picked (see
+        // CoopSave.OwnPicks)
+        _ownCreatureHooks.Add(CreateHook(
+            typeof(HutongGames.PlayMaker.Actions.GetRandomChild).GetMethod(
+                "DoGetRandomChild", flags, null, Type.EmptyTypes, null
+            ),
+            new Action<Action<HutongGames.PlayMaker.Actions.GetRandomChild>,
+                HutongGames.PlayMaker.Actions.GetRandomChild>(OnChildPick)
+        ));
+
         // Its checks of what a player has on (see CoopSave.OwnToolChecks)
         _ownCreatureHooks.Add(CreateHook(
             typeof(HutongGames.PlayMaker.Actions.CheckIfToolEquipped).GetProperty("IsTrue", flags)?.GetGetMethod(true),
@@ -612,7 +622,8 @@ internal partial class CoopSave {
         // something outside the creature tells it here, like a part of the room that this game's player came into,
         // which the scene host's game is told of and plays too (see CoopSave.OwnTells)
         var waitedFor = IsWaitedFor(self);
-        var setOffByStrike = CoopHits.IsMakingLocalStrike && Fsm.EventData?.SentByFsm != self;
+        var teller = Fsm.EventData?.SentByFsm;
+        var setOffByStrike = CoopHits.IsMakingLocalStrike && teller != self;
         var setOffHere = !LeadsMove(self) && !CatchesLocalPlayer(self, toState, creature) &&
                          ToldFromOutside(self, toState, creature);
         var picks = PicksAPart(toState);
@@ -739,7 +750,15 @@ internal partial class CoopSave {
                 $"'{toState.Name}' of '{self.Name}'" + (struck ? " at a blow" : "") +
                 $" after {step.Counts.Count / 2} kinds of rolls, as the members in the room are told"
             );
-            var update = OwnCreatureUpdate(machine, step);
+            // With the children that it picks at random in the state, which the others pick as the step comes (see
+            // CoopSave.OwnPicks), and with what another state machine that told it to go on set on it there, which
+            // the others take with the step: the nest that drops a worm sets on it which nest it is, which it comes
+            // out of, and in a game that follows, whose nest had picked another worm of the pool or none, the worm
+            // came out of a nest it went out of before, or none (review of 5670703)
+            PickChildren(self, toState);
+            var update = OwnCreatureUpdate(
+                machine, step, teller != null && teller != self ? ToldValues.SetBy(teller, creature, machine) : null
+            );
             if (CoopHits.IsReplayingPartnersStrike) {
                 update.PartCount = OwnStruckPart;
                 update.Key = CoopHits.ReplayedStriker;
@@ -939,6 +958,7 @@ internal partial class CoopSave {
             worked.Write(writer);
             SharedDice.WritePastPicks(writer, fsm);
             writer.Write(SharedDice.BouncesOf(machine.gameObject));
+            WriteChildPicks(writer, fsm, step.State);
             GamePatcher.WriteWalk(writer, machine.gameObject);
         }
 
@@ -1583,6 +1603,7 @@ internal partial class CoopSave {
                 ToldValues.Read(reader);
                 SharedDice.PutPastPicks(reader, fsm);
                 SharedDice.SetBounces(creature, reader.ReadInt32());
+                ReadChildPicks(reader, fsm, update);
                 GamePatcher.PutWalk(reader, creature);
             }
 
@@ -1752,6 +1773,7 @@ internal partial class CoopSave {
         SharedDice.PutPastPicks(reader, fsm);
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         SharedDice.SetBounces(creature, reader.ReadInt32());
+        ReadChildPicks(reader, fsm, update);
         if (MovesAt(fsm, update)) {
             // The walk first: the game's own steps of it turn the creature and set it going, which the rest then puts
             // as it was there
