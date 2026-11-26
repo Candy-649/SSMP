@@ -255,10 +255,11 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private readonly HashSet<HealthManager> _blowLanded = [];
 
     /// <summary>
-    /// The bars of the bosses whose FSMs keep their health instead of a HealthManager (see
-    /// <see cref="FsmHealthComponent"/>), by what reads it.
+    /// The bars of the bosses whose FSMs keep their health instead of a HealthManager (see <see cref="FsmHealth"/>), by
+    /// what reads it: the copy's (see <see cref="FsmHealthComponent"/>), or each game's own for a boss that every game
+    /// runs by itself (see OwnCreatures.FsmHealths).
     /// </summary>
-    private readonly Dictionary<FsmHealthComponent, Bar> _fsmBars = new();
+    private readonly Dictionary<FsmHealth, Bar> _fsmBars = new();
 
     /// <summary>
     /// Creates the canvas of the bars and starts drawing them.
@@ -398,6 +399,20 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     }
 
     /// <summary>
+    /// Notes that the bar of a boss whose FSMs keep its health is to be drawn this frame, making it the first time.
+    /// </summary>
+    private void SeeFsmHealth(FsmHealth health) {
+        if (!_fsmBars.TryGetValue(health, out var bar)) {
+            bar = new Bar(
+                health.Creature, () => health.Health, () => health.IsBeaten, health.Full, true, () => health.Full
+            );
+            _fsmBars[health] = bar;
+        }
+
+        bar.SeenFrame = Time.frameCount;
+    }
+
+    /// <summary>
     /// Forgets the bars of the creatures of the previous scene.
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
@@ -454,20 +469,17 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             bar.SeenFrame = Time.frameCount;
         }
 
-        foreach (var fsmHealth in FsmHealthComponent.All) {
-            if (!fsmHealth.IsShown) {
-                continue;
+        foreach (var component in FsmHealthComponent.All) {
+            if (component.IsShown) {
+                SeeFsmHealth(component.Health);
             }
+        }
 
-            if (!_fsmBars.TryGetValue(fsmHealth, out var bar)) {
-                bar = new Bar(
-                    fsmHealth.Creature, () => fsmHealth.Health, () => fsmHealth.IsBeaten, fsmHealth.Full, true,
-                    () => fsmHealth.Full
-                );
-                _fsmBars[fsmHealth] = bar;
+        foreach (var health in OwnCreatures.FsmHealths) {
+            if (health.Creature != null && health.Creature.activeInHierarchy) {
+                health.Read();
+                SeeFsmHealth(health);
             }
-
-            bar.SeenFrame = Time.frameCount;
         }
 
         var scale = _canvas.scaleFactor;
@@ -711,7 +723,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// <param name="initialHealth">The health that the creature starts with.</param>
     /// <param name="isBoss">Whether the creature is a boss.</param>
     /// <param name="readFull">What reads the full health of the creature, for one whose full health is known (see
-    /// <see cref="FsmHealthComponent.Full"/>); null to learn it from the health (see <see cref="FollowHealth"/>).
+    /// <see cref="FsmHealth.Full"/>); null to learn it from the health (see <see cref="FollowHealth"/>).
     /// </param>
     private class Bar(
         GameObject creature,

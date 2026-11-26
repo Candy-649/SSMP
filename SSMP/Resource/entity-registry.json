@@ -1610,6 +1610,7 @@
   {
     "base_object_name": "Wisp Pyre Effigy",
     "type": "FatherOfTheFlame",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation",

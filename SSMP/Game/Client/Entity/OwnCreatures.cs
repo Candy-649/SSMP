@@ -76,6 +76,12 @@ internal static class OwnCreatures {
     private static readonly Dictionary<PlayMakerFSM, Dictionary<string, string>> Tries = new();
 
     /// <summary>
+    /// The health of the creatures whose FSMs keep it instead of a HealthManager, which each game reads by itself for
+    /// the bar, as their parts take the blows of every player in every game (see FsmHealth).
+    /// </summary>
+    private static readonly List<FsmHealth> KeptHealths = [];
+
+    /// <summary>
     /// How many there are.
     /// </summary>
     public static int Count => Creatures.Count;
@@ -464,8 +470,10 @@ internal static class OwnCreatures {
         Entity.HookTalks();
         Creatures[creature] = (creature.scene.name, place);
         var parts = 0;
+        var keepsHealth = false;
         foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
             var part = machine.gameObject;
+            keepsHealth |= machine.FsmName == FsmHealth.PartFsmName;
             if (part != creature && !Parts.ContainsKey(part)) {
                 Parts[part] = (creature, creature.scene.name, partPlace(part));
                 parts++;
@@ -480,6 +488,10 @@ internal static class OwnCreatures {
             if (part == creature && EntityRegistry.TryGetTries(type, machine.FsmName, out var tries)) {
                 Tries[machine] = tries;
             }
+        }
+
+        if (keepsHealth && new FsmHealth(creature) is { KeepsHealth: true } health) {
+            KeptHealths.Add(health);
         }
 
         return parts;
@@ -608,6 +620,11 @@ internal static class OwnCreatures {
     /// Whether a creature here has states where each player has a try of their own (see <see cref="Tries"/>).
     /// </summary>
     public static bool HasTries => Tries.Count > 0;
+
+    /// <summary>
+    /// The health of the creatures here whose FSMs keep it (see <see cref="KeptHealths"/>).
+    /// </summary>
+    public static IReadOnlyList<FsmHealth> FsmHealths => KeptHealths;
 
     /// <summary>
     /// Whether a creature that every game runs by itself plays its end in each game by itself (see
@@ -799,6 +816,7 @@ internal static class OwnCreatures {
         EachGame.Clear();
         EachGameFrom.Clear();
         Tries.Clear();
+        KeptHealths.Clear();
         Dead.Clear();
         Deaths.Clear();
         DeathLooks.Clear();
