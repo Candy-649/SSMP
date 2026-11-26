@@ -3809,6 +3809,7 @@
   {
     "base_object_name": "Dancer A",
     "type": "CogworkDancers",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3823,6 +3824,7 @@
   {
     "base_object_name": "Dancer B",
     "type": "CogworkDancers",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
