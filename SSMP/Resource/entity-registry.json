@@ -2728,6 +2728,7 @@
   {
     "base_object_name": "Spinner Boss",
     "type": "Widow",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3145,6 +3146,7 @@
   {
     "base_object_name": "Coral King",
     "type": "CrustKingKhann",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
