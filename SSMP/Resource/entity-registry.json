@@ -1069,6 +1069,7 @@
   {
     "base_object_name": "Dock Guard Thrower",
     "type": "ForebrothersSignisAndGron",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1083,6 +1084,7 @@
   {
     "base_object_name": "Dock Guard Slasher",
     "type": "ForebrothersSignisAndGron",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1274,18 +1276,6 @@
     "fsm_names": [
       "Control",
       "Msg Reactor"
-    ]
-  },
-  {
-    "base_object_name": "Shield Dockworker",
-    "type": "SmokerockSifter",
-    "parent_name": "Minions",
-    "components": [
-      "Rotation"
-    ],
-    "internal_name": "Shield Dock Worker",
-    "fsm_names": [
-      "Behaviour"
     ]
   },
   {
@@ -2912,19 +2902,6 @@
   {
     "base_object_name": "Dock Worker",
     "type": "SmeltShoveller",
-    "parent_name": "Minions",
-    "components": [
-      "Rotation"
-    ],
-    "internal_name": "Dock Worker",
-    "fsm_names": [
-      "Control",
-      "Behaviour"
-    ]
-  },
-  {
-    "base_object_name": "Dock Worker",
-    "type": "SmeltShoveller",
     "own_in_each_game": true,
     "parent_name": null,
     "components": [
@@ -3207,20 +3184,6 @@
     "internal_name": "Crypt Worm",
     "fsm_names": [
       "Control"
-    ]
-  },
-  {
-    "base_object_name": "Dock Flyer",
-    "type": "FlintstoneFlyer",
-    "parent_name": "Minions",
-    "components": [
-      "Rotation"
-    ],
-    "internal_name": "Dock Flyer",
-    "fsm_names": [
-      "Behaviour",
-      "FSM",
-      "Go Direction Velocity"
     ]
   },
   {
