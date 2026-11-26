@@ -1204,6 +1204,7 @@
   {
     "base_object_name": "Citadel Bat Large",
     "type": "Drapelord",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
