@@ -342,6 +342,7 @@ internal partial class CoopSave {
         OwnCreatures.HasNoHealthAsTold = HasNoHealthAsTold;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
+        EntityManager.PicksOwnGroup = PickOwnGroup;
         _ownCreatureHooks.Add(CreateHook(
             typeof(Fsm).GetMethod("SwitchState", flags, null, [typeof(FsmState)], null),
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnOwnCreatureStep)

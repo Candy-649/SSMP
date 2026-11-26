@@ -932,5 +932,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Names"/> holds them after the change, <see cref="CoopSaveUpdate.Sequence"/> counts the
     /// change, and <see cref="CoopSaveUpdate.Key"/> decides between two changes that count as many.
     /// </summary>
-    QuestShopPicks
+    QuestShopPicks,
+
+    /// <summary>
+    /// Which of the children of a group of the room that lets some of them out at random (ActivateRandomChild) are out
+    /// in the scene host's game, where it holds a creature that every game runs by itself (see CoopSave.RoomPicks):
+    /// <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name the group,
+    /// <see cref="CoopSaveUpdate.Names"/> holds the names of its children, and <see cref="CoopSaveUpdate.Amounts"/>
+    /// holds 1 for each that is out and 0 for each that is not.
+    /// </summary>
+    RoomPick
 }

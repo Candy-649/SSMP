@@ -648,10 +648,22 @@
     ]
   },
   {
-    "base_object_name": "Coral Conch Driller",
+    "base_object_name": "Coral Conch Driller Roar",
     "type": "Conchfly",
-    "own_in_each_game": true,
-    "parent_name": "Wave",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Coral Conch Driller",
+    "fsm_names": [
+      "Control",
+      "FSM"
+    ]
+  },
+  {
+    "base_object_name": "Coral Conch Driller Giant Mourn",
+    "type": "Conchfly",
+    "parent_name": null,
     "components": [
       "Rotation"
     ],
@@ -664,6 +676,7 @@
   {
     "base_object_name": "Coral Conch Driller",
     "type": "Conchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"

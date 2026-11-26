@@ -82,6 +82,13 @@ internal class EntityManager {
     private Hook? _pickRandomChildHook;
 
     /// <summary>
+    /// Has the pick of a group of the room that holds a creature that every game runs by itself made as the scene
+    /// host's game makes it, which tells the others which of the group are out (see CoopSave.RoomPicks): whether it
+    /// took the pick, made here or not. Given by the code of the two-player save.
+    /// </summary>
+    public static Func<Action<ActivateRandomChild>, ActivateRandomChild, bool>? PicksOwnGroup { get; set; }
+
+    /// <summary>
     /// The groups of creatures in this room whose pick was left to the other game, each said once.
     /// </summary>
     private readonly HashSet<ActivateRandomChild> _picksLeftToTheOtherGame = [];
@@ -950,8 +957,14 @@ internal class EntityManager {
     /// looked up from the copy itself, which stands at the top of the room. Nothing here should pick at all, though:
     /// which of them come out reaches this game as each creature being switched on or off, like anything else the
     /// other game does to them, and the room's own creatures are left asleep where the room put them for a take-over.
+    /// A group that holds a creature that every game runs by itself, which has no copy, is picked as the scene host's
+    /// game tells (see <see cref="PicksOwnGroup"/>).
     /// </summary>
     private void OnPickRandomChild(Action<ActivateRandomChild> orig, ActivateRandomChild self) {
+        if (PicksOwnGroup?.Invoke(orig, self) == true) {
+            return;
+        }
+
         if (RunsTheRoom || !HoldsCreatures(self.transform)) {
             orig(self);
             return;

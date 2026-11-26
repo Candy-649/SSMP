@@ -843,6 +843,7 @@ internal partial class CoopSave {
         _ledMovesMet.Clear();
         _earlyLedSteps.Clear();
         _freesOwed.Clear();
+        _roomPicksTold.Clear();
         _summonWords.Clear();
 
         GrowBackPustulesThePartnerDrew();
@@ -1307,6 +1308,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.QuestShopPicks:
                 OnQuestShopPicks(player, update);
+                break;
+            case CoopSaveUpdateKind.RoomPick:
+                OnRoomPick(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);
