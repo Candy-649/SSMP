@@ -138,6 +138,11 @@ internal partial class CoopSave {
         }
 
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
+        if (OwnCreatures.RunsInEachGame(fsm.FsmComponent)) {
+            Logger.Info($"[Own creatures] {told}, which each game runs by itself for its own player here");
+            return;
+        }
+
         if (update.Key == 0 && TellTakenAlready(fsm, by, true)) {
             Logger.Info($"[Own creatures] {told}, which it was told here too a moment before");
             return;

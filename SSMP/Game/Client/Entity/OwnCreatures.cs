@@ -57,6 +57,17 @@ internal static class OwnCreatures {
     private static readonly HashSet<PlayMakerFSM> EachGame = [];
 
     /// <summary>
+    /// The state machines of the creatures that each game runs by itself for its own player from a state on, with that
+    /// state (see EntityRegistryEntry.EachGameFrom): the end of a boss that takes the player's character, which each
+    /// game plays on its own player (USER 11-26 "各演各的"; see BossRoomCoop.Endings). Taken by the scene host's steps,
+    /// it went as the scene host's player did in it: bound when they bound, and a game whose player had yet to bind
+    /// followed the scene host's on. Once it is in that state, it is one of <see cref="EachGame"/> until the room is
+    /// left, as the parry boss's end, which a missed parry takes back into its fight, never comes back to the steps of
+    /// the scene host's.
+    /// </summary>
+    private static readonly Dictionary<PlayMakerFSM, string> EachGameFrom = new();
+
+    /// <summary>
     /// How many there are.
     /// </summary>
     public static int Count => Creatures.Count;
@@ -454,6 +465,8 @@ internal static class OwnCreatures {
 
             if (EntityRegistry.IsEachGameFsm(type, machine.FsmName)) {
                 EachGame.Add(machine);
+            } else if (part == creature && EntityRegistry.TryGetEachGameFrom(type, machine.FsmName, out var from)) {
+                EachGameFrom[machine] = from;
             }
         }
 
@@ -543,6 +556,15 @@ internal static class OwnCreatures {
     /// </summary>
     public static bool RunsInEachGame(PlayMakerFSM machine) {
         return EachGame.Count > 0 && EachGame.Contains(machine);
+    }
+
+    /// <summary>
+    /// Takes a state machine of a creature that every game runs by itself as one that each game runs by itself from
+    /// now on, as it goes into the state from which it does (see <see cref="EachGameFrom"/>), returning whether it did.
+    /// </summary>
+    public static bool BeginsEachGamePart(PlayMakerFSM machine, string toState) {
+        return EachGameFrom.Count > 0 && EachGameFrom.TryGetValue(machine, out var from) && from == toState &&
+               EachGame.Add(machine);
     }
 
     /// <summary>
@@ -715,6 +737,7 @@ internal static class OwnCreatures {
         SummonedBy.Clear();
         MadeAsTold.Clear();
         EachGame.Clear();
+        EachGameFrom.Clear();
         Dead.Clear();
         Deaths.Clear();
         DeathLooks.Clear();

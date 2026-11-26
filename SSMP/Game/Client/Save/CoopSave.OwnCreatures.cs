@@ -396,6 +396,19 @@ internal partial class CoopSave {
             return;
         }
 
+        // The end of a boss that takes the player's character, which each game plays on its own player from the state
+        // where it begins (see OwnCreatures.BeginsEachGamePart): nothing of it is told or taken from then on, and a
+        // player lying in their cocoon is stood up for it first, as for the copy's (see Entity.EachGamePartBegan)
+        if (OwnCreatures.BeginsEachGamePart(machine, toState.Name)) {
+            Logger.Info(
+                $"[Own creatures] '{OwnCreatures.PlaceOf(machine.gameObject)}' goes into '{toState.Name}' of " +
+                $"'{self.Name}', from which each game runs it by itself for its own player"
+            );
+            Entity.Entity.TellEachGamePartBegan();
+            orig(self, toState);
+            return;
+        }
+
         // A part of such a creature catches the local player only while the creature goes after them (see
         // CoopSave.OwnCatches), but for one that catches whoever touches it, like the drill of a driller that sweeps
         // the room aiming at nobody (see CatchesWhoeverTouches). One that looks at a player takes its steps as the
@@ -1247,6 +1260,17 @@ internal partial class CoopSave {
         // which it goes to as well when it is neither there nor in a talk here, or one while this game plays a leap at
         // its own player or a talk by itself (see CoopSave.OwnTalks, CoopSave.OwnCatches)
         var fsm = PlayMakerFSM.FindFsmOnGameObject(creature, update.FsmName).Fsm;
+
+        // One that each game runs by itself here from the end of a boss on goes as this game's player plays it, and a
+        // step of the scene host's, whose end began later there, is of that game's player (see
+        // OwnCreatures.BeginsEachGamePart)
+        if (OwnCreatures.RunsInEachGame(fsm.FsmComponent)) {
+            Logger.Info(
+                $"[Own creatures] '{place}' went to '{update.StateName}' of '{fsm.Name}' in {player.Username}'s " +
+                "game, which each game runs by itself for its own player here"
+            );
+            return;
+        }
 
         // The answer of the scene host's game to a blow of this game's player that set it off on a way of its own here:
         // what that game takes from then on comes after the blow there (see AwaitsLocalBlow), whatever takes this one

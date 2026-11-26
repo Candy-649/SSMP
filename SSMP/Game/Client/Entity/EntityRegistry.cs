@@ -583,7 +583,9 @@ internal class EntityRegistryEntry {
     /// fought in. The scene host's game plays it for its own player as it always did, and the copy of a scene client
     /// plays it for theirs, from that state, from the moment the scene host says the FSM is in it or any state it leads
     /// to (Entity.RunEachGamePart). Played by the scene host alone, only its player did the binding, and the other
-    /// stood by and watched it, or was left in the memory.
+    /// stood by and watched it, or was left in the memory. Of a kind that every game runs by itself (see
+    /// <see cref="OwnInEachGame"/>), each game runs the FSM by itself from the moment it goes into that state, telling
+    /// and taking no step of it until the room is left (OwnCreatures.BeginsEachGamePart).
     /// </summary>
     [JsonProperty("each_game_from")]
     public Dictionary<string, string>? EachGameFrom { get; set; }

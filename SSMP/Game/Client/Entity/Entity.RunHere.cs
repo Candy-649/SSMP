@@ -189,6 +189,14 @@ internal partial class Entity {
     public static event System.Action? EachGamePartBegan;
 
     /// <summary>
+    /// Raises <see cref="EachGamePartBegan"/> for a creature that every game runs by itself, as its state machine goes
+    /// into the state from which each game runs it by itself (see OwnCreatures.BeginsEachGamePart).
+    /// </summary>
+    public static void TellEachGamePartBegan() {
+        EachGamePartBegan?.Invoke();
+    }
+
+    /// <summary>
     /// The FSM of the copy that runs here, or null while none does.
     /// </summary>
     private PlayMakerFSM? _runHere;
