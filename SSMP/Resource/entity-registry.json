@@ -1347,6 +1347,7 @@
   {
     "base_object_name": "Tormented Trobbio",
     "type": "TormentedTrobbio",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1365,7 +1366,10 @@
           "Stun Land"
         ]
       }
-    }
+    },
+    "catch_events": [
+      "MULTI HIT CONNECT"
+    ]
   },
   {
     "base_object_name": "Lilypad Plat Trap",
@@ -3941,6 +3945,7 @@
   {
     "base_object_name": "Trobbio",
     "type": "Trobbio",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3966,7 +3971,10 @@
           "Stun Land"
         ]
       }
-    }
+    },
+    "catch_events": [
+      "MULTI HIT CONNECT"
+    ]
   },
   {
     "base_object_name": "Wraith",
