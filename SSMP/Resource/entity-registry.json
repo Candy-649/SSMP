@@ -2260,6 +2260,9 @@
     ],
     "catch_events": [
       "MULTI HIT CONNECT"
+    ],
+    "each_game_fsms": [
+      "hornet_multi_wounder"
     ]
   },
   {
