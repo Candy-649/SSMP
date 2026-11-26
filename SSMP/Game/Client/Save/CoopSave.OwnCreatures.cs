@@ -172,15 +172,14 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, HashSet<string>> _playerWayValues = new();
 
     /// <summary>
-    /// The variables that a state adds to once as it starts, for each state machine of a creature that every game runs
-    /// by itself whose steps this game has looked at (see ChoosesByCount).
+    /// The variables that hold a value that each game has for itself, for each state machine of a creature that every
+    /// game runs by itself whose steps this game has looked at (see ChoosesByOwnValue).
     /// </summary>
-    private readonly Dictionary<Fsm, HashSet<string>> _countedValues = new();
+    private readonly Dictionary<Fsm, HashSet<string>> _ownValues = new();
 
     /// <summary>
     /// The variables that the machines of each loaded room that run by the scene host's word set on other state
-    /// machines, by the name of the state machine and of the variable, found as a state of a creature that every game
-    /// runs by itself is first looked at in the room (see GoesByMachineValue).
+    /// machines, by the name of the state machine and of the variable (see MachineSetValues).
     /// </summary>
     private readonly Dictionary<string, HashSet<(string Fsm, string Variable)>> _machineSetValues = new();
 
@@ -1796,61 +1795,43 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether the others wait for a step that a state machine of a creature that every game runs by itself takes now,
-    /// in the games that follow the scene host's: one out of a state that goes by where the players are, by a count
-    /// that each game keeps for itself or by a value that a machine of the room sets on it, or one that another state
-    /// machine told it.
+    /// in the games that follow the scene host's: one out of a state that goes by where the players are or by a value
+    /// that each game has for itself (see <see cref="ChoosesByOwnValue"/>), or one that another state machine told it.
     /// </summary>
     private bool IsWaitedFor(Fsm fsm) {
-        return fsm.ActiveState is { } from &&
-               (GoesByPlayers(from) || ChoosesByCount(from) || GoesByMachineValue(from)) ||
+        return fsm.ActiveState is { } from && (GoesByPlayers(from) || ChoosesByOwnValue(from)) ||
                Fsm.EventData?.SentByFsm is { } sender && sender != fsm;
     }
 
     /// <summary>
-    /// Whether a state chooses its way on by a value that a machine of the room that runs by the scene host's word sets
-    /// on its state machine (see CoopSave.PacedMachines, CoopSave.DirectedFights), like the flag by which the foremen
-    /// of the docks leap out of the way of the lava that the fall of their fight pours. A game that follows the scene
-    /// host's starts each round of such a machine at the scene host's word, a moment late, and sets the value as late:
-    /// its foremen, back at their rest in that moment, found the lava still coming and leapt away from lava that the
-    /// scene host's foremen knew was gone, to be put back at the scene host's next step (review of 790db7f). The scene
-    /// host's step is the one.
+    /// The variables that the machines of a room that run by the scene host's word set on other state machines, by the
+    /// name of the state machine and of the variable (see CoopSave.PacedMachines, CoopSave.DirectedFights), found once
+    /// for the room.
     /// </summary>
-    private bool GoesByMachineValue(FsmState state) {
-        var fsm = state.Fsm;
-        var room = fsm.GameObject.scene;
-        if (!_machineSetValues.TryGetValue(room.name, out var set)) {
-            set = [];
-            foreach (var root in room.GetRootGameObjects()) {
-                foreach (var machine in root.GetComponentsInChildren<PlayMakerFSM>(true)) {
-                    if (FindMachineKind(machine.gameObject, machine.FsmName) == null) {
-                        continue;
-                    }
+    private HashSet<(string Fsm, string Variable)> MachineSetValues(UnityEngine.SceneManagement.Scene room) {
+        if (_machineSetValues.TryGetValue(room.name, out var set)) {
+            return set;
+        }
 
-                    foreach (var each in machine.FsmStates) {
-                        foreach (var action in each.Actions) {
-                            if (VariableSetOnAnother(action) is { } written) {
-                                set.Add(written);
-                            }
+        set = [];
+        foreach (var root in room.GetRootGameObjects()) {
+            foreach (var machine in root.GetComponentsInChildren<PlayMakerFSM>(true)) {
+                if (FindMachineKind(machine.gameObject, machine.FsmName) == null) {
+                    continue;
+                }
+
+                foreach (var each in machine.FsmStates) {
+                    foreach (var action in each.Actions) {
+                        if (VariableSetOnAnother(action) is { } written) {
+                            set.Add(written);
                         }
                     }
                 }
             }
-
-            _machineSetValues[room.name] = set;
         }
 
-        if (set.Count == 0) {
-            return false;
-        }
-
-        foreach (var action in state.Actions) {
-            if (action.Enabled && Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
-                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(name => set.Contains((fsm.Name, name)))) {
-                return true;
-            }
-        }
-
-        return false;
+        _machineSetValues[room.name] = set;
+        return set;
     }
 
     /// <summary>
@@ -1963,7 +1944,7 @@ internal partial class CoopSave {
             }
 
             var ways = state.Transitions.Where(each => TakenByItself(state, each)).ToList();
-            if (GoesByPlayers(state) || ChoosesByCount(state) || ways.Count != 1) {
+            if (GoesByPlayers(state) || ChoosesByOwnValue(state) || ways.Count != 1) {
                 return false;
             }
 
@@ -2076,7 +2057,7 @@ internal partial class CoopSave {
         next.Enqueue(from);
         while (next.Count > 0) {
             var state = next.Dequeue();
-            if (GoesByPlayers(state) || ChoosesByCount(state)) {
+            if (GoesByPlayers(state) || ChoosesByOwnValue(state)) {
                 continue;
             }
 
@@ -2134,55 +2115,83 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a state chooses its way on by a count that each game keeps for itself: one of its actions decides where
-    /// it goes by a number that a state of its state machine adds to once as it starts (see HitCounters.CountedBy),
-    /// like the blows that the boss at the end of the second act took since it was last stunned. Each game takes in
-    /// the blows of every player, its own player's at once and the others' as they come, and counts some of them in
-    /// another state than the others, so that a count is full at another blow in each game: the scene host's is the
-    /// one (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
-    /// host's step came). Its health, as it reads it to choose a part of its fight by (GetHP), is such a count too:
-    /// it comes under the mark of the next part at another blow in each game, and the giant driller, a blow short of
-    /// it in one game, chose a move of its first part there while the scene host's roared into its second (review of
-    /// d71f2ce; USER 11-17 "我说白了血条听房主的"). What it does as it has none goes by the scene host's word that it has
-    /// none (see CoopSave.OwnHealth). So is how many objects there are under one (GetChildCount), like the flies that a
-    /// conductor made, under the object of the dead ones, which each game has more or fewer of for a moment as a fly
-    /// dies at another moment there, and calls back: the scene host's count is the one.
+    /// Whether a state chooses its way on by a value that each game has for itself, other than the scene host's or at
+    /// another moment: the scene host's is the one.
+    ///
+    /// A count: one of its actions decides where it goes by a number that a state of its state machine adds to once as
+    /// it starts (see HitCounters.CountedBy), like the blows that the boss at the end of the second act took since it
+    /// was last stunned. Each game takes in the blows of every player, its own player's at once and the others' as they
+    /// come, and counts some of them in another state than the others, so that a count is full at another blow in each
+    /// game (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
+    /// host's step came). So is how many objects there are under one (GetChildCount), like the flies that a conductor
+    /// made, under the object of the dead ones, which each game has more or fewer of for a moment as a fly dies at
+    /// another moment there, and calls back.
+    ///
+    /// Its health, as it reads it to choose a part of its fight by (GetHP): it comes under the mark of the next part at
+    /// another blow in each game, and the giant driller, a blow short of it in one game, chose a move of its first part
+    /// there while the scene host's roared into its second (review of d71f2ce; USER 11-17 "我说白了血条听房主的"). What
+    /// it does as it has none goes by the scene host's word that it has none (see CoopSave.OwnHealth).
+    ///
+    /// The save of the player of the game (a test of PlayerData, or what GetPlayerData stores), which differs between
+    /// players: the last judge, at the first sight of the player, threw its censer in a game whose player had never met
+    /// it and waited in the other's (review of 556ca6e).
+    ///
+    /// A value that a machine of the room that runs by the scene host's word sets on its state machine (see
+    /// <see cref="MachineSetValues"/>), like the flag by which the foremen of the docks leap out of the way of the lava
+    /// that the fall of their fight pours. A game that follows the scene host's starts each round of such a machine at
+    /// the scene host's word, a moment late, and sets the value as late: its foremen, back at their rest in that moment,
+    /// found the lava still coming and leapt away from lava that the scene host's foremen knew was gone, to be put back
+    /// at the scene host's next step (review of 790db7f).
     /// </summary>
-    private bool ChoosesByCount(FsmState state) {
+    private bool ChoosesByOwnValue(FsmState state) {
         var fsm = state.Fsm;
-        if (!_countedValues.TryGetValue(fsm, out var counted)) {
-            counted = [];
+        if (!_ownValues.TryGetValue(fsm, out var own)) {
+            own = [];
             foreach (var each in fsm.States) {
                 foreach (var action in each.Actions) {
                     if (HitCounters.CountedBy(action) is { Length: > 0 } name) {
-                        counted.Add(name);
+                        own.Add(name);
                     }
 
-                    if (action is HutongGames.PlayMaker.Actions.GetChildCount {
-                            storeResult: { UseVariable: true, Name.Length: > 0 } children
-                        }) {
-                        counted.Add(children.Name);
-                    }
-
-                    if (action is HutongGames.PlayMaker.Actions.GetHP {
-                            storeValue: { UseVariable: true, Name.Length: > 0 } health
-                        }) {
-                        counted.Add(health.Name);
+                    if (OwnValueStoredBy(action) is { UseVariable: true, Name.Length: > 0 } stored) {
+                        own.Add(stored.Name);
                     }
                 }
             }
 
-            _countedValues[fsm] = counted;
+            foreach (var (machineFsm, variable) in MachineSetValues(fsm.GameObject.scene)) {
+                if (machineFsm == fsm.Name) {
+                    own.Add(variable);
+                }
+            }
+
+            _ownValues[fsm] = own;
         }
 
         foreach (var action in state.Actions) {
             if (action.Enabled && Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
-                Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(counted.Contains)) {
+                (action.GetType().Name.IndexOf("PlayerData", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(own.Contains))) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The variable in which an action stores a value that each game has for itself (see
+    /// <see cref="ChoosesByOwnValue"/>), or null for one that stores none.
+    /// </summary>
+    private static NamedVariable? OwnValueStoredBy(FsmStateAction action) {
+        return action switch {
+            HutongGames.PlayMaker.Actions.GetChildCount get => get.storeResult,
+            HutongGames.PlayMaker.Actions.GetHP get => get.storeValue,
+            HutongGames.PlayMaker.Actions.GetPlayerDataBool get => get.storeValue,
+            HutongGames.PlayMaker.Actions.GetPlayerDataInt get => get.storeValue,
+            HutongGames.PlayMaker.Actions.GetPlayerDataFloat get => get.storeValue,
+            _ => null
+        };
     }
 
     /// <summary>
