@@ -15,10 +15,14 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// What a creature that every game runs by itself does as something outside it tells it to: a part of the room that the
 /// player of this game came into, like the ground under the bats that wakes them, the player's own harpoon, another
 /// creature or an alarm of the room. The game that is told plays it at once, as a game of one does, and a game that
-/// follows the scene host's tells that game of it, whose creature is told the same where it is, as if its own part of
-/// the room told it now, and which every other game takes as a step of the scene host's (USER 11-25 "就本地先演，本地的
-/// 怪本来就是活的"). Before, a game that follows the scene host's held such a step for the scene host's, which never came
-/// where only its own player had come into the part of the room: no part of a room feels the figure of a partner.
+/// follows the scene host's tells that game of it, whose creature is put where it was in the game that was told, with
+/// what told it set on it there, and is told the same, as if its own part of the room told it now, and which every
+/// other game takes as a step of the scene host's (USER 11-25 "就本地先演，本地的怪本来就是活的"). Before, a game that
+/// follows the scene host's held such a step for the scene host's, which never came where only its own player had come
+/// into the part of the room: no part of a room feels the figure of a partner. What tells it may have set it somewhere
+/// and set the way it goes first: a part of a room that a player of the ward sets off by taking what lies there puts
+/// the husk that lies in wait at the hole it leaps out of, and sets the way of its leap, before it tells it to leap,
+/// which only the game of that player has.
 ///
 /// What tells it in every game, like another creature that every game runs by itself, comes to the scene host's game
 /// both by itself and at the word of each other game, and is played there once: whichever comes first (see
@@ -89,17 +93,18 @@ internal partial class CoopSave {
     private void TellOwnTell(PlayMakerFSM machine, FsmState toState) {
         var creature = machine.gameObject;
         var fsm = machine.Fsm;
+        var teller = Fsm.EventData?.SentByFsm;
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         var word = OwnCreatureUpdate(
             machine,
             new OwnStep(
                 fsm.ActiveStateName, SharedDice.RollCounts(creature), creature.transform.position,
                 creature.transform.localScale.x
-            )
+            ),
+            teller != null ? ToldValues.SetBy(teller, creature, machine) : null
         );
         word.PartCount = OwnTellPart;
         word.Key = ToldByEachGame() ? 1UL : 0UL;
-        var teller = Fsm.EventData?.SentByFsm;
         word.Names = [fsm.LastTransition!.EventName, toState.Name];
         Logger.Info(
             $"[Own creatures] '{word.ObjectPath}' is told by '{teller?.Name}' of " +
@@ -129,10 +134,11 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Takes the word of a game that follows the scene host's that something outside a creature that every game runs by
-    /// itself told it to go on there (see <see cref="TellOwnTell"/>): in the scene host's game, the creature is told
-    /// the same where it is, as if what told it there told it here now, and goes on as the game has it, which every
-    /// other game takes as a step of the scene host's. Not where it took the same tell a moment before, but for one of
-    /// a state machine that each game runs by itself, which is of that game's player.
+    /// itself told it to go on there (see <see cref="TellOwnTell"/>): in the scene host's game, the creature is put
+    /// where it was there as it was told, turned and going as it was, with what told it set on it there (see
+    /// PutAtSceneHostsStep), and is told the same, as if what told it there told it here now, and goes on as the game
+    /// has it, which every other game takes as a step of the scene host's. Not where it took the same tell a moment
+    /// before, but for one of a state machine that each game runs by itself, which is of that game's player.
     /// </summary>
     private void TakeOwnTell(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
         var place = update.ObjectPath;
@@ -162,9 +168,12 @@ internal partial class CoopSave {
             return;
         }
 
+        var away = Vector2.Distance(creature.transform.position, new Vector2(update.Values[0], update.Values[1]));
         Logger.Info(
-            $"[Own creatures] {told}, and is told the same here, from '{fsm.ActiveStateName}' into '{way.ToState}'"
+            $"[Own creatures] {told}, and is told the same here, from '{fsm.ActiveStateName}' into '{way.ToState}', " +
+            $"where it was there, {away:F1} away"
         );
+        PutAtSceneHostsStep(fsm, update);
         fsm.Event(way.FsmEvent);
     }
 }

@@ -51,16 +51,22 @@ internal sealed class ToldValues {
     /// <param name="target">The object of the FSM that was told.</param>
     /// <param name="told">The FSM that was told.</param>
     public static ToldValues From(HutongGames.PlayMaker.Fsm sender, GameObject target, PlayMakerFSM told) {
+        return Of(told.Fsm, SetBy(sender, target, told));
+    }
+
+    /// <summary>
+    /// The names of the variables of an FSM that a part set on it in the state from which it told that FSM an event:
+    /// those that the actions of that state which set variables of the FSM set.
+    /// </summary>
+    /// <param name="sender">The FSM of the part.</param>
+    /// <param name="target">The object of the FSM that was told.</param>
+    /// <param name="told">The FSM that was told.</param>
+    public static IEnumerable<string> SetBy(HutongGames.PlayMaker.Fsm sender, GameObject target, PlayMakerFSM told) {
         if (sender.ActiveState is not { } state) {
-            return None;
+            yield break;
         }
 
-        var values = new List<(string Name, object Value)>();
         foreach (var action in state.Actions) {
-            if (values.Count >= MaxValues) {
-                break;
-            }
-
             // The actions that read a variable of another FSM have the same fields
             if (action == null || !action.GetType().Name.StartsWith("SetFsm", StringComparison.Ordinal) ||
                 GetSetterFields(action.GetType()) is not { } fields ||
@@ -75,15 +81,10 @@ internal sealed class ToldValues {
                 continue;
             }
 
-            var name = (fields.VariableName.GetValue(action) as FsmString)?.Value;
-            if (string.IsNullOrEmpty(name) || ValueOf(told.FsmVariables.GetVariable(name)) is not { } value) {
-                continue;
+            if ((fields.VariableName.GetValue(action) as FsmString)?.Value is { Length: > 0 } name) {
+                yield return name;
             }
-
-            values.Add((name!, value));
         }
-
-        return values.Count == 0 ? None : new ToldValues(values);
     }
 
     /// <summary>

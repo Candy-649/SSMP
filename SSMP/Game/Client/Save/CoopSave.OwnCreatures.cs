@@ -812,9 +812,13 @@ internal partial class CoopSave {
     /// stands, which each game has a little elsewhere, and jumped as far as its own game had it, to be moved where the
     /// scene host's landed as it landed (USER 11-15, of that fight, "只有一步闪了一下，其他时候都很丝滑"). So does where the
     /// player that it goes after was beside it, which the start of the step turns to and measures by in every game
-    /// (see SeeTargetAsTold).
+    /// (see SeeTargetAsTold). The variables named in <paramref name="setOnIt"/> go with what the state worked with.
     /// </summary>
-    private static CoopSaveUpdate OwnCreatureUpdate(PlayMakerFSM machine, OwnStep step) {
+    private static CoopSaveUpdate OwnCreatureUpdate(
+        PlayMakerFSM machine,
+        OwnStep step,
+        IEnumerable<string>? setOnIt = null
+    ) {
         var transform = machine.transform;
         var speed = machine.TryGetComponent<Rigidbody2D>(out var body) ? body.linearVelocity : Vector2.zero;
         var fall = body != null ? body.gravityScale : 0f;
@@ -832,7 +836,7 @@ internal partial class CoopSave {
             ? ToldValues.Of(
                 fsm,
                 state.Actions.Where(action => action.Enabled)
-                    .SelectMany(Entity.Action.EntityFsmActions.ValueVariablesOf).Distinct()
+                    .SelectMany(Entity.Action.EntityFsmActions.ValueVariablesOf).Concat(setOnIt ?? []).Distinct()
             )
             : ToldValues.None;
         using var stream = new MemoryStream();
