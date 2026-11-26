@@ -787,6 +787,7 @@
   {
     "base_object_name": "Song Automaton Ball",
     "type": "CogworkClapper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2470,6 +2471,7 @@
   {
     "base_object_name": "Spine Floater",
     "type": "Hoker",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
