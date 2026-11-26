@@ -240,6 +240,7 @@ internal partial class GamePatcher {
         RegisterNpcZoneHooks();
         RegisterBoxPassageHooks();
         RegisterFigureReadHooks();
+        RegisterPlayerReadHooks();
     }
 
     /// <summary>
@@ -403,6 +404,7 @@ internal partial class GamePatcher {
         DisposeNpcZoneHooks();
         DisposeBoxPassageHooks();
         DisposeFigureReadHooks();
+        DisposePlayerReadHooks();
 
         _crawlerStopCrawlingHook?.Dispose();
         _crawlerStopCrawlingHook = null;

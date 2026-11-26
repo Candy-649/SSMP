@@ -584,6 +584,14 @@ internal partial class GamePatcher {
         Transform target,
         bool ignoreRange
     ) {
+        // A creature that reads of the player what is known of every player hears the song of the player it reads
+        // alone (see ReadPlayerOf)
+        if (_askingCheck?.Fsm is { } reading && ReadPlayerOf(reading) is { } read) {
+            return read.GetComponent<HeroController>() != null
+                ? orig(target, ignoreRange)
+                : NeedolinCoop.EvaluateOne(target, ignoreRange, read);
+        }
+
         var state = orig(target, ignoreRange);
         if (!NeedolinCoop.HasRemotePerformers || target == null ||
             !CountsRemotePerformers(target, ignoreRange, _askingCheck, _singReactionAsks)) {

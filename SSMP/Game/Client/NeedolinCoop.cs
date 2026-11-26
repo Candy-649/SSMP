@@ -230,6 +230,37 @@ internal static class NeedolinCoop {
     }
 
     /// <summary>
+    /// Works out how strongly a target is affected by the song of one remote player alone, for a creature that reads
+    /// that player (see PlayerFacts).
+    /// </summary>
+    /// <param name="target">The transform whose position is checked.</param>
+    /// <param name="ignoreRange">Whether the check ignores range, so that the performer affects the target
+    /// fully.</param>
+    /// <param name="playerObject">The player object of the remote player.</param>
+    /// <returns>How strongly the target is affected.</returns>
+    public static HeroPerformanceRegion.AffectedState EvaluateOne(
+        Transform target,
+        bool ignoreRange,
+        GameObject playerObject
+    ) {
+        var state = HeroPerformanceRegion.AffectedState.None;
+        NeedolinPerformer? performer = null;
+        if (RemotePerformers.TryGetValue(playerObject, out var remotePerformer)) {
+            Consider(remotePerformer, target.position, ignoreRange, 0f, ref state, ref performer);
+        }
+
+        return state;
+    }
+
+    /// <summary>
+    /// Whether a remote player plays the needolin.
+    /// </summary>
+    /// <param name="playerObject">The player object of the remote player.</param>
+    public static bool IsRemotePerforming(GameObject playerObject) {
+        return RemotePerformers.ContainsKey(playerObject);
+    }
+
+    /// <summary>
     /// Checks whether any remote performer is within a circular range of a position, like
     /// <see cref="HeroPerformanceRegion.IsPlayingInRange"/> does for the local player.
     /// </summary>

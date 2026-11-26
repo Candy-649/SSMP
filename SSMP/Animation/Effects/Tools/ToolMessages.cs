@@ -272,24 +272,31 @@ internal static class ToolMessages {
 
     /// <summary>
     /// Writes the list of which things of the thrower's tools are out, by their number, which element the needle has
-    /// and whether the lantern glows.
+    /// and whether the lantern glows, and, after the list, whether the thrower carries the white flower, which a
+    /// creature near them reads (see Game.Client.PlayerFacts).
     /// </summary>
-    public static byte[] WriteLiveList(NailElements element, bool lanternShown, ICollection<byte> ids) {
+    public static byte[] WriteLiveList(
+        NailElements element,
+        bool lanternShown,
+        ICollection<byte> ids,
+        bool carriesWhiteFlower
+    ) {
         var count = ids.Count < byte.MaxValue ? ids.Count : byte.MaxValue;
-        var message = new byte[5 + count];
+        var message = new byte[6 + count];
         message[0] = (byte) ToolMessageKind.LiveList;
         message[2] = (byte) element;
         message[3] = (byte) (lanternShown ? 1 : 0);
         message[4] = (byte) count;
         var i = 5;
         foreach (var id in ids) {
-            if (i == message.Length) {
+            if (i == 5 + count) {
                 break;
             }
 
             message[i++] = id;
         }
 
+        message[5 + count] = (byte) (carriesWhiteFlower ? 1 : 0);
         return message;
     }
 

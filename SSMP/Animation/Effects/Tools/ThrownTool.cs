@@ -354,8 +354,9 @@ internal class ThrownTool : BaseAttackTool {
 
     /// <summary>
     /// Takes away the copies of a player's things that are gone in their game but whose end got lost on the way, and
-    /// puts the look of their needle's element and the glow of their lantern right. A copy only just made is left
-    /// alone, as the list may have been written before its thing came out.
+    /// puts the look of their needle's element and the glow of their lantern right, and notes whether they carry the
+    /// white flower (see Game.Client.PlayerFacts). A copy only just made is left alone, as the list may have been
+    /// written before its thing came out.
     /// </summary>
     private static void KeepLive(GameObject playerObject, BinaryReader reader) {
         ImbuedNail.Keep(playerObject, (NailElements) reader.ReadByte());
@@ -365,6 +366,8 @@ internal class ThrownTool : BaseAttackTool {
         for (var count = reader.ReadByte(); count > 0; count--) {
             live.Add(reader.ReadByte());
         }
+
+        Game.Client.PlayerFacts.SetRemoteWhiteFlower(playerObject, reader.ReadByte() == 1);
 
         var player = playerObject.GetInstanceID();
         List<(int, byte)>? gone = null;

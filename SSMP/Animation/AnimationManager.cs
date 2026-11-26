@@ -1052,8 +1052,10 @@ internal class AnimationManager {
             return false;
         }
 
-        // Track whether the player is playing the needolin, so needolin range checks count them
+        // Track whether the player is playing the needolin, so needolin range checks count them, and whether they swim,
+        // which a creature near them reads (see PlayerFacts)
         NeedolinCoop.OnRemoteAnimation(playerObject!, animationClip);
+        PlayerFacts.OnRemoteAnimation(playerObject!, animationClip);
 
         if (!ClipEnumNames.ContainsSecond(animationClip)) {
             // This happens when we send custom clips, that can't be played by the sprite animator, so for now we

@@ -232,6 +232,12 @@ internal partial class GamePatcher {
             return orig(self);
         }
 
+        // A creature that reads of the player what is known of every player asks its ranges about the player it reads
+        // (see ReadPlayerOf), which is somebody near it
+        if (HutongGames.PlayMaker.FsmExecutionStack.ExecutingFsm is { } reading && ReadPlayerOf(reading) is { } read) {
+            return IsValidTargetForAlertRange(self, read);
+        }
+
         // So does a range that a state machine asks which each game runs by itself for its own player, of a creature
         // that every game runs by itself (see Entity.OwnCreatures.RunsInEachGame): the pale stag of the lilies keeps
         // the nail off itself while the player stands under it, high up, and the conductor of the ward keeps blows

@@ -608,8 +608,8 @@ internal static class ToolCopies {
     }
 
     /// <summary>
-    /// Sends the list of what of the local player's tools is out, the element of the needle and whether the lantern
-    /// glows, every so often.
+    /// Sends the list of what of the local player's tools is out, the element of the needle, whether the lantern glows
+    /// and whether they carry the white flower, every so often.
     /// </summary>
     public static void Tick() {
         _liveListTimer -= Time.unscaledDeltaTime;
@@ -620,7 +620,9 @@ internal static class ToolCopies {
         _liveListTimer = LiveListInterval;
         var hero = HeroController.SilentInstance;
         var element = hero != null ? hero.NailImbuement.CurrentElement : NailElements.None;
-        MessageReady?.Invoke(ToolMessages.WriteLiveList(element, _lanternShown, LiveIds));
+        MessageReady?.Invoke(
+            ToolMessages.WriteLiveList(element, _lanternShown, LiveIds, PlayerData.instance.HasWhiteFlower)
+        );
     }
 
     /// <summary>
