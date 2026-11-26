@@ -14,6 +14,7 @@
   {
     "base_object_name": "Garmond Black Threaded Fighter",
     "type": "LostGarmond",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -218,6 +219,7 @@
   {
     "base_object_name": "Cloverstag White Boss",
     "type": "Palestag",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -227,6 +229,10 @@
       "Control",
       "Cast Control",
       "Cast Timer",
+      "Harpoon Evade",
+      "Protect from underneath nail"
+    ],
+    "each_game_fsms": [
       "Harpoon Evade",
       "Protect from underneath nail"
     ]
@@ -2237,6 +2243,7 @@
   {
     "base_object_name": "Zap Core Enemy",
     "type": "Voltvyrm",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3405,6 +3412,7 @@
   {
     "base_object_name": "Last Judge",
     "type": "LastJudge",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
