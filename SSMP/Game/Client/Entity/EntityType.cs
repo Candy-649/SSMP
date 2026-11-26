@@ -363,5 +363,14 @@ internal enum EntityType {
     /// and lets it out as a player comes near or strikes it. It runs in every game, so that the fly that it makes does
     /// too: as a part of the room, the scene host's game alone made the fly (RoomCreatures).
     /// </summary>
-    GloomflyCocoon
+    GloomflyCocoon,
+
+    /// <summary>
+    /// Not a creature: the lily pad that drifts on the water of the stag boss's room, without health, which the boss
+    /// stands on, held where the pad is every frame, once it goes over to it. It runs in every game, so that it drifts
+    /// alike in every game, by the same dice and the scene host's steps, and the boss on it stands in the same place:
+    /// each game's pad drifted its own way and was bumped by its own player, and the boss on it stood apart in each
+    /// (review of 556ca6e).
+    /// </summary>
+    BossLilypad
 }

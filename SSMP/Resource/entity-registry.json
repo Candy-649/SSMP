@@ -1375,6 +1375,17 @@
     ]
   },
   {
+    "base_object_name": "Lilypad Plat",
+    "type": "BossLilypad",
+    "own_in_each_game": true,
+    "parent_name": "Boss Scene",
+    "components": [
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
     "base_object_name": "Bone Flyer Giant",
     "type": "SavageBeastfly",
     "parent_name": null,
