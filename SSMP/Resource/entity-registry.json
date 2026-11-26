@@ -2,6 +2,7 @@
   {
     "base_object_name": "Coral Conch Driller Giant Solo",
     "type": "GreatConchflies",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -656,6 +657,7 @@
   {
     "base_object_name": "Coral Conch Driller Roar",
     "type": "Conchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3532,7 +3534,35 @@
   {
     "base_object_name": "Driller A",
     "type": "Conchfly",
+    "own_in_each_game": true,
+    "parent_name": "Charge Drillers",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Coral Conch Driller",
+    "fsm_names": [
+      "Control",
+      "Death Checker"
+    ]
+  },
+  {
+    "base_object_name": "Driller A",
+    "type": "Conchfly",
     "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Coral Conch Driller",
+    "fsm_names": [
+      "Control",
+      "Death Checker"
+    ]
+  },
+  {
+    "base_object_name": "Driller B",
+    "type": "Conchfly",
+    "own_in_each_game": true,
+    "parent_name": "Charge Drillers",
     "components": [
       "Rotation"
     ],
@@ -3558,6 +3588,7 @@
   {
     "base_object_name": "Driller C",
     "type": "Conchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
