@@ -610,6 +610,7 @@
   {
     "base_object_name": "Bone Hunter Trapper",
     "type": "GurrTheOutcast",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -897,6 +898,7 @@
   {
     "base_object_name": "Coral Warrior Grey",
     "type": "WatcherAtTheEdge",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2189,6 +2191,7 @@
   {
     "base_object_name": "Blue Assistant",
     "type": "PlasmifiedZango",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
