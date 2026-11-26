@@ -101,16 +101,21 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Takes the steps of the scene host's of each state machine of a thing that waited for the replay of a blow on it,
-    /// as it is made here (see <see cref="TookOthersBlow"/>).
+    /// as it is made here (see <see cref="TookOthersBlow"/>): only that blow's, by the player who struck and its
+    /// number, which a step at another blow waits for no more. Freed by another player's blow whose replay came first,
+    /// the step went into the state that that replay left the thing waiting in, the scene host's step at that blow
+    /// then found it past there, and the replay of the blow of the step, which came later, left it waiting there for
+    /// a step that never came (review of 638a2ec).
     /// </summary>
-    private void TakeStepsForBlow(GameObject struck) {
+    private void TakeStepsForBlow(GameObject struck, ushort striker, uint strike) {
         if (_stepsForBlows.Count == 0) {
             return;
         }
 
         foreach (var fsm in _stepsForBlows.Keys.ToList()) {
-            if (fsm.GameObject == struck) {
-                TakeStepsForBlow(fsm, "as the replay of the blow is made here");
+            var (player, step) = _stepsForBlows[fsm][0];
+            if (fsm.GameObject == struck && BlowOf(player, step) == (striker, strike)) {
+                TakeStepsForBlow(fsm, $"as the replay of blow {strike} of the player {striker} is made here");
             }
         }
     }

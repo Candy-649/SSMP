@@ -1420,8 +1420,10 @@ internal partial class CoopSave {
         }
 
         // A step at a blow of another player on a thing that takes blows by itself waits for the replay of the blow
-        // here, and so does every one after it (see CoopSave.OwnBlowSteps)
-        if (update.PartCount != OwnToldPart && !_settingOntoLatest && WaitsForReplayedBlow(player, fsm, update)) {
+        // here, and so does every one after it (see CoopSave.OwnBlowSteps), also as the creature is set onto the scene
+        // host's latest, after which the replays that waited for its move are made (review of 638a2ec: walked in,
+        // the step counted the blow, and the replay counted it again)
+        if (update.PartCount != OwnToldPart && WaitsForReplayedBlow(player, fsm, update)) {
             return;
         }
 

@@ -179,7 +179,7 @@ internal partial class CoopSave {
     /// <param name="striker">The player who struck.</param>
     /// <param name="strike">The number of the strike in the game of that player.</param>
     private void TookOthersBlow(GameObject struck, ushort striker, uint strike) {
-        TakeStepsForBlow(struck);
+        TakeStepsForBlow(struck, striker, strike);
         if (struck.TryGetComponent<HealthManager>(out var health) && OwnCreatures.Has(struck)) {
             _othersBlowsTaken[(health, striker)] = strike;
             if (_emptiedAtBlows.TryGetValue(health, out var at) && at.Striker == striker && at.Strike <= strike) {
