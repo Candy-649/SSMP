@@ -764,6 +764,7 @@ internal partial class BossRoomCoop {
             MarkFightBegan(self, toState.Name);
             NoteChallengeSpotUse(self);
             NoteHeartEndState(self, toState);
+            NoteRoomEnding(self, toState);
         }
 
         TellSceneHostRoomStarted(self, fromState, toState);

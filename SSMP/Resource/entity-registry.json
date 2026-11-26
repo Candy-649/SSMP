@@ -2255,6 +2255,7 @@
   {
     "base_object_name": "Lost Lace Boss",
     "type": "LostLace",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2275,7 +2276,11 @@
           "Stun Land"
         ]
       }
-    }
+    },
+    "catch_events": [
+      "CS TELE",
+      "CS READY"
+    ]
   },
   {
     "base_object_name": "Zap Core Enemy",

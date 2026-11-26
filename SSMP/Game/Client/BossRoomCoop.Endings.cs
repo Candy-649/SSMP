@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
 using SSMP.Animation.Effects;
@@ -7,9 +8,13 @@ using SSMP.Game.Client.Skin;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
+
+// SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
+using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
 /// The end of a boss that takes the player's character over to play itself out, as one does with a parry and a last
@@ -28,10 +33,21 @@ namespace SSMP.Game.Client;
 /// here, those of a player who comes in meanwhile too, and nothing is drawn in their look; they show again once the
 /// local player has control again, or the room changes. Nobody is told: each game hides the others by itself.
 ///
-/// An end is an action of a creature's FSM that takes the character's control once the creature has no health left.
-/// The game gives control back at the end, and a hit gives it back too, as when the player did not parry in time.
+/// An end is an action of a creature's FSM that takes the character's control once the creature has no health left,
+/// or, for a creature that every game runs by itself, a machine of the room that plays its end as the character goes
+/// into it (see <see cref="RoomEndings"/>). The game gives control back at the end, and a hit gives it back too, as
+/// when the player did not parry in time.
 /// </summary>
 internal partial class BossRoomCoop {
+    /// <summary>
+    /// The machines of rooms that play the end of the room's boss, which every game runs by itself, as the local
+    /// player's character goes into it: by the scene, the object, its state machine and the first state of the end
+    /// (see <see cref="NoteRoomEnding"/>).
+    /// </summary>
+    private static readonly HashSet<(string Scene, string Object, string Fsm, string State)> RoomEndings = [
+        ("Abyss_Cocoon", "Superjump Sequence", "Control", "Lift 1")
+    ];
+
     /// <summary>
     /// Whether a creature's end has the local player's character, which the other players in the room were told.
     /// </summary>
@@ -124,16 +140,9 @@ internal partial class BossRoomCoop {
         }
 
         if (OwnCreatures.Owning(creature.gameObject) != null) {
-            _ownEndingHasLocalPlayer = true;
-            HeldLook.StopAll();
-            HeldLook.LocalEnding = true;
-            _hideOthers ??= HideOthers;
-            MonoBehaviourUtil.Instance.OnUpdateEvent += _hideOthers;
-            HideOthers();
-            Logger.Info(
-                $"[Ending] '{creature.name}', which every game runs by itself, with no health left, took this " +
-                $"player's character in '{fsm.ActiveStateName}' of '{fsm.Name}' to play its end, so the other " +
-                "players hide here until it is over"
+            HideOthersForOwnEnding(
+                $"'{creature.name}', which every game runs by itself, with no health left, took this player's " +
+                $"character in '{fsm.ActiveStateName}' of '{fsm.Name}' to play its end"
             );
             return;
         }
@@ -143,6 +152,38 @@ internal partial class BossRoomCoop {
         Logger.Info(
             $"[Ending] '{creature.name}', with no health left, took this player's character in " +
             $"'{fsm.ActiveStateName}' of '{fsm.Name}' to play its end, which the other players in the room watch"
+        );
+    }
+
+    /// <summary>
+    /// Has the other players hide here while the end of a creature that every game runs by itself has the local
+    /// player's character (see <see cref="HideOthers"/>).
+    /// </summary>
+    private void HideOthersForOwnEnding(string what) {
+        _ownEndingHasLocalPlayer = true;
+        HeldLook.StopAll();
+        HeldLook.LocalEnding = true;
+        _hideOthers ??= HideOthers;
+        MonoBehaviourUtil.Instance.OnUpdateEvent += _hideOthers;
+        HideOthers();
+        Logger.Info($"[Ending] {what}, so the other players hide here until it is over");
+    }
+
+    /// <summary>
+    /// Has the other players hide here as a machine of the room that plays the end of a creature that every game runs
+    /// by itself takes the local player's character into it (see <see cref="RoomEndings"/>), which no action of the
+    /// creature's own does: the lost one of the cocoon, once dead, leaves its end to the sequence of the room, which
+    /// the player sets off themselves as they come up to it, and which the game takes the character for as they do.
+    /// </summary>
+    private void NoteRoomEnding(Fsm fsm, FsmState toState) {
+        if (_ownEndingHasLocalPlayer || fsm.GameObject == null ||
+            !RoomEndings.Contains((SceneManager.GetActiveScene().name, fsm.GameObject.name, fsm.Name, toState.Name))) {
+            return;
+        }
+
+        HideOthersForOwnEnding(
+            $"'{fsm.GameObject.name}' took this player's character into '{toState.Name}' of '{fsm.Name}' to play " +
+            "the end of the boss of the room, which every game runs by itself"
         );
     }
 
