@@ -389,6 +389,7 @@
   {
     "base_object_name": "Crowman Dagger Juror",
     "type": "SquatcrawJuror",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -918,6 +919,7 @@
   {
     "base_object_name": "Crowman Juror Tiny",
     "type": "CrawJuror",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2340,6 +2342,7 @@
   {
     "base_object_name": "Crowman Juror",
     "type": "TallcrawJuror",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3174,6 +3177,7 @@
   {
     "base_object_name": "Crawfather",
     "type": "Crawfather",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3191,7 +3195,10 @@
           "Stun Land"
         ]
       }
-    }
+    },
+    "catch_events": [
+      "MULTI HIT CONNECT"
+    ]
   },
   {
     "base_object_name": "Crypt Worm",

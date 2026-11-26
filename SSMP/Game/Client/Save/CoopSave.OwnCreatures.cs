@@ -178,8 +178,9 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, HashSet<string>> _ownValues = new();
 
     /// <summary>
-    /// The variables that the machines of each loaded room that run by the scene host's word set on other state
-    /// machines, by the name of the state machine and of the variable (see MachineSetValues).
+    /// The variables that the machines of each loaded room that run by the scene host's word, and the creatures of it
+    /// that every game runs by itself, set on other state machines, by the name of the state machine and of the
+    /// variable (see MachineSetValues).
     /// </summary>
     private readonly Dictionary<string, HashSet<(string Fsm, string Variable)>> _machineSetValues = new();
 
@@ -1843,8 +1844,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The variables that the machines of a room that run by the scene host's word set on other state machines, by the
-    /// name of the state machine and of the variable (see CoopSave.PacedMachines, CoopSave.DirectedFights), found once
-    /// for the room.
+    /// name of the state machine and of the variable (see CoopSave.PacedMachines, CoopSave.DirectedFights), and those
+    /// that the creatures of the room that every game runs by itself, and their parts, set so, found once for the room
+    /// (the room's creatures are taken as it loads, see OwnCreatures.Take).
     /// </summary>
     private HashSet<(string Fsm, string Variable)> MachineSetValues(UnityEngine.SceneManagement.Scene room) {
         if (_machineSetValues.TryGetValue(room.name, out var set)) {
@@ -1854,7 +1856,8 @@ internal partial class CoopSave {
         set = [];
         foreach (var root in room.GetRootGameObjects()) {
             foreach (var machine in root.GetComponentsInChildren<PlayMakerFSM>(true)) {
-                if (FindMachineKind(machine.gameObject, machine.FsmName) == null) {
+                if (FindMachineKind(machine.gameObject, machine.FsmName) == null &&
+                    OwnCreatures.Owning(machine.gameObject) == null) {
                     continue;
                 }
 
@@ -1873,14 +1876,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The state machine and the variable of it that an action sets a switch or a number of, on another state machine
-    /// than its own, or null for an action that sets none.
+    /// The state machine and the variable of it that an action sets a switch or a number of, or adds to a number of,
+    /// on another state machine than its own, or null for an action that sets none.
     /// </summary>
     private static (string Fsm, string Variable)? VariableSetOnAnother(FsmStateAction action) {
         var (fsmName, variableName) = action switch {
             HutongGames.PlayMaker.Actions.SetFsmBool set => (set.fsmName, set.variableName),
             HutongGames.PlayMaker.Actions.SetFsmInt set => (set.fsmName, set.variableName),
             HutongGames.PlayMaker.Actions.SetFsmFloat set => (set.fsmName, set.variableName),
+            HutongGames.PlayMaker.Actions.FsmIntAdd add => (add.fsmName, add.variableName),
             _ => (null, null)
         };
         return fsmName?.Value is { Length: > 0 } fsm && variableName?.Value is { Length: > 0 } variable
@@ -2179,7 +2183,11 @@ internal partial class CoopSave {
     /// that the fall of their fight pours. A game that follows the scene host's starts each round of such a machine at
     /// the scene host's word, a moment late, and sets the value as late: its foremen, back at their rest in that
     /// moment, found the lava still coming and leapt away from lava that the scene host's foremen knew was gone, to be
-    /// put back at the scene host's next step (review of 790db7f).
+    /// put back at the scene host's next step (review of 790db7f). So too one that a creature that every game runs by
+    /// itself sets on it at a moment of each game's own, as at its death: a juror of the court of the crows takes one
+    /// off the count of the summoned as it falls, by which their father calls more, and a juror felled by a blow of
+    /// one game's player a moment before the scene host's game had it fall, or after, made the father call there and
+    /// not in the other.
     /// </summary>
     private bool ChoosesByOwnValue(FsmState state) {
         var fsm = state.Fsm;
