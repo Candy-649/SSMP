@@ -232,6 +232,16 @@ internal partial class GamePatcher {
             return orig(self);
         }
 
+        // So does a range that a state machine asks which each game runs by itself for its own player, of a creature
+        // that every game runs by itself (see Entity.OwnCreatures.RunsInEachGame): the pale stag of the lilies keeps
+        // the nail off itself while the player stands under it, high up, and the conductor of the ward keeps blows
+        // from above off its head while the player stands over it. Asked about the player that the creature goes
+        // after, the stag kept off the nail of a player beside it while the other stood under it
+        if (HutongGames.PlayMaker.FsmExecutionStack.ExecutingFsm?.FsmComponent is { } asker &&
+            Entity.OwnCreatures.RunsInEachGame(asker)) {
+            return orig(self);
+        }
+
         // A thing that sends creatures at the players in its ranges asks about one player for each run of it, in the
         // game that runs it (see AnswerForSenderRun)
         if (GetEnemyTargetOwner(self.gameObject) is { } thing && SenderRunOf(thing) is { } run) {

@@ -213,6 +213,12 @@ internal partial class CoopSave {
         // coming in isn't the host's, and its word can come up to some 15 s after that pause is over.
         new(["Sauna Control"], "FSM", ["Drip Sequence"], sceneName: "Dock_10", holdLimit: 16f),
 
+        // The machine of the room before the fight with the conductor of the ward that sends husks out again once the
+        // fight is won, two at a time that it picks, whenever a player is near and the last two are back under it,
+        // dead. The husks run in every game (D109), so the machine of each game would send others than the scene
+        // host's, at times of its own; a round starts as it picks.
+        new(["Respawn Scene"], "Control", ["Spawn Choice"], sceneName: "Ward_02", wholeNames: true),
+
         // The controller of the fight with the two dancers, which the other game follows in every state from the first
         // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
         // beat setting off, each game has by itself.
@@ -242,6 +248,21 @@ internal partial class CoopSave {
             ownStateNames: [
                 "Init", "Briefly Activate Bell Beast NPC", "Dormant", "Set HP", "Body R Up", "Intro Cam",
                 "Body L Down", "Roar Head Up", "Intro Roar", "Intro Roar End", "Start Pause", "Battle Start"
+            ]
+        ),
+
+        // The controller of the fight with the conductor of the ward, which sends its husks in, wave after wave, goes
+        // on to the next wave as they are all back under it, dead, which each game has a moment otherwise, wakes the
+        // conductor and holds back the next wave until the conductor tells it that it was struck down to its next
+        // part. The other game follows it in every state from the first husk on. The start before that, with the title
+        // of the boss, each game has by itself as its player walks in, and so the end after the conductor bursts: the
+        // heart that each player takes in their own game, which marks the boss beaten for them, and the gate that
+        // opens for them once they took it.
+        new(
+            ["Boss Scene"], "Control", [], sceneName: "Ward_02_boss", wholeNames: true,
+            ownStateNames: [
+                "Init", "Idle", "Arena Start", "Shuffle R", "Boss Title", "Encountered Pause", "Encountered Start",
+                "Silk Heart", "Battle End", "Open Gate"
             ]
         ),
 
@@ -1479,8 +1500,9 @@ internal partial class CoopSave {
         public string? SceneName { get; }
 
         /// <summary>
-        /// For the controller of a fight, the states that each game goes into by itself: the start of the fight. Every
-        /// other state is paced. Null for a machine that is paced at the starts of its rounds.
+        /// For the controller of a fight, the states that each game goes into by itself: the start of the fight, and
+        /// for one whose end is each player's own, the end. Every other state is paced. Null for a machine that is
+        /// paced at the starts of its rounds.
         /// </summary>
         public HashSet<string>? OwnStateNames { get; }
 

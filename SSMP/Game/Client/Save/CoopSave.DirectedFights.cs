@@ -47,6 +47,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// Anything else that would send it into the fight before that, like a dancer's word of a fight that is further on in
 /// the host's game, is turned away, so that the start is played to the end.
 ///
+/// So each game has by itself an end that is for its own player, like that of the fight with the conductor of the
+/// ward: once the conductor bursts, a heart comes for each player to take in their own game, and the controller marks
+/// the boss beaten for them and opens the gate as they take it. Followed, it went on as the scene host's player took
+/// theirs.
+///
 /// The parts that a state of a controller switches on start their own state machines, which may roll as they start.
 /// One switched on again starts again at once, in the middle of the state, so its rolls go with the dice of the state;
 /// but the game starts one that was never on a moment later, after the state, so the first time, each game rolled its
@@ -127,10 +132,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Decides what a change of state of the controller of a fight does. One into the start of the fight goes on as
-    /// usual, as does any while the partner isn't in the room. Any other is told to the partner by the scene host's,
-    /// and held back by the other game's until the host's word comes, or traded for a word that came already. The
-    /// other game's, still in its start, goes into the fight only by the way out of its start.
+    /// Decides what a change of state of the controller of a fight does. One into the start of the fight, or into an
+    /// end that is each player's own, goes on as usual, as does any while the partner isn't in the room. Any other is
+    /// told to the partner by the scene host's, and held back by the other game's until the host's word comes, or
+    /// traded for a word that came already. The other game's, still in its start, goes into the fight only by the way
+    /// out of its start.
     /// </summary>
     private MachineStep DecideDirectorSwitch(Fsm fsm, FsmState toState, MachineKind director) {
         // The state of the scene host's word that it is going into here

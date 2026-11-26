@@ -51,6 +51,7 @@
   {
     "base_object_name": "Song Threaded Husk Spin New",
     "type": "Dregwheel",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -169,6 +170,7 @@
   {
     "base_object_name": "Ward Corpse Projectile",
     "type": "DregHusk",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1029,6 +1031,7 @@
   {
     "base_object_name": "Song Threaded Husk",
     "type": "DregHusk",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2234,6 +2237,7 @@
   {
     "base_object_name": "Conductor Boss",
     "type": "TheUnravelled",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2242,6 +2246,9 @@
     "fsm_names": [
       "Control",
       "Custom Stun Control",
+      "Head Invuln Check"
+    ],
+    "each_game_fsms": [
       "Head Invuln Check"
     ]
   },
@@ -3734,6 +3741,7 @@
   {
     "base_object_name": "Slasher 1",
     "type": "DregHusk",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3747,6 +3755,7 @@
   {
     "base_object_name": "Slasher 2",
     "type": "DregHusk",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3760,6 +3769,7 @@
   {
     "base_object_name": "Slammer 1",
     "type": "Dregwheel",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3772,6 +3782,7 @@
   {
     "base_object_name": "Slammer 2",
     "type": "Dregwheel",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
