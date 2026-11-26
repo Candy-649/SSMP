@@ -199,6 +199,12 @@ internal partial class CoopSave {
     private readonly Dictionary<(Fsm Fsm, string State), bool> _putsItself = new();
 
     /// <summary>
+    /// Whether each state of a creature that every game runs by itself, or of a part of it, whose steps this game has
+    /// looked at puts something where the player that the creature goes after is (see PlacesByPlayer).
+    /// </summary>
+    private readonly Dictionary<FsmState, bool> _placesByPlayer = new();
+
+    /// <summary>
     /// The state machines of creatures that every game runs by itself that took a step here that a blow set off, of
     /// this game's player or another's as it came, or a hurt of a player (see CoopSave.OwnHits), and go on from there
     /// by themselves until they next wait for a step of the scene host's (see TakeOwnStep).
@@ -568,7 +574,9 @@ internal partial class CoopSave {
         // A step that goes by where the players are or by a count that each game keeps for itself, or that another
         // state machine told it, is the scene host's: it waits for that, which has mostly come already, as this game
         // is a moment behind. So is a step into a state that tells a part of the room which it picks by where a player
-        // is, after which the scene host's game tells which part it picked (see CoopSave.OwnPicks). The switch that the
+        // is, after which the scene host's game tells which part it picked (see CoopSave.OwnPicks), and one into a
+        // state that puts something where the player it goes after is, like the mark that it aims at, which goes where
+        // the scene host's game had the player as it starts the step here (see PlacesByPlayer). The switch that the
         // game was to make is let go of, as the game tries it again at once until it is made. A leap at this game's
         // player is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which
         // it waits for the scene host's to come as far, and so is a step before the fight into a state whose steps of
@@ -588,6 +596,7 @@ internal partial class CoopSave {
         var setOffHere = !LeadsMove(self) && !CatchesLocalPlayer(self, toState, creature) &&
                          ToldFromOutside(self, toState, creature);
         var picks = PicksAPart(toState);
+        var places = PlacesByPlayer(toState);
 
         // A move that a thing of this game's player sets off, which a state machine that each game runs by itself for
         // its own player tells it of, finds what they have on here, which every other game is told (see
@@ -621,7 +630,7 @@ internal partial class CoopSave {
 
         if (OwnCreatures.FollowsSceneHost(creature) && !PlaysOwnLeap(machine, toState) &&
             !GoesByItselfBeforeFight(self, toState) &&
-            (WaitsAfterOwnTalk(self) || waitedFor && !setOffByStrike && !setOffHere || picks)) {
+            (WaitsAfterOwnTalk(self) || (waitedFor || places) && !setOffByStrike && !setOffHere || picks)) {
             MachineSwitchToStateField?.SetValue(self, null);
             _ownWays.Remove(self);
             if (!_heldOwnSteps.TryGetValue(self, out var waits) || waits != self.ActiveStateName) {
@@ -651,10 +660,10 @@ internal partial class CoopSave {
         // A blow of this game's player sets it off on a way of its own here a round trip before the scene host's game
         // has the blow: the steps that that game took before go by (see AwaitsLocalBlow), and so do the steps of the
         // scene host's that it kept to get to by itself (review of a0d1558). Only where that game tells its answer,
-        // which a part tells only of the steps that the others wait for or that pick (see below): one that a part takes
-        // by itself, like a tink, waits for no answer (review of 45dad32)
+        // which a part tells only of the steps that the others wait for, that pick or that put something where the
+        // player is (see below): one that a part takes by itself, like a tink, waits for no answer (review of 45dad32)
         if (CoopHits.IsMakingLocalStrike && OwnCreatures.FollowsSceneHost(creature) &&
-            (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
+            (!OwnCreatures.IsPart(creature) || waitedFor || picks || places)) {
             var strike = CoopHits.LocalStrikeNumber;
             var into = _awaitedBlows.TryGetValue(self, out var armed) && armed.Strike == strike
                 ? armed.Into
@@ -699,11 +708,12 @@ internal partial class CoopSave {
         }
 
         // A part tells only the steps that the others wait for, which it took by where the players are, by a count or
-        // as it was told, or into a state that picks a part of the room: the rest of them the others take by
-        // themselves, and a part steps on many times in each move. One that a blow set off is told as such, of another
-        // player, with whose it was, or of this game's own, and so is one of a strike back at a blow of another player
-        // that this game takes at the word of their game (see MovesAt)
-        if (IsSceneHost?.Invoke() == true && !hit && (!OwnCreatures.IsPart(creature) || waitedFor || picks)) {
+        // as it was told, or into a state that picks a part of the room or puts something where the player is: the
+        // rest of them the others take by themselves, and a part steps on many times in each move. One that a blow set
+        // off is told as such, of another player, with whose it was, or of this game's own, and so is one of a strike
+        // back at a blow of another player that this game takes at the word of their game (see MovesAt)
+        if (IsSceneHost?.Invoke() == true && !hit &&
+            (!OwnCreatures.IsPart(creature) || waitedFor || picks || places)) {
             Logger.Info(
                 $"[Own creatures] '{OwnCreatures.PlaceOf(creature)}' goes from '{self.ActiveStateName}' to " +
                 $"'{toState.Name}' of '{self.Name}'" + (struck ? " at a blow" : "") +
@@ -1935,6 +1945,31 @@ internal partial class CoopSave {
                 ToldValues.ObjectsStoredBy(action).Any()) &&
                GamePatcher.LooksAtAPlayerByMake(action) &&
                !Entity.Action.EntityFsmActions.DealsWithThePlayerIn(action.State);
+    }
+
+    /// <summary>
+    /// Whether a state puts something where the player that its creature goes after is, like the mark that a boss aims
+    /// its dash or throw at, the point by which a grasshopper of the clover woods comes out of its jump or the creature
+    /// itself: each game would put it where it has that player, a little elsewhere in each, and the creature would come
+    /// at another place in each game until the scene host's next step put it where the scene host's was. Its step in is
+    /// the scene host's, whose first look at the player looks where the scene host's game had them (see
+    /// OwnCreatures.TargetThere): what looks at the players goes by the scene host's game (USER 11-25 "看人的部分听房主";
+    /// "客机就不应该挑招"). Not in a state that does something to the player, like a catch that puts a stand-in of the
+    /// caught player where they are, which is about the player caught (see
+    /// GamePatcher.LooksAtAPlayerByMake), found once for each state.
+    /// </summary>
+    private bool PlacesByPlayer(FsmState state) {
+        if (!_placesByPlayer.TryGetValue(state, out var places)) {
+            places = state.Actions.Any(
+                action => action is { Enabled: true } and (HutongGames.PlayMaker.Actions.SetPositionToObject
+                              or HutongGames.PlayMaker.Actions.SetPositionToObject2D
+                              or HutongGames.PlayMaker.Actions.SetPositionToObject2DV2) &&
+                          GamePatcher.LooksAtAPlayerByMake(action)
+            );
+            _placesByPlayer[state] = places;
+        }
+
+        return places;
     }
 
     /// <summary>
