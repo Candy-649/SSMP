@@ -295,6 +295,12 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, CoopSaveUpdate> _pendingMachineRounds = new();
 
     /// <summary>
+    /// The scene host's words for a controller of a fight here that came while it was still in its own start, every
+    /// one as they came, which it goes through as its start ends (see <see cref="TakeWordsOfTheStart"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, List<CoopSaveUpdate>> _wordsInStart = new();
+
+    /// <summary>
     /// The number of the newest word taken for each machine from each member, whose words count up by themselves, so
     /// that a word that comes late, after a newer one, is dropped.
     /// </summary>
@@ -522,10 +528,12 @@ internal partial class CoopSave {
             case MachineStep.TakePending:
                 _pendingMachineRounds.Remove(fsm, out var pending);
                 if (pending == null || fsm.GetState(pending.StateName) is not { } pendingState) {
+                    _wordsInStart.Remove(fsm);
                     HoldMachineRound(fsm, toState);
                     return;
                 }
 
+                TakeWordsOfTheStart(kind, fsm, pending, state => orig(fsm, state));
                 StartMachineRound(kind, fsm, pending, () => orig(fsm, pendingState));
                 return;
             case MachineStep.StayPut:
@@ -671,6 +679,14 @@ internal partial class CoopSave {
             _takenMachineRounds[(fsm, player.Id)] = update.Sequence;
             if (!TryStartMachineRoundNow(kind, fsm, update)) {
                 _pendingMachineRounds[fsm] = update;
+                if (kind.IsDirector) {
+                    if (!_wordsInStart.TryGetValue(fsm, out var words)) {
+                        words = [];
+                        _wordsInStart[fsm] = words;
+                    }
+
+                    words.Add(update);
+                }
             }
 
             return;
@@ -756,6 +772,30 @@ internal partial class CoopSave {
             SharedDice.Throw(update.Amounts, () => fsm.DoAsItRuns(start));
         } finally {
             _startingMachineRound = lastStarting;
+        }
+    }
+
+    /// <summary>
+    /// Takes the controller of a fight here through the scene host's words that came while it was still in its own
+    /// start (see <see cref="_wordsInStart"/>), up to the last of them, which is then taken as before: each state is
+    /// gone into as its word came, with its dice, and does what it does to the room as it is entered. The newest word
+    /// alone took the controller of the great centipede, whose player walked in late, past the state that makes its
+    /// room wide: the walls of its body and the camera stayed as narrow as at the start in that game, while the head
+    /// and the tail went about the wide room of the scene host's game (review of e499a84).
+    /// </summary>
+    /// <param name="kind">The kind of the controller.</param>
+    /// <param name="fsm">The FSM of the controller.</param>
+    /// <param name="last">The last word, which the caller takes.</param>
+    /// <param name="go">What goes into a state.</param>
+    private void TakeWordsOfTheStart(MachineKind kind, Fsm fsm, CoopSaveUpdate last, Action<FsmState> go) {
+        if (!_wordsInStart.Remove(fsm, out var words)) {
+            return;
+        }
+
+        foreach (var word in words) {
+            if (word != last && fsm.GetState(word.StateName) is { } state) {
+                StartMachineRound(kind, fsm, word, () => go(state));
+            }
         }
     }
 
@@ -878,6 +918,7 @@ internal partial class CoopSave {
         var runsTheRoom = _checkedMembers.Count == 0 || IsSceneHost?.Invoke() == true || !IsMemberInRoom();
         if (runsTheRoom) {
             _pendingMachineRounds.Clear();
+            _wordsInStart.Clear();
             _takenMachineRounds.Clear();
         }
 
@@ -891,6 +932,7 @@ internal partial class CoopSave {
 
             if (fsm.GameObject == null) {
                 _pendingMachineRounds.Remove(fsm);
+                _wordsInStart.Remove(fsm);
                 continue;
             }
 
@@ -900,6 +942,7 @@ internal partial class CoopSave {
 
             if (GoesStraightTo(fsm.ActiveState, update.StateName) || IsInDirectedPart(kind, fsm)) {
                 _pendingMachineRounds.Remove(fsm);
+                TakeWordsOfTheStart(kind, fsm, update, state => fsm.SetState(state.Name));
                 StartMachineRound(kind, fsm, update, () => fsm.SetState(update.StateName));
             } else if (!kind.IsDirector && !kind.IsGrinder) {
                 HurryWaits(fsm.ActiveState);
@@ -1093,6 +1136,7 @@ internal partial class CoopSave {
     private void ResetMachines() {
         _heldMachines.Clear();
         _pendingMachineRounds.Clear();
+        _wordsInStart.Clear();
         _takenMachineRounds.Clear();
         _machinesSaid.Clear();
         _roundThrows.Clear();

@@ -41,10 +41,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// it out again, as the user asked for the parts of the fight on the stage (USER 10-13: 烟花的位置不能直接拿到吗).
 ///
 /// The start of the fight before the first beat each game still has by itself, since what it does there is for its
-/// own player: the gates, the lights and the beat setting off. A word that comes while the controller here is still in
-/// that start is kept, and the controller takes it where its start ends. Anything else that would send it into the
-/// fight before that, like a dancer's word of a fight that is further on in the host's game, is turned away, so that
-/// the start is played to the end.
+/// own player: the gates, the lights and the beat setting off. The words that come while the controller here is still
+/// in that start are kept, every one, and the controller goes through them where its start ends, as the host's did:
+/// what each state does to the room stays, like the walls that one of them puts wide (see TakeWordsOfTheStart).
+/// Anything else that would send it into the fight before that, like a dancer's word of a fight that is further on in
+/// the host's game, is turned away, so that the start is played to the end.
 ///
 /// The parts that a state of a controller switches on start their own state machines, which may roll as they start.
 /// One switched on again starts again at once, in the middle of the state, so its rolls go with the dice of the state;
