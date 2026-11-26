@@ -1603,7 +1603,8 @@ internal partial class CoopSave {
     /// player still lay there had them miss it: they neither bound the boss nor followed the others into the memory it
     /// sends them to, and found its room shut when they came back, and an end that takes the character of one who
     /// plays it, which the others watch (BossRoomCoop.Endings), took it lying there. Each game stands up its own
-    /// player: the game that runs the boss as it dies there, the others as its copy is told so.
+    /// player: the game that runs the boss as it dies there, the others as its copy is told so, and every game as a
+    /// boss that every game runs by itself dies there, of a blow or as told (see OnOwnCreatureDie).
     /// </summary>
     private void StandUpAsABossDies(HealthManager creature) {
         if (_rescue is { Outcome: RescueOutcome.Waiting } && EnemyHealthBars.IsBoss(creature)) {

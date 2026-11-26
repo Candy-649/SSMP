@@ -727,6 +727,14 @@ internal partial class CoopSave {
             overrideSpecialDeath, disallowDropFlying
         );
 
+        // A boss that dies here, at a blow or as told, stands the local player up if they lie in their cocoon, as the
+        // death of a copy does (see StandUpAsABossDies): the end of a boss that takes the character found the player
+        // lying there, as each game plays it on its own player (see BossRoomCoop.Endings)
+        if (OwnCreatures.Has(self.gameObject) &&
+            (self.isDead || self.hasSpecialDeath && self.hp <= 0 && HearsNoHealth(self))) {
+            StandUpAsABossDies(self);
+        }
+
         // One whose state machines play its death, like a boss, is never marked dead, and dies again at each blow
         // that finds it with no health: it is told once, where they play it as the game tells them that it has none.
         // One whose state machines go on by their own look at its health, like the boss at the end of the second act
