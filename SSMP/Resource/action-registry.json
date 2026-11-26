@@ -660,7 +660,8 @@
     "targeted_fsm": true
   },
   {
-    "type": "DockClamberCheck"
+    "type": "DockClamberCheck",
+    "targeted_fsm": true
   },
   {
     "type": "EaseColor"

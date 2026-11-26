@@ -2616,6 +2616,7 @@
   {
     "base_object_name": "Dock Charger",
     "type": "DeepDiver",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
