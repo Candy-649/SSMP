@@ -502,8 +502,7 @@ internal partial class CoopSave {
 
         // Their game has the creatures that every game runs by itself where the room starts them, and let out of
         // their groups as their game picked, before what the creatures here do comes
-        SendRoomPicksTo(player);
-        SendOwnCreaturesTo(player);
+        SendOwnRoomTo(player);
 
         // The heat lamps are whole in their game, which just loaded the room (see CoopSave.HeatLamps)
         if (cameIn) {
