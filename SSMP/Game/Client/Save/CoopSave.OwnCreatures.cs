@@ -2140,10 +2140,13 @@ internal partial class CoopSave {
     /// the blows of every player, its own player's at once and the others' as they come, and counts some of them in
     /// another state than the others, so that a count is full at another blow in each game: the scene host's is the
     /// one (review: the striker's game stunned the boss at a blow of its own, and played the stun again as the scene
-    /// host's step came). Its health is no such count: what it does as it has none goes by the scene host's word that
-    /// it has none (see CoopSave.OwnHealth). So is how many objects there are under one (GetChildCount), like the
-    /// flies that a conductor made, under the object of the dead ones, which each game has more or fewer of for a
-    /// moment as a fly dies at another moment there, and calls back: the scene host's count is the one.
+    /// host's step came). Its health, as it reads it to choose a part of its fight by (GetHP), is such a count too:
+    /// it comes under the mark of the next part at another blow in each game, and the giant driller, a blow short of
+    /// it in one game, chose a move of its first part there while the scene host's roared into its second (review of
+    /// d71f2ce; USER 11-17 "我说白了血条听房主的"). What it does as it has none goes by the scene host's word that it has
+    /// none (see CoopSave.OwnHealth). So is how many objects there are under one (GetChildCount), like the flies that a
+    /// conductor made, under the object of the dead ones, which each game has more or fewer of for a moment as a fly
+    /// dies at another moment there, and calls back: the scene host's count is the one.
     /// </summary>
     private bool ChoosesByCount(FsmState state) {
         var fsm = state.Fsm;
@@ -2159,6 +2162,12 @@ internal partial class CoopSave {
                             storeResult: { UseVariable: true, Name.Length: > 0 } children
                         }) {
                         counted.Add(children.Name);
+                    }
+
+                    if (action is HutongGames.PlayMaker.Actions.GetHP {
+                            storeValue: { UseVariable: true, Name.Length: > 0 } health
+                        }) {
+                        counted.Add(health.Name);
                     }
                 }
             }
