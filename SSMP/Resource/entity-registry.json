@@ -2004,6 +2004,7 @@
   {
     "base_object_name": "Lace Boss2 New",
     "type": "Lace",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3254,6 +3255,7 @@
   {
     "base_object_name": "Lace Boss1",
     "type": "Lace",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
