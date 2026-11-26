@@ -1533,6 +1533,7 @@
   {
     "base_object_name": "Spike Lazy Flyer",
     "type": "Imoba",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
