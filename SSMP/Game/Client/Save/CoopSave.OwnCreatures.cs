@@ -2176,7 +2176,9 @@ internal partial class CoopSave {
     ///
     /// The save of the player of the game (a test of PlayerData, or what GetPlayerData stores), which differs between
     /// players: the last judge, at the first sight of the player, threw its censer in a game whose player had never met
-    /// it and waited in the other's (review of 556ca6e).
+    /// it and waited in the other's (review of 556ca6e). So does what the player has on (CheckIfToolEquipped): the
+    /// shaman of the swamp swallows a bomb into the burst of poison where the player has the pouch on, and a game whose
+    /// player had not would burst it plain, to be put back into the swallow as the scene host's step came.
     ///
     /// A value that a machine of the room that runs by the scene host's word sets on its state machine (see
     /// <see cref="MachineSetValues"/>), like the flag by which the foremen of the docks leap out of the way of the lava
@@ -2217,6 +2219,7 @@ internal partial class CoopSave {
         foreach (var action in state.Actions) {
             if (action.Enabled && Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
                 (action.GetType().Name.IndexOf("PlayerData", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 action is HutongGames.PlayMaker.Actions.CheckIfToolEquipped ||
                  Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(own.Contains))) {
                 return true;
             }

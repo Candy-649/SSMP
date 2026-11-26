@@ -2776,6 +2776,7 @@
   {
     "base_object_name": "Swamp Shaman",
     "type": "GroalTheGreat",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2784,6 +2785,9 @@
     "fsm_names": [
       "Control",
       "Stun Control"
+    ],
+    "each_game_fsms": [
+      "Detect Grab"
     ],
     "runs_here": {
       "Control": {
