@@ -121,17 +121,17 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a state tells a creature that its part caught the player, by one of the events of a catch (see
-    /// <see cref="IsCatchEvent"/>).
+    /// The event of a catch (see <see cref="IsCatchEvent"/>) by which a state tells a creature that its part caught the
+    /// player, or null if it tells none.
     /// </summary>
-    private static bool TellsACatch(FsmState state) {
+    private static string? CatchToldIn(FsmState state) {
         foreach (var action in state.Actions) {
             if (action is SendEventByName { sendEvent.Value: { } name } && IsCatchEvent(name)) {
-                return true;
+                return name;
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
@@ -146,9 +146,11 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether a creature catches by an event whoever touches what it watches, whomever it goes after, as its entry
     /// lists the event (see EntityRegistryEntry.CatchEvents): the tendril of the maw that hangs from the ceiling grabs
-    /// whichever player walks into it, as in a game of one, and as it did as a copy. Held to whom it goes after, it
-    /// would go after the first player it grabbed from then on, as the grab has it (see GamePatcher.GoAfterGrabbed),
-    /// and never grab another.
+    /// whichever player walks into it, as in a game of one, and as it did as a copy, and so do the drills of the
+    /// drillers that sweep the room of the fight with the giant driller aiming at nobody, across it at the giant's
+    /// word or up and down at its roar. Held to whom it goes after, each would go after the first player it caught
+    /// from then on, as the catch has it (see GamePatcher.GoAfterGrabbed), and never catch another: the drill went
+    /// through them unfelt (review of d71f2ce).
     /// </summary>
     private static bool CatchesWhoeverTouches(GameObject creature, string eventName) {
         return EntityRegistry.TryGetEntry(creature, out var entry) && entry.CatchEvents?.Contains(eventName) == true;

@@ -391,11 +391,12 @@ internal partial class CoopSave {
         }
 
         // A part of such a creature catches the local player only while the creature goes after them (see
-        // CoopSave.OwnCatches). One that looks at a player takes its steps as the creature does, and the rest of them
-        // go as the game has them, with their own dice (see OwnCreatures)
+        // CoopSave.OwnCatches), but for one that catches whoever touches it, like the drill of a driller that sweeps
+        // the room aiming at nobody (see CatchesWhoeverTouches). One that looks at a player takes its steps as the
+        // creature does, and the rest of them go as the game has them, with their own dice (see OwnCreatures)
         if (!OwnCreatures.Has(machine.gameObject)) {
-            if (TellsACatch(toState) && OwnCreatures.Owning(machine.gameObject) is { } owner &&
-                !GoesAfterLocalPlayer(owner)) {
+            if (CatchToldIn(toState) is { } told && OwnCreatures.Owning(machine.gameObject) is { } owner &&
+                !GoesAfterLocalPlayer(owner) && !CatchesWhoeverTouches(owner, told)) {
                 RefuseCatch(self, owner, toState);
                 return;
             }

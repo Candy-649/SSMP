@@ -666,6 +666,9 @@
     "fsm_names": [
       "Control",
       "FSM"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
@@ -3544,6 +3547,9 @@
     "fsm_names": [
       "Control",
       "Death Checker"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
@@ -3571,6 +3577,9 @@
     "fsm_names": [
       "Control",
       "Death Checker"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
@@ -3597,6 +3606,9 @@
     "internal_name": "Coral Conch Driller",
     "fsm_names": [
       "Control"
+    ],
+    "catch_events": [
+      "MULTI HIT CONNECT"
     ]
   },
   {
