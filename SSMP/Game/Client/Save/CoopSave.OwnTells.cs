@@ -35,7 +35,7 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// there may go by where the players are.
 ///
 /// So goes a touch of this game's player that a state machine of the creature feels itself, as what it watches feels
-/// them come in, or a strike of theirs (see <see cref="FeltByLocalPlayer"/>).
+/// them come in (see <see cref="FeltByLocalPlayer"/>).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -43,9 +43,16 @@ internal partial class CoopSave {
     /// that game that something outside the creature told a state machine of it to go on there, with the event (see
     /// <see cref="TellOwnTell"/>): the scene host's game takes it (see <see cref="TakeOwnTell"/>).
     /// <see cref="CoopSaveUpdate.Key"/> is 1 for a tell of a state machine that each game runs by itself (see
-    /// <see cref="ToldByEachGame"/>), and 0 for any other.
+    /// <see cref="ToldByEachGame"/>), 2 for a touch of that game's player that the state machine felt itself (see
+    /// <see cref="FeltByLocalPlayer"/>), which only that game has, and 0 for any other.
     /// </summary>
     private const ushort OwnTellPart = 16;
+
+    /// <summary>
+    /// The <see cref="CoopSaveUpdate.Key"/> of the word of a touch of that game's player that a state machine of a
+    /// creature felt itself (see <see cref="OwnTellPart"/>).
+    /// </summary>
+    private const ulong FeltTellKey = 2;
 
     /// <summary>
     /// How long, in seconds, the scene host's game takes the same tell of a state machine as played already, by itself
@@ -90,13 +97,21 @@ internal partial class CoopSave {
     private static readonly Dictionary<Type, FieldInfo?> TouchKindFields = new();
 
     /// <summary>
+    /// The field of each kind of action that feels what touches it which says what object it feels it on, by type, or
+    /// null for a kind without one (see <see cref="FeelsOnOwner"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo?> TouchObjectFields = new();
+
+    /// <summary>
     /// Whether a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
     /// goes to a state as it feels this game's player touch what it watches itself: a trigger or a collision of an
-    /// action of the state it is in, which this game's player came into, they or a strike of theirs, like the spikes of
-    /// the coral brute, which a strike of theirs breaks, or a creature lying dormant that sets off as they come to it.
-    /// No other game feels them there: the figure of a player in another game touches nothing that waits for one. It
-    /// plays here at once, and the scene host's game is told, as of what something outside the creature tells it here
-    /// (USER 11-25 "就本地先演，本地的怪本来就是活的"). Before, it went its own way here, which the scene host's game
+    /// action of the state it is in, which this game's player came into, they or a strike of theirs, like a creature
+    /// lying dormant that sets off as they come to it. No other game feels them there: the figure of a player in
+    /// another game touches nothing that waits for one. It plays here at once, and the scene host's game is told, as of
+    /// what something outside the creature tells it here (USER 11-25 "就本地先演，本地的怪本来就是活的"), or, for a
+    /// strike, as of the touch it was (see CoopHits.OnLocalAttackTouch), which every other game replays, and which the
+    /// state machine there feels as it does here: as what a strike sets off as it is made, which this game waits for
+    /// the scene host's answer to (see AwaitsLocalBlow). Before, it went its own way here, which the scene host's game
     /// never heard of, and was put back onto the steps of the scene host's a moment later, or waited for good for a
     /// step of the scene host's where its state goes by where the players are. Not a player leaving what it watches,
     /// which says nothing of the others, nor a way into a state that their leaving takes it out of again, which each
@@ -109,21 +124,35 @@ internal partial class CoopSave {
     private bool FeltByLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
         if (Fsm.EventData?.SentByFsm != fsm || fsm.LastTransition is not { } way || way.ToState != toState.Name ||
             fsm.ActiveState is not { } from || HeroController.SilentInstance is not { } hero ||
-            !OwnCreatures.FollowsSceneHost(creature) ||
-            toState.Actions.Any(action => FeelsTouch(action, out _) && FeelsLeaving(action)) ||
-            Entity.Action.EntityFsmActions.DealsWithThePlayerIn(toState) ||
-            StartsBossFight?.Invoke(fsm, from, way.EventName) == true) {
+            !TouchedByLocalPlayer(fsm, from, way.EventName, hero)) {
             return false;
         }
 
+        return OwnCreatures.FollowsSceneHost(creature) &&
+               !toState.Actions.Any(action => FeelsTouch(action, out _) && FeelsLeaving(action)) &&
+               !Entity.Action.EntityFsmActions.DealsWithThePlayerIn(toState) &&
+               StartsBossFight?.Invoke(fsm, from, way.EventName) != true;
+    }
+
+    /// <summary>
+    /// Whether an action of a state that feels what touches the state machine's own object, and can send an event,
+    /// felt this game's player come into it, they or a strike of theirs: each by what the state machine keeps of what
+    /// touched it last, by a trigger or by a collision as the action feels it (see <see cref="FeltByLocalPlayer"/>).
+    /// Not one that feels what touches another object, which hears of it through a component of that object, whose
+    /// tell no state machine sends (review of fab59c0).
+    /// </summary>
+    private static bool TouchedByLocalPlayer(Fsm fsm, FsmState from, string eventName, HeroController hero) {
         foreach (var action in from.Actions) {
-            if (!FeelsTouch(action, out var trigger) || FeelsLeaving(action) || !Sends(action, way.EventName)) {
+            if (!FeelsTouch(action, out var trigger) || !FeelsOnOwner(action) || FeelsLeaving(action) ||
+                !Sends(action, eventName)) {
                 continue;
             }
 
             var toucher = trigger ? fsm.TriggerCollider2D : fsm.Collision2DInfo?.collider;
-            return toucher != null &&
-                   (toucher.transform.IsChildOf(hero.transform) || Entity.Entity.IsStrikeOfTheLocalPlayer(toucher));
+            if (toucher != null &&
+                (toucher.transform.IsChildOf(hero.transform) || Entity.Entity.IsStrikeOfTheLocalPlayer(toucher))) {
+                return true;
+            }
         }
 
         return false;
@@ -137,6 +166,21 @@ internal partial class CoopSave {
         var kind = action.GetType().Name;
         trigger = kind.StartsWith("Trigger", StringComparison.Ordinal);
         return action.Enabled && (trigger || kind.StartsWith("Collision", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Whether an action that feels what touches it feels it on the state machine's own object, which tells the state
+    /// machine itself of the touch (see <see cref="TouchedByLocalPlayer"/>): one whose object is its owner. One without
+    /// a field for its object hears of it through a component that it puts on the object.
+    /// </summary>
+    private static bool FeelsOnOwner(FsmStateAction action) {
+        var type = action.GetType();
+        if (!TouchObjectFields.TryGetValue(type, out var objectField)) {
+            objectField = type.GetField("gameObject", BindingFlags.Instance | BindingFlags.Public);
+            TouchObjectFields[type] = objectField;
+        }
+
+        return objectField?.GetValue(action) is FsmOwnerDefault { OwnerOption: OwnerDefaultOption.UseOwner };
     }
 
     /// <summary>
@@ -197,7 +241,7 @@ internal partial class CoopSave {
             teller != null && !felt ? ToldValues.SetBy(teller, creature, machine) : null
         );
         word.PartCount = OwnTellPart;
-        word.Key = ToldByEachGame() ? 1UL : 0UL;
+        word.Key = felt ? FeltTellKey : ToldByEachGame() ? 1UL : 0UL;
         word.Names = [fsm.LastTransition!.EventName, toState.Name];
         var by = felt
             ? "is set off by this game's player"
@@ -272,8 +316,10 @@ internal partial class CoopSave {
     /// where it was there as it was told, turned and going as it was, with what told it set on it there (see
     /// PutAtSceneHostsStep), and is told the same, as if what told it there told it here now, and goes on as the game
     /// has it, which every other game takes as a step of the scene host's. Not where it took the same tell a moment
-    /// before, but for one of a state machine that each game runs by itself, which is of that game's player, nor where
-    /// it holds a player or plays a move that another player's game leads, which goes on to its end.
+    /// before, but for one of a state machine that each game runs by itself, or a touch that the state machine felt
+    /// there, which are of that game's player alone: two players who came into the dormant creature one after the
+    /// other, the second one's touch went nowhere (review of fab59c0). Nor where it holds a player or plays a move
+    /// that another player's game leads, which goes on to its end.
     /// </summary>
     private void TakeOwnTell(ClientPlayerData player, GameObject creature, CoopSaveUpdate update) {
         var place = update.ObjectPath;

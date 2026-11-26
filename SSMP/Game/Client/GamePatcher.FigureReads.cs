@@ -83,8 +83,10 @@ internal partial class GamePatcher {
             return;
         }
 
-        if (self.noClamber.Value || self.hero.Value is not { } player || self.clamberRayL.Value is not { } left ||
-            self.clamberRayR.Value is not { } right ||
+        // A figure that is gone, as its player left, stays where the charger keeps who it goes after until it looks for
+        // another (review of 9c94aaf)
+        if (self.noClamber.Value || self.hero.Value is not { } player || player == null ||
+            self.clamberRayL.Value is not { } left || self.clamberRayR.Value is not { } right ||
             player.transform.position.y <= self.Owner.transform.position.y || !IsOnGround(player)) {
             return;
         }

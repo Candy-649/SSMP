@@ -611,8 +611,8 @@ internal partial class CoopSave {
         // player is this game's to play, to its end (see CoopSave.OwnCatches), and so is a talk, at the end of which
         // it waits for the scene host's to come as far, and so is a step before the fight into a state whose steps of
         // the scene host's this game lets go of, which nothing comes to wait for (see CoopSave.OwnTalks). So is what a
-        // strike of this game's player sets off as it is made, as in a game of one: a wound, a block or a tink, and
-        // what they tell the other
+        // strike of this game's player sets off as it is made, as in a game of one: a wound, a block or a tink, a touch
+        // of it that a state machine of the creature feels itself, and what they tell the other
         // state machines of the creature at once, though not where a state that it went into chooses its way on by
         // where the players are or by a count, which stays the scene host's. The scene host's game is told of the
         // strike as it was taken here, and its creature answers it as the game does, which every other game takes as a
@@ -623,9 +623,13 @@ internal partial class CoopSave {
         // which the scene host's game is told of and plays too (see CoopSave.OwnTells)
         var waitedFor = IsWaitedFor(self);
         var teller = Fsm.EventData?.SentByFsm;
-        var setOffByStrike = CoopHits.IsMakingLocalStrike && teller != self;
+
+        // A touch of this game's player that the state machine felt itself (see CoopSave.OwnTells): a strike of theirs
+        // goes to the others as the touch that it was, which they replay, and nothing more (review of fab59c0)
+        var felt = FeltByLocalPlayer(self, toState, creature);
+        var setOffByStrike = CoopHits.IsMakingLocalStrike && (teller != self || felt);
         var setOffHere = !LeadsMove(self) && !CatchesLocalPlayer(self, toState, creature) &&
-                         (ToldFromOutside(self, toState, creature) || FeltByLocalPlayer(self, toState, creature));
+                         (ToldFromOutside(self, toState, creature) || felt && !CoopHits.IsMakingLocalStrike);
         var picks = PicksAPart(toState);
         var places = PlacesByPlayer(toState);
 
