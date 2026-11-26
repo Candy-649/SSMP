@@ -2700,6 +2700,7 @@
   {
     "base_object_name": "First Weaver",
     "type": "FirstSinner",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -2710,6 +2711,9 @@
       "Fake Death",
       "Stun Control"
     ],
+    "each_game_from": {
+      "Control": "Death Stagger"
+    },
     "runs_here": {
       "Control": {
         "Slash 1": [
@@ -3513,6 +3517,7 @@
   {
     "base_object_name": "FW Pin Projectile",
     "type": "WeaverPin",
+    "own_in_each_game": true,
     "parent_name": "Pin Projectiles",
     "components": [
       "OwnMotion",
@@ -3525,6 +3530,7 @@
   {
     "base_object_name": "FW Loose Pin",
     "type": "WeaverLoosePin",
+    "own_in_each_game": true,
     "parent_name": "Loose Pins",
     "components": [
       "OwnMotion",
