@@ -2190,6 +2190,13 @@ internal partial class CoopSave {
     /// off the count of the summoned as it falls, by which their father calls more, and a juror felled by a blow of
     /// one game's player a moment before the scene host's game had it fall, or after, made the father call there and
     /// not in the other.
+    ///
+    /// A value that it reads off a state machine of another object (GetFsmBool, GetFsmInt, GetFsmFloat), like one of
+    /// the room that each game runs by itself: the flower boss of the dream room leaves its brambles where the platform
+    /// that a player who fell on them comes back up on is up, which each game has for its own player. The scene host's
+    /// boss, its player on the platform, left them, while the other game's went on to bring them down by itself, and
+    /// was set onto the scene host's later steps past the step that brings them up again: the spikes on its walls
+    /// stood otherwise than in the scene host's game until the next leap (review of b37f128).
     /// </summary>
     private bool ChoosesByOwnValue(FsmState state) {
         var fsm = state.Fsm;
@@ -2239,8 +2246,18 @@ internal partial class CoopSave {
             HutongGames.PlayMaker.Actions.GetPlayerDataBool get => get.storeValue,
             HutongGames.PlayMaker.Actions.GetPlayerDataInt get => get.storeValue,
             HutongGames.PlayMaker.Actions.GetPlayerDataFloat get => get.storeValue,
+            HutongGames.PlayMaker.Actions.GetFsmBool get when ReadsAnother(get.gameObject) => get.storeValue,
+            HutongGames.PlayMaker.Actions.GetFsmInt get when ReadsAnother(get.gameObject) => get.storeValue,
+            HutongGames.PlayMaker.Actions.GetFsmFloat get when ReadsAnother(get.gameObject) => get.storeValue,
             _ => null
         };
+    }
+
+    /// <summary>
+    /// Whether an action that reads a variable of a state machine reads one of another object than its own.
+    /// </summary>
+    private static bool ReadsAnother(FsmOwnerDefault owner) {
+        return owner.OwnerOption != OwnerDefaultOption.UseOwner;
     }
 
     /// <summary>
