@@ -892,9 +892,15 @@ internal partial class CoopSave {
             }
         }
 
+        // A dead one is taken away there, but for one whose end each game plays by itself, which dies there too, as
+        // it died here, so that their game plays the end on its player as well (USER 11-26 "各演各的"; see
+        // OwnCreatures.EachGameFrom): the widow, who marks herself dead as her end begins, was taken away there, and
+        // the member who came in neither bound her nor went into the memory that her end sends them to (review of
+        // b18af06..c5de11d)
         foreach (var pair in OwnCreatures.All) {
             var creature = pair.Key;
-            if (creature == null || creature.TryGetComponent<HealthManager>(out var health) && health.isDead) {
+            if (creature == null || creature.TryGetComponent<HealthManager>(out var health) && health.isDead &&
+                !(OwnCreatures.IsMarkedDead(creature) && OwnCreatures.PlaysEndInEachGame(creature))) {
                 Logger.Info($"[Own creatures] {player.Username} is told that '{pair.Value.Place}' is dead here");
                 TellTakenAway(player, pair.Value.Scene, pair.Value.Place);
                 continue;

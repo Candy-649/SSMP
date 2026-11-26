@@ -63,7 +63,8 @@ internal static class OwnCreatures {
     /// it went as the scene host's player did in it: bound when they bound, and a game whose player had yet to bind
     /// followed the scene host's on. Once it is in that state, it is one of <see cref="EachGame"/> until the room is
     /// left, as the parry boss's end, which a missed parry takes back into its fight, never comes back to the steps of
-    /// the scene host's.
+    /// the scene host's, and so is every other state machine of the creature and of its parts (see
+    /// <see cref="BeginsEachGamePart"/>).
     /// </summary>
     private static readonly Dictionary<PlayMakerFSM, string> EachGameFrom = new();
 
@@ -560,11 +561,45 @@ internal static class OwnCreatures {
 
     /// <summary>
     /// Takes a state machine of a creature that every game runs by itself as one that each game runs by itself from
-    /// now on, as it goes into the state from which it does (see <see cref="EachGameFrom"/>), returning whether it did.
+    /// now on, as it goes into the state from which it does (see <see cref="EachGameFrom"/>), and every other state
+    /// machine of the creature and of its parts with it, returning whether it did. The rest of the boss, taking the
+    /// scene host's steps still, told the end that this game played by itself to go elsewhere: the count of the
+    /// widow's stun, filled by the blows of the scene host's player while she still fought there, stunned her here in
+    /// the middle of her end, which took the character of this game's player (review of b18af06..c5de11d).
     /// </summary>
     public static bool BeginsEachGamePart(PlayMakerFSM machine, string toState) {
-        return EachGameFrom.Count > 0 && EachGameFrom.TryGetValue(machine, out var from) && from == toState &&
-               EachGame.Add(machine);
+        if (EachGameFrom.Count == 0 || !EachGameFrom.TryGetValue(machine, out var from) || from != toState ||
+            !EachGame.Add(machine)) {
+            return false;
+        }
+
+        var creature = machine.gameObject;
+        EachGame.UnionWith(creature.GetComponents<PlayMakerFSM>());
+        foreach (var pair in Parts) {
+            if (pair.Value.Creature == creature && pair.Key != null) {
+                EachGame.UnionWith(pair.Key.GetComponents<PlayMakerFSM>());
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a creature that every game runs by itself plays its end in each game by itself (see
+    /// <see cref="EachGameFrom"/>).
+    /// </summary>
+    public static bool PlaysEndInEachGame(GameObject creature) {
+        if (EachGameFrom.Count == 0) {
+            return false;
+        }
+
+        foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
+            if (EachGameFrom.ContainsKey(machine)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

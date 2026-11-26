@@ -2711,9 +2711,6 @@
       "Fake Death",
       "Stun Control"
     ],
-    "each_game_from": {
-      "Control": "Death Stagger"
-    },
     "runs_here": {
       "Control": {
         "Slash 1": [
