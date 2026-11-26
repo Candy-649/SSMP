@@ -818,17 +818,6 @@ internal partial class CoopSave {
             $"[Own creatures] '{leap.Place}' is through its {leap.What} in '{fsm.Name}', as it goes to " +
             $"'{toState.Name}'"
         );
-
-        // A cage of the creature's that has this game's player lets go of the others as well, whom it holds, as the
-        // creature goes out of its catch by a way that every state has, like the death that the partner's blow dealt
-        // it in their game, which lets go of this game's player too (see CoopSave.PrisonCapture): the others were held
-        // for as long as the cage could take at the most. The capture is the last state of the catch, where it rests,
-        // which no move counts in, and lets go of nobody
-        if (_ownCatch is { } caged && caged.By == fsm && fsm.LastTransition is { } way &&
-            fsm.GlobalTransitions.Contains(way)) {
-            LetGoOfOwnCatch($"'{leap.Place}' went out of its catch into '{toState.Name}' of '{fsm.Name}'");
-        }
-
         return leap.Led;
     }
 

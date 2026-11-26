@@ -642,6 +642,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether a creature's cage has the local player now (see <see cref="OwnCatch.By"/>): a death of the creature that
+    /// another game tells waits until it lets go of them (see CoopSave.OwnCreatures), as the game keeps it from harm
+    /// meanwhile.
+    /// </summary>
+    private bool CagesLocalPlayer(GameObject creature) {
+        return _ownCatch?.By is { } by && by.GameObject == creature;
+    }
+
+    /// <summary>
     /// A cage that has the local player.
     /// </summary>
     /// <param name="since">When it caught them.</param>
@@ -650,7 +659,7 @@ internal partial class CoopSave {
         public float Since { get; } = since;
 
         /// <summary>
-        /// The state machine that marked them held in it (see CoopSave.OwnCatches).
+        /// The state machine that marked them held in it (see <see cref="CagesLocalPlayer"/>).
         /// </summary>
         public HutongGames.PlayMaker.Fsm? By { get; } = by;
 

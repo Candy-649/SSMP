@@ -1165,7 +1165,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Has the creatures that died in another player's game while they were not out here die here as they come out,
-    /// by the word that told of it (see <see cref="OnOwnCreature"/>).
+    /// and those whose cage had the local player as they let go of them, by the word that told of it (see
+    /// <see cref="OnOwnCreature"/>).
     /// </summary>
     private void UpdateDeathsOwed() {
         if (_deathsOwed.Count == 0) {
@@ -1174,7 +1175,8 @@ internal partial class CoopSave {
 
         foreach (var pair in _deathsOwed.ToList()) {
             var creature = pair.Key;
-            if (creature != null && (!creature.activeInHierarchy || ArenaCoop.WaitsForItsWave(creature))) {
+            if (creature != null &&
+                (!creature.activeInHierarchy || ArenaCoop.WaitsForItsWave(creature) || CagesLocalPlayer(creature))) {
                 continue;
             }
 
@@ -1216,14 +1218,19 @@ internal partial class CoopSave {
         // One that is not out here yet dies here as it comes out, and one of a wave of an arena once the wave called
         // it out here, which counts it then (see UpdateDeathsOwed): let go of, it came out alive later and fought on
         // in this game alone, as a member came in after it died there, or as the wave that lets it out started there
-        // a moment before it did here (11-24 review; USER 11-25 "做吧")
+        // a moment before it did here (11-24 review; USER 11-25 "做吧"). So does one whose cage has the local player,
+        // which the game keeps from harm until the capture takes them away, and whose death in the game lets go of
+        // them only by halves, as it never comes then: they were left hidden, floating and unable to save, as the
+        // partner killed it in their game, where it had caught nobody (review of 59f478f)
         if (update.PartCount is 1 or 2 && hasHealth && !health.isDead &&
-            (!creature.activeInHierarchy || ArenaCoop.WaitsForItsWave(creature))) {
+            (!creature.activeInHierarchy || ArenaCoop.WaitsForItsWave(creature) || CagesLocalPlayer(creature))) {
             if (_deathsOwed.TryAdd(creature, (player, update))) {
                 var told = update.PartCount == 1 ? "is dead" : "died";
                 Logger.Info(
-                    $"[Own creatures] '{place}' {told} in {player.Username}'s game, and is not out here yet: it dies " +
-                    "here as it comes out"
+                    $"[Own creatures] '{place}' {told} in {player.Username}'s game, and " +
+                    (CagesLocalPlayer(creature)
+                        ? "has the local player in its cage here: it dies here if it lets go of them"
+                        : "is not out here yet: it dies here as it comes out")
                 );
             }
 
