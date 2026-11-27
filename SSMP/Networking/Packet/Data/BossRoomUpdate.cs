@@ -263,5 +263,12 @@ internal enum BossRoomUpdateKind : byte {
     /// TEMPORARY debug: the sender typed the chat command /2 (see BossRoomCoop.DebugCommands), whose number
     /// <see cref="BossRoomUpdate.EventName"/> holds. The other players hear about it in any scene.
     /// </summary>
-    DebugCommand
+    DebugCommand,
+
+    /// <summary>
+    /// The sender handed a character what its talk takes, which sets off a story scene that the other players in the
+    /// scene play in their own game too (see BossRoomCoop.TalkStories): <see cref="BossRoomUpdate.Path"/> is the
+    /// character, and <see cref="BossRoomUpdate.FsmName"/> its FSM.
+    /// </summary>
+    TalkStoryStarted
 }

@@ -571,8 +571,7 @@ internal class EntityRegistryEntry {
     /// <summary>
     /// Names of objects without health, named after the creature with more words, that are still taken for it, each
     /// found to need it: a spawner whose pools grow with the creature's, a crowd whose members follow the scene host's,
-    /// a sleeper whose waking is shared, a trap that waits for a row of its own (see EntityRegistry.TryGetEntry). Null
-    /// for none.
+    /// a trap that waits for a row of its own (see EntityRegistry.TryGetEntry). Null for none.
     /// </summary>
     [JsonProperty("kept_names")]
     public List<string>? KeptNames { get; set; }

@@ -509,6 +509,9 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.EndingGaveBack:
                 OnEndingGaveBack(update);
                 break;
+            case BossRoomUpdateKind.TalkStoryStarted:
+                OnTalkStoryStarted(update);
+                break;
         }
     }
 
@@ -577,6 +580,12 @@ internal partial class BossRoomCoop {
 
         if (_sharedDialogues.Count > 0) {
             ForgetEndedDialogue(self, eventName);
+        }
+
+        // A story scene that a talk sets off asks for what it takes only once every player has reached it, and plays in
+        // every game once a player handed it over (BossRoomCoop.TalkStories)
+        if (self.ActiveState is { } talkState && TryTakeTalkStoryEvent(self, talkState, eventName)) {
+            return;
         }
 
         // Where rooms wait for other players: the story scene, the fight gate, the start of a room, its event and
@@ -995,6 +1004,7 @@ internal partial class BossRoomCoop {
         _frameSteps ??= [
             (ReleaseHeldStarts, nameof(ReleaseHeldStarts)),
             (ReleaseHeldStories, nameof(ReleaseHeldStories)),
+            (UpdateTalkStories, nameof(UpdateTalkStories)),
             (UpdateDialogues, nameof(UpdateDialogues)),
             (UpdateEventStarts, nameof(UpdateEventStarts)),
             (UpdateCatchUps, nameof(UpdateCatchUps)),

@@ -236,11 +236,11 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether every other player has reached a story scene: is in the local scene and has been in one of the scene's
-    /// triggers since it was held, or is now. Without triggers to look at, being in the scene is enough. For a scene
-    /// that the game sets in several rooms, a player who waits at it in any of them, or for whom it started, has reached
-    /// it too. The partner of a two-player save counts as not there while they aren't on the server. True when nobody
-    /// else plays.
+    /// Whether every other player has reached a story scene: is in the local scene and their figure has been in one of
+    /// the scene's triggers since it was held, or is now. Without triggers to look at, being in the scene is enough.
+    /// For a scene that the game sets in several rooms, a player who waits at it in any of them, or for whom it
+    /// started, has reached it too. The partner of a two-player save counts as not there while they aren't on the
+    /// server. True when nobody else plays.
     /// </summary>
     private bool HaveAllReachedStory(HeldStory held) {
         if (!IsHoldActive()) {
@@ -264,8 +264,7 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
-            var container = playerData.PlayerContainer;
-            if (container == null || !IsInStoryTriggers(held.Triggers, container.transform.position)) {
+            if (!IsFigureInStoryTriggers(held.Triggers, playerData)) {
                 return false;
             }
 
@@ -380,11 +379,29 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether a point is in one of the triggers of a story scene.
+    /// Whether the figure of another player is in one of the triggers of a story scene: whether its body touches one,
+    /// as the game asks of the local player's (see <see cref="IsLocalHeroInStoryTrigger"/>), or, for a trigger that is
+    /// off, whether the point the figure stands at is in its shape. A trigger low on the ground, like the one in which
+    /// a character is talked to, holds the feet of a figure that stands in it and not that point, which is higher up.
     /// </summary>
-    private static bool IsInStoryTriggers(List<Collider2D> triggers, Vector2 point) {
+    private static bool IsFigureInStoryTriggers(List<Collider2D> triggers, ClientPlayerData playerData) {
+        var container = playerData.PlayerContainer;
+        if (container == null) {
+            return false;
+        }
+
+        var body = playerData.PlayerObject != null ? playerData.PlayerObject.GetComponent<Collider2D>() : null;
+        var hasBody = body != null && body.enabled && body.gameObject.activeInHierarchy;
         foreach (var trigger in triggers) {
-            if (trigger != null && ContainsPoint(trigger, point)) {
+            if (trigger == null) {
+                continue;
+            }
+
+            if (hasBody && trigger.enabled && trigger.gameObject.activeInHierarchy) {
+                if (trigger.Distance(body!).isOverlapped) {
+                    return true;
+                }
+            } else if (ContainsPoint(trigger, container.transform.position)) {
                 return true;
             }
         }
@@ -590,6 +607,7 @@ internal partial class BossRoomCoop {
         }
 
         _heldStories.Clear();
+        ClearTalkStories();
     }
 
     /// <summary>
