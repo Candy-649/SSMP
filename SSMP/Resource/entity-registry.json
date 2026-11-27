@@ -183,6 +183,7 @@
   {
     "base_object_name": "Bone Goomba Bounce Fly",
     "type": "Skullwing",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
