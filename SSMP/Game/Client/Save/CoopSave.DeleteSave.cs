@@ -112,10 +112,8 @@ internal partial class CoopSave {
                 return;
             }
 
-            // The save menu in the title menu reads the slot anew the next time it shows; in a save, it is built anew
-            // as the player quits to it
             if (!IsInGame()) {
-                global::UIManager.instance.ClearSaveCache();
+                ReadSaveMenuAnew();
             }
 
             Logger.Info($"Deleted save slot {slot}");

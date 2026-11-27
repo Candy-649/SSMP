@@ -1951,6 +1951,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Makes the save menu read every slot anew after a command wrote or deleted a save in the title menu, as the game
+    /// does after it imports saves. Each slot keeps the save it read as the title menu started, which the menu would
+    /// still show and load. In a save, the menu is built anew as the player quits to it.
+    /// </summary>
+    private static void ReadSaveMenuAnew() {
+        global::UIManager.instance.ReloadSaves();
+    }
+
+    /// <summary>
     /// Shows a message about two-player saves (see <see cref="CoopMessageBox"/>).
     /// </summary>
     private static void ShowMessage(string text, Action? onClose = null) {

@@ -183,8 +183,7 @@ internal partial class CoopSave {
                 $"已把存档 {slot} 复制到存档槽 {target}，回到主菜单就能看到。"
             );
         } else {
-            // The save menu reads the slot anew the next time it shows
-            global::UIManager.instance.ClearSaveCache();
+            ReadSaveMenuAnew();
             message = Lang.Pick(
                 $"Copied save {slot} to save slot {target}. It shows in the save menu.",
                 $"已把存档 {slot} 复制到存档槽 {target}，选存档界面里就能看到。"
