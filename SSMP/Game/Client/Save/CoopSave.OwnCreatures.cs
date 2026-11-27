@@ -1249,7 +1249,8 @@ internal partial class CoopSave {
             return;
         }
 
-        // A creature that fights the room's creatures beside the players is out where it is out in another game (see
+        // A creature that fights the room's creatures beside the players, or another that comes out so, like the flea
+        // whose cage a member who came in later still has whole, is out where it is out in another game (see
         // CoopSave.OwnFighters), and goes on as there once it runs
         if (update.PartCount is not (1 or 2) && ComesOutAsThere(player, update, creature)) {
             return;

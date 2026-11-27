@@ -3507,6 +3507,20 @@
   {
     "base_object_name": "Giant Flea",
     "type": "HugeFlea",
+    "own_in_each_game": true,
+    "comes_out_as_there": true,
+    "parent_name": "Giant Flea Scene",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Giant Flea",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "Giant Flea",
+    "type": "HugeFlea",
     "parent_name": null,
     "components": [
       "Rotation"

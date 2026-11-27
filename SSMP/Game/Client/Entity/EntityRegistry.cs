@@ -42,6 +42,12 @@ internal static class EntityRegistry {
     private static readonly HashSet<EntityType> FighterTypes = [];
 
     /// <summary>
+    /// The types of entity whose entry says that they come out in every game where they are out in another (see
+    /// <see cref="EntityRegistryEntry.ComesOutAsThere"/>), with those that fight the room's creatures.
+    /// </summary>
+    private static readonly HashSet<EntityType> ComingOutTypes = [];
+
+    /// <summary>
     /// For each type of entity whose entry names any, the FSMs that each game runs by itself (see
     /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
     /// </summary>
@@ -102,6 +108,12 @@ internal static class EntityRegistry {
     /// <see cref="EntityRegistryEntry.FightsCreatures"/>).
     /// </summary>
     public static bool FightsCreatures(EntityType type) => FighterTypes.Contains(type);
+
+    /// <summary>
+    /// Whether an entity of the given type comes out in every game where it is out in another (see
+    /// <see cref="EntityRegistryEntry.ComesOutAsThere"/>).
+    /// </summary>
+    public static bool ComesOutAsThere(EntityType type) => ComingOutTypes.Contains(type);
 
     /// <summary>
     /// Whether an FSM of an entity of the given type is one that each game runs by itself (see
@@ -234,6 +246,10 @@ internal static class EntityRegistry {
 
             if (entry.FightsCreatures) {
                 FighterTypes.Add(entry.Type);
+            }
+
+            if (entry.FightsCreatures || entry.ComesOutAsThere) {
+                ComingOutTypes.Add(entry.Type);
             }
 
             if (entry.EachGameFsms is { Count: > 0 } eachGameFsms) {
@@ -539,6 +555,18 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("fights_creatures")]
     public bool FightsCreatures { get; set; }
+
+    /// <summary>
+    /// Whether the creature, which every game runs by itself (see <see cref="OwnInEachGame"/>), comes out in every game
+    /// where it is out in another, as one that fights the room's creatures does (see CoopSave.OwnFighters): what lets
+    /// it out reads each player's own save or waits for each player's own touch, like the cage of the flea that fights
+    /// the players once they break it, which every game breaks as the hits of both players count in each, but which a
+    /// member who comes in after it broke still has whole, their flag of having let it out unset: its flea would fight
+    /// the others where that member could not see it, where the copy that the scene host's game ran came out in every
+    /// game (11-27 research, USER "不对啊，现在笼子是一起破的吧").
+    /// </summary>
+    [JsonProperty("comes_out_as_there")]
+    public bool ComesOutAsThere { get; set; }
 
     /// <summary>
     /// Names of objects without health, named after the creature with more words, that are still taken for it, each

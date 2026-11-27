@@ -73,6 +73,12 @@ internal static class OwnCreatures {
     private static readonly HashSet<GameObject> Fighters = [];
 
     /// <summary>
+    /// The creatures that come out in every game where they are out in another (see
+    /// EntityRegistryEntry.ComesOutAsThere), those that fight the room's creatures among them.
+    /// </summary>
+    private static readonly HashSet<GameObject> ComingOut = [];
+
+    /// <summary>
     /// The state machines of the creatures that each game runs by itself for its own player from a state on, with that
     /// state (see EntityRegistryEntry.EachGameFrom): the end of a boss that takes the player's character, which each
     /// game plays on its own player (USER 11-26 "各演各的"; see BossRoomCoop.Endings). Taken by the scene host's steps,
@@ -547,6 +553,10 @@ internal static class OwnCreatures {
             Fighters.Add(creature);
         }
 
+        if (EntityRegistry.ComesOutAsThere(type)) {
+            ComingOut.Add(creature);
+        }
+
         var parts = 0;
         var keepsHealth = false;
         foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
@@ -693,6 +703,13 @@ internal static class OwnCreatures {
     /// </summary>
     public static bool FightsCreatures(GameObject part) {
         return Fighters.Count > 0 && Owning(part) is { } creature && Fighters.Contains(creature);
+    }
+
+    /// <summary>
+    /// Whether a creature here comes out in every game where it is out in another (see <see cref="ComingOut"/>).
+    /// </summary>
+    public static bool ComesOutAsThere(GameObject creature) {
+        return ComingOut.Count > 0 && ComingOut.Contains(creature);
     }
 
     /// <summary>
@@ -938,6 +955,7 @@ internal static class OwnCreatures {
         RoomMakes.Clear();
         EachGame.Clear();
         Fighters.Clear();
+        ComingOut.Clear();
         EachGameFrom.Clear();
         Tries.Clear();
         KeptHealths.Clear();

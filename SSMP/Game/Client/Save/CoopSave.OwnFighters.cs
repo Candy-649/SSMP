@@ -26,7 +26,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// is already went so, as the actions of the kinds that look at a player look at anything else than the creature
 /// itself (see LooksAtPlayers). Whether that creature is still there is each game's own look, which needs no wait in
 /// a move: its death goes to every game, as any death does, and the next pick is the scene host's again. Its blows
-/// land in each game on that game's creatures.
+/// land in each game on that game's creatures. It comes out in every game where it is out in another, and so does
+/// a creature of another kind whose entry says so (see ComesOutAsThere).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -82,25 +83,27 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The words of other games for each creature that fights the room's creatures that came out here at one of them
-    /// (see <see cref="ComesOutAsThere"/>), in the order they came, taken once its state machines run.
+    /// The words of other games for each creature that came out here at one of them (see
+    /// <see cref="ComesOutAsThere"/>), in the order they came, taken once its state machines run.
     /// </summary>
     private readonly Dictionary<GameObject, List<(ClientPlayerData Player, CoopSaveUpdate Word)>> _wordsAsItComesOut =
         new();
 
     /// <summary>
-    /// The creatures that fight the room's creatures that came out here at a word of another game (see
-    /// <see cref="ComesOutAsThere"/>), each once in a stay in the room: one that the room switches off again stays so.
+    /// The creatures that came out here at a word of another game (see <see cref="ComesOutAsThere"/>), each once in a
+    /// stay in the room: one that the room switches off again stays so.
     /// </summary>
     private readonly HashSet<GameObject> _broughtOut = [];
 
     /// <summary>
-    /// Switches on a creature that fights the room's creatures, which is out in the game whose word came, where it is
-    /// off while what it stands in is on, once in a stay in the room, and tells whether it did or waits so. What has it
-    /// come out reads each player's own save or waits for each player's own touch: whether the player asked for its
-    /// aid, where they have been, whether they walked into the part of the room where it waits. One game had it fight
-    /// beside the players and another had it nowhere, and the copy of it that the scene host's game ran had come out in
-    /// every game. The word, and those that come after it, are taken once its state machines run (see
+    /// Switches on a creature that fights the room's creatures, or another that comes out so (see
+    /// EntityRegistryEntry.ComesOutAsThere), which is out in the game whose word came, where it is off while what it
+    /// stands in is on, once in a stay in the room, and tells whether it did or waits so. What has it come out reads
+    /// each player's own save or waits for each player's own touch: whether the player asked for its aid, where they
+    /// have been, whether they walked into the part of the room where it waits, whether they broke the cage that
+    /// holds it. One game had it fight beside the players and another had it nowhere, and the copy of it that the
+    /// scene host's game ran had come out in every game. The word, and those that come after it, are taken once its
+    /// state machines run (see
     /// <see cref="UpdateComingOut"/>): what the word of a member who has just come in tells it does there would be lost
     /// otherwise, and a creature at the end of its fight there sends no more of them (review of c3c6288: it stood
     /// unseen at its start).
@@ -111,7 +114,7 @@ internal partial class CoopSave {
             return true;
         }
 
-        if (creature.activeSelf || !OwnCreatures.FightsCreatures(creature) ||
+        if (creature.activeSelf || !OwnCreatures.ComesOutAsThere(creature) ||
             creature.transform.parent is { } stand && !stand.gameObject.activeInHierarchy ||
             !_broughtOut.Add(creature)) {
             return false;
