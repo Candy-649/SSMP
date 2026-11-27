@@ -121,6 +121,13 @@ internal partial class CoopSave {
             $"[Own creatures] '{update.ObjectPath}' is out in {player.Username}'s game, in '{update.StateName}', and " +
             "comes out here too, to go on as there once it runs"
         );
+        // Its mark of having come out in this room, kept in each player's own save, switches it off again as it first
+        // runs (PersistentBoolItem: disableIfActivated, taken in Awake, then the save's value in Start): a player who
+        // had met it here before had it nowhere while it fought beside the others
+        foreach (var mark in creature.GetComponents<PersistentBoolItem>()) {
+            mark.disableIfActivated = false;
+        }
+
         creature.SetActive(true);
         _wordsAsItComesOut[creature] = [(player, update)];
         return true;
