@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
+using HutongGames.PlayMaker.Actions;
 using SSMP.Animation.Effects;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
@@ -55,6 +56,13 @@ internal partial class CoopSave {
     /// (see <see cref="ExtractStates"/>).
     /// </summary>
     private readonly Dictionary<Fsm, HashSet<FsmState>?> _extractStates = new();
+
+    /// <summary>
+    /// What each state machine kept off the character of another player who extracts from its creature here (see
+    /// <see cref="KeepOffHeroMoves"/>), with the states that it is kept off in.
+    /// </summary>
+    private readonly Dictionary<Fsm, (HashSet<FsmState> States, List<FsmStateAction> Muted)> _heroMovesKeptOff =
+        new();
 
     /// <summary>
     /// The states of the extraction of a state machine: the one that it gives way to extracting in, and those that it
@@ -123,7 +131,71 @@ internal partial class CoopSave {
             hero.Value = figure;
         }
 
+        KeepOffHeroMoves(fsm, states);
         FollowLedMove(fsm, states, hero, leader, number);
+    }
+
+    /// <summary>
+    /// Keeps off the character of another player who extracts from a creature here what the creature does to the body
+    /// of the hero who extracts, in the states of the extraction and in those that it ends in, as the game of that
+    /// player does it to their own hero, whom their character here shows where they are. The blue blood worm that
+    /// shoots holds that hero still and draws them to its side: here it drew their character off the place where the
+    /// player stands, for good, and as the extraction ended, the hero of its state machine this game's player again,
+    /// it held this game's player still. The other creatures that give way to extracting only look at that hero (all
+    /// of them read, 11-27). Let back in as it goes on past those states (see <see cref="LetHeroMovesBackIn"/>).
+    /// </summary>
+    private void KeepOffHeroMoves(Fsm fsm, HashSet<FsmState> states) {
+        var kept = new HashSet<FsmState>(states);
+        foreach (var state in states) {
+            foreach (var way in state.Transitions) {
+                if (ExtractEnds.Contains(way.EventName) && fsm.GetState(way.ToState) is { } end) {
+                    kept.Add(end);
+                }
+            }
+        }
+
+        var muted = new List<FsmStateAction>();
+        foreach (var state in kept) {
+            foreach (var action in state.Actions) {
+                var body = action switch {
+                    SetVelocity2d set => set.gameObject,
+                    AnimateRigidBody2DPositionToV2 animate => animate.GameObject,
+                    _ => null
+                };
+                if (action.Enabled && body is { OwnerOption: OwnerDefaultOption.SpecifyGameObject } &&
+                    body.GameObject.Name == "Hero") {
+                    action.Enabled = false;
+                    muted.Add(action);
+                }
+            }
+        }
+
+        if (muted.Count == 0) {
+            return;
+        }
+
+        _heroMovesKeptOff[fsm] = (kept, muted);
+        Logger.Info(
+            $"[Own creatures] '{OwnCreatures.PlaceOf(fsm.GameObject)}' keeps off the character of the player who " +
+            $"extracts from it here {muted.Count} of what it does to that hero in '{fsm.Name}', which their game does"
+        );
+    }
+
+    /// <summary>
+    /// Lets back in what a state machine kept off the character of another player who extracted from its creature here
+    /// (see <see cref="KeepOffHeroMoves"/>), as it goes to a state past the extraction and where it ended.
+    /// </summary>
+    private void LetHeroMovesBackIn(Fsm fsm, FsmState toState) {
+        if (_heroMovesKeptOff.Count == 0 || !_heroMovesKeptOff.TryGetValue(fsm, out var kept) ||
+            kept.States.Contains(toState)) {
+            return;
+        }
+
+        foreach (var action in kept.Muted) {
+            action.Enabled = true;
+        }
+
+        _heroMovesKeptOff.Remove(fsm);
     }
 
     /// <summary>

@@ -484,6 +484,10 @@ internal partial class CoopSave {
         // (see CoopSave.OwnToolChecks)
         ForgetToolChecks(self, toState);
 
+        // What it does to the body of the hero who extracts, kept off here in another player's extraction, as it goes
+        // on past it (see CoopSave.OwnExtracts)
+        LetHeroMovesBackIn(self, toState);
+
         // One that played a death that it comes back from has health again, and its next death is told again: a
         // death of such a creature was told once, and the creature, back in the game that killed it, was killed there
         // again with no word of it to the others

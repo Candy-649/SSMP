@@ -870,6 +870,7 @@ internal partial class CoopSave {
         _tellsTaken.Clear();
         _toolChecks.Clear();
         _extractStates.Clear();
+        _heroMovesKeptOff.Clear();
         _ledMoves.Clear();
         _ledMovesMet.Clear();
         _earlyLedSteps.Clear();
