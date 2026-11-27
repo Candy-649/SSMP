@@ -509,8 +509,8 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.EndingGaveBack:
                 OnEndingGaveBack(update);
                 break;
-            case BossRoomUpdateKind.TalkStoryStarted:
-                OnTalkStoryStarted(update);
+            case BossRoomUpdateKind.TalkStoryPaid:
+                OnTalkStoryPaid(update);
                 break;
         }
     }
@@ -525,8 +525,9 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Tells a player who entered the local scene which rooms the local player already reached and what their bosses
-    /// told them, and shares the dialogue that is still being read. A player who told of a film of theirs before they
-    /// came in is kept off the list of whom creatures go after (see KeepInCutsceneOffTargets).
+    /// told them, and for which story scenes of the scene they handed over their share, and shares the dialogue that
+    /// is still being read. A player who told of a film of theirs before they came in is kept off the list of whom
+    /// creatures go after (see KeepInCutsceneOffTargets).
     /// </summary>
     public void OnPlayerEnterScene() {
         KeepInCutsceneOffTargets();
@@ -538,6 +539,7 @@ internal partial class BossRoomCoop {
 
         TellBossEventsToNewPlayer();
         TellUsedChallengeSpotsToNewPlayer();
+        TellTalkStoriesPaid();
         ShareDialoguesWithNewPlayers();
         TellCutsceneToNewPlayer();
     }
@@ -582,8 +584,8 @@ internal partial class BossRoomCoop {
             ForgetEndedDialogue(self, eventName);
         }
 
-        // A story scene that a talk sets off asks for what it takes only once every player has reached it, and plays in
-        // every game once a player handed it over (BossRoomCoop.TalkStories)
+        // A story scene that a talk sets off plays once every player has handed over their own share of what it takes
+        // and is next to it, in every game (BossRoomCoop.TalkStories)
         if (self.ActiveState is { } talkState && TryTakeTalkStoryEvent(self, talkState, eventName)) {
             return;
         }

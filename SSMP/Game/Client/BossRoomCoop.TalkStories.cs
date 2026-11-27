@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
 using SSMP.Ui;
@@ -16,37 +15,25 @@ namespace SSMP.Game.Client;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Story scenes that a player's talk sets off and that play once: a character that wakes when a player hands it what it
-/// asks for (USER 11-27 "改吧", after "按照现在的做法，它应该属于有一次性的剧情见面？"). Like the scenes that start as a
-/// player walks into them (see BossRoomCoop.Story), such a scene was there for one player only: it played in the game
-/// of the player who handed it over, and only their save marked it, while what the game makes of that mark later
-/// reached the other saves too, which then said that the character still slept and had gone on all at once.
+/// Story scenes that a player's talk sets off and that play once: a character that wakes when it is handed what it asks
+/// for (USER 11-27 "改吧", after "按照现在的做法，它应该属于有一次性的剧情见面？"). Like the scenes that start as a player
+/// walks into them (see BossRoomCoop.Story), such a scene was there for one player only: it played in the game of the
+/// player who handed it over, and only their save marked it, while what the game makes of that mark later reached the
+/// other saves too, which then said that the character still slept and had gone on all at once.
 ///
-/// The talk asks for what it takes only once every player has reached the character: until then the game answers as it
-/// does for a player who lacks it, the talk ends, and the player hears to wait. Its prompt stays open only while every
-/// other player is still in the room. Once a player has handed it over, every other player in the room watches the
-/// scene in their own game: the game takes them into the talk as it does when they press to talk, once they stand next
-/// to the character and could, and the character goes on from the step after the handing over, as it does for the
-/// player who handed it over. A player who is in their own talk with it by then goes on there instead, and their prompt
-/// closes as a no, so that only the player who handed it over gives anything (review of 17e47be). Each game marks the
-/// scene in its own save as it plays it, and the mark is a flag of the shared world that a check and a join keep if
-/// either save has it, so the save of a player who was not there has it too.
+/// Every player hands over their own share, at their own prompt, and nobody's prompt is answered for them (USER 11-27
+/// "不，你这个“替玩家选否”的思路，我实在有太多阴影了，如果这个东西只有一个，那就每个人都要交自己那份，那就所有人都要有",
+/// then "A"). The character wakes once every player has handed theirs over and every player is next to it, in every
+/// game at once. A player who hands theirs over before that hears what it waits for, and their talk goes on to where
+/// the game ends it, with what they handed over kept in the marker of the save (CoopSave.TalkStoriesPaid), as the
+/// scene may wait for a player who comes another time. Once it may wake, each game takes its player into the talk as
+/// it does when they press to talk, and the character goes on from the step after the handing over; the player who
+/// hands over the last share goes on in their own talk. Each game marks the scene in its own save as it plays it, and
+/// the mark is a flag of the shared world that a check and a join keep if either save has it.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
-    /// The event with which the talk of a story scene that a talk sets off says that the player holds what it takes.
-    /// </summary>
-    private const string TalkStoryHoldsEventName = "YES";
-
-    /// <summary>
-    /// The event with which the talk of a story scene that a talk sets off says that the player lacks what it takes,
-    /// which ends the talk.
-    /// </summary>
-    private const string TalkStoryLacksEventName = "NO";
-
-    /// <summary>
-    /// The event with which the player hands over what the talk of a story scene that a talk sets off takes, at its
-    /// prompt.
+    /// The event with which the player hands over their share of what the talk of a story scene takes, at its prompt.
     /// </summary>
     private const string TalkStoryHandsEventName = "YES";
 
@@ -65,8 +52,8 @@ internal partial class BossRoomCoop {
             "Song Knight Scene/Song Knight Sleeping",
             "Control",
             "Tube Opened",
-            "Has Heart?",
             "Give Heart Prompt",
+            "End Dialogue",
             "Chose Yes"
         )
     ];
@@ -76,78 +63,65 @@ internal partial class BossRoomCoop {
     /// apart by before anything else.
     /// </summary>
     private static readonly HashSet<(string FsmName, string StateName)> TalkStoryStates = TalkStories
-        .SelectMany(story => new[] {
-            (story.FsmName, story.WaitState), (story.FsmName, story.AskState), (story.FsmName, story.HandState)
-        })
+        .SelectMany(story => new[] { (story.FsmName, story.WaitState), (story.FsmName, story.HandState) })
         .ToHashSet();
 
     /// <summary>
-    /// The box of the game that asks the player whether to hand over an item, of which it keeps one.
+    /// The message for a player who handed over their share of what a story scene takes, while it waits. Another player
+    /// tells of their own share only to the players in their scene, so this game may not have heard of it yet.
     /// </summary>
-    private static readonly FieldInfo? ItemPromptBoxField = typeof(DialogueYesNoBox).GetField(
-        "_instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+    private static string TalkStoryPaidMessage => Lang.Pick(
+        "Handed over. This starts once everyone has handed theirs over and is next to it.",
+        "交好了。等每个人都交了自己那份、也都走到它旁边，才会开始。"
     );
 
     /// <summary>
-    /// The message for a player whose talk held back a story scene, since the other players aren't next to its
-    /// character yet.
+    /// The message for the players of a story scene for which every player handed over their share, while not every
+    /// player is next to its character.
     /// </summary>
-    private string TalkStoryWaitingMessage => _playerData.Count <= 1
-        ? Lang.Pick(
-            "This waits until your teammate is next to it too: talk to it again once they are.",
-            "要等队友也走到它旁边才行，到了以后再跟它说话。"
-        )
-        : Lang.Pick(
-            "This waits until your teammates are next to it too: talk to it again once they are.",
-            "要等队友们也走到它旁边才行，到齐以后再跟它说话。"
-        );
-
-    /// <summary>
-    /// The message for a player whose talk held back a story scene, once every player has reached its character.
-    /// </summary>
-    private static string TalkStoryReadyMessage => Lang.Pick(
-        "Everyone is next to it now: talk to it again.",
-        "人都到齐了，再跟它说话就行。"
+    private static string TalkStoryGatherMessage => Lang.Pick(
+        "Everyone has handed theirs over: this starts once everyone is next to it.",
+        "大家都交好了，等所有人都走到它旁边就开始。"
     );
 
     /// <summary>
-    /// The message for a player who isn't next to the character of a story scene that another player set off in the
-    /// room, which plays for them once they are.
+    /// The message for a player who hasn't handed over their share of what a story scene takes, as a teammate does.
     /// </summary>
-    private static string TalkStoryComeMessage => Lang.Pick(
-        "A teammate set off a scene here: walk up to where they talked to watch it too.",
-        "队友在这里开始了一段剧情，走到他们刚才说话的地方就能一起看。"
+    private static string TalkStoryTeammatePaidMessage => Lang.Pick(
+        "A teammate handed over what it asks for: this starts once everyone has handed theirs over.",
+        "队友交了它要的东西，每个人都交了才会开始。"
     );
 
     /// <summary>
-    /// The story scenes of the current scene whose talk the local player held back, by their FSM, until every player
-    /// has reached their character.
+    /// Whether the local player handed over their share for a story scene in the loaded co-op save, by its scene and
+    /// path (CoopSave.IsTalkStoryPaid). Set by the game's client, as the two-player save is made after this.
     /// </summary>
-    private readonly Dictionary<Fsm, HeldStory> _waitingTalkStories = new();
+    public Func<string, bool>? IsTalkStoryPaidInSave { get; set; }
 
     /// <summary>
-    /// The FSMs of <see cref="_waitingTalkStories"/> whose players heard that every player has reached their character.
-    /// A player who reached it counts as there until its talk asks again, also once they stepped away.
+    /// Notes in the loaded co-op save that the local player handed over their share for a story scene, by its scene
+    /// and path (CoopSave.MarkTalkStoryPaid). Set by the game's client, as the two-player save is made after this.
     /// </summary>
-    private readonly HashSet<Fsm> _readyTalkStories = [];
+    public Action<string>? MarkTalkStoryPaidInSave { get; set; }
 
     /// <summary>
-    /// The story scenes of the current scene whose talk asks the local player at its prompt now, by their FSM, since
-    /// every player had reached their character. The prompt stays open only while every other player is in the room.
+    /// The story scenes for which the local player handed over their share since the save was loaded, by their scene
+    /// and path: for a save that isn't a co-op save, which has no marker to keep it in.
     /// </summary>
-    private readonly Dictionary<Fsm, TalkStory> _askingTalkStories = new();
+    private readonly HashSet<string> _paidTalkStories = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The story scenes of the current scene that another player set off, by their FSM, which play here once the local
-    /// player is next to their character and free to talk.
+    /// The story scenes that a talk sets off of the current scene, by their FSM, as the local player or another player
+    /// had to do with them.
     /// </summary>
-    private readonly Dictionary<Fsm, ToldTalkStory> _toldTalkStories = new();
+    private readonly Dictionary<Fsm, TalkStoryVisit> _talkStoryVisits = new();
 
     /// <summary>
-    /// Takes an event of the talk of a story scene that a talk sets off: holds back the question of what it takes until
-    /// every player has reached its character, tells the other players in the room as the local player hands it over,
-    /// and goes on from the step after the handing over as the local player is taken into the talk of one that another
-    /// player set off.
+    /// Takes an event of the talk of a story scene that a talk sets off: as the local player hands over their share,
+    /// tells the other players in the room, and lets the talk go on into the scene if it may wake now, or goes on to
+    /// where the game ends the talk; as the local player is taken into the talk once it may wake, or presses to talk
+    /// then, goes on from the step after the handing over; and as a player who handed theirs over presses to talk while
+    /// it waits, ends the talk and tells them what it waits for.
     /// </summary>
     /// <returns>Whether the event was taken here instead of by the FSM.</returns>
     private bool TryTakeTalkStoryEvent(Fsm fsm, FsmState state, string eventName) {
@@ -155,75 +129,112 @@ internal partial class BossRoomCoop {
             return false;
         }
 
+        var visit = GetTalkStoryVisit(fsm, story);
         if (state.Name == story.WaitState) {
-            if (eventName != TalkStoryTalkEventName || !_toldTalkStories.Remove(fsm)) {
+            if (eventName != TalkStoryTalkEventName) {
                 return false;
             }
 
-            Logger.Info(
-                $"Playing the story scene '{GetPath(fsm)}' from '{story.SceneState}', as another player set it off"
-            );
-            fsm.SetStateAsItRuns(story.SceneState);
-            return true;
-        }
+            // The game lets a player talk only from within its trigger, and moves them to where they talk from
+            if (MayTalkStoryWake(visit, true)) {
+                Logger.Info($"Playing the story scene '{GetPath(fsm)}' from '{story.SceneState}', as all are there");
+                fsm.SetStateAsItRuns(story.SceneState);
+                return true;
+            }
 
-        if (state.Name == story.HandState) {
-            _askingTalkStories.Remove(fsm);
-            if (eventName == TalkStoryHandsEventName) {
-                ForgetWaitingTalkStory(fsm);
-                _toldTalkStories.Remove(fsm);
-                Logger.Info($"The local player set off the story scene '{GetPath(fsm)}', which every player plays");
-                Send(BossRoomUpdateKind.TalkStoryStarted, fsm, story.HandState, story.SceneState, eventName);
+            if (!IsLocalTalkStoryPaid(story)) {
                 return false;
             }
 
-            return TakeIntoToldScene(fsm);
-        }
-
-        if (TakeIntoToldScene(fsm)) {
+            // A player who handed theirs over doesn't do so again: the talk, which takes no event, ends as the game
+            // ends it then (PlayMakerNPC.OnStartDialogue), and they hear what the scene waits for
+            Logger.Info($"The story scene '{GetPath(fsm)}' still waits, for which the local player handed theirs over");
+            UiManager.InternalChatBox.AddMessage(HaveOthersPaid(visit) ? TalkStoryGatherMessage : TalkStoryPaidMessage);
             return true;
         }
 
-        if (eventName != TalkStoryHoldsEventName) {
+        // A no is the player's own, which the game takes its own way
+        if (eventName != TalkStoryHandsEventName) {
             return false;
         }
 
-        if (!_waitingTalkStories.TryGetValue(fsm, out var held)) {
-            held = new HeldStory(story.WaitState, GetTalkStoryTriggers(fsm), null);
-        }
+        _paidTalkStories.Add(story.Key);
+        MarkTalkStoryPaidInSave?.Invoke(story.Key);
+        Send(BossRoomUpdateKind.TalkStoryPaid, fsm, story.HandState, "", eventName);
 
-        if (HaveAllReachedStory(held)) {
-            ForgetWaitingTalkStory(fsm);
-            _askingTalkStories[fsm] = story;
+        if (MayTalkStoryWake(visit, true)) {
+            Logger.Info($"The local player handed over the last share for the story scene '{GetPath(fsm)}'");
             return false;
         }
 
-        if (_waitingTalkStories.TryAdd(fsm, held)) {
-            Logger.Info($"Holding back the story scene '{GetPath(fsm)}' until the other players reach it");
-        }
+        var allPaid = HaveOthersPaid(visit);
+        Logger.Info(
+            $"The local player handed over their share for the story scene '{GetPath(fsm)}', which waits for " +
+            (allPaid ? "every player to be next to it" : "the other players' shares")
+        );
+        visit.HeardAllPaid |= allPaid;
+        UiManager.InternalChatBox.AddMessage(allPaid ? TalkStoryGatherMessage : TalkStoryPaidMessage);
 
-        UiManager.InternalChatBox.AddMessage(TalkStoryWaitingMessage);
-        TellTeammatesWaiting();
-
-        // The game's own answer for a player who lacks what it takes, which ends the talk
-        fsm.Event(TalkStoryLacksEventName);
+        // The talk waits in the prompt's state for the frame, and goes on to its end from outside the FSM's own run, as
+        // a state that it is still in the middle of is no place to switch it from (see UpdateTalkStories)
+        visit.EndsPaidTalk = true;
         return true;
     }
 
     /// <summary>
-    /// Keeps the local player's own talk with the character of a story scene that another player set off where it is,
-    /// where it asks for what it takes or the player declined to hand it over, to go on into the scene from there as
-    /// the next frame comes (see <see cref="UpdateTalkStories"/>): from outside the FSM's own run, as a state that it
-    /// is still starting is no place to switch it from.
+    /// Whether the character of a story scene that a talk sets off may wake now: every player handed over their share,
+    /// and every player is next to it. The local player counts as next to it while they talk to it.
     /// </summary>
-    /// <returns>Whether another player set the scene off, and the event was taken here.</returns>
-    private bool TakeIntoToldScene(Fsm fsm) {
-        if (!_toldTalkStories.TryGetValue(fsm, out var told)) {
+    private bool MayTalkStoryWake(TalkStoryVisit visit, bool isLocalTalking) {
+        if (!IsLocalTalkStoryPaid(visit.Story)) {
             return false;
         }
 
-        told.FromOwnTalk = true;
+        if (!IsHoldActive()) {
+            return true;
+        }
+
+        if (!HaveOthersPaid(visit) || (!isLocalTalking && !IsLocalHeroInStoryTrigger(visit.Where))) {
+            return false;
+        }
+
+        foreach (var playerData in _playerData.Values) {
+            if (!playerData.IsInLocalScene || !IsFigureInStoryTriggers(visit.Where.Triggers, playerData)) {
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    /// <summary>
+    /// Whether every other player handed over their share for a story scene that a talk sets off, as they said in the
+    /// room. The partner of a two-player save hasn't while they aren't on the server.
+    /// </summary>
+    private bool HaveOthersPaid(TalkStoryVisit visit) {
+        if (!IsHoldActive()) {
+            return true;
+        }
+
+        if (_isPartnerMissing()) {
+            return false;
+        }
+
+        foreach (var playerData in _playerData.Values) {
+            if (!visit.Payers.Contains(playerData.Id)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the local player handed over their share for a story scene that a talk sets off, in this session or, in
+    /// a co-op save, before.
+    /// </summary>
+    private bool IsLocalTalkStoryPaid(TalkStory story) {
+        return _paidTalkStories.Contains(story.Key) || IsTalkStoryPaidInSave?.Invoke(story.Key) == true;
     }
 
     /// <summary>
@@ -253,6 +264,24 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Gets what the current scene knows of a story scene that a talk sets off, made as it is first needed.
+    /// </summary>
+    private TalkStoryVisit GetTalkStoryVisit(Fsm fsm, TalkStory story) {
+        if (_talkStoryVisits.TryGetValue(fsm, out var visit)) {
+            return visit;
+        }
+
+        var where = new HeldStory(story.WaitState, GetTalkStoryTriggers(fsm), null);
+        if (fsm.GameObject != null) {
+            where.Position = fsm.GameObject.transform.position;
+        }
+
+        visit = new TalkStoryVisit(story, where);
+        _talkStoryVisits[fsm] = visit;
+        return visit;
+    }
+
+    /// <summary>
     /// Gets the trigger colliders in which a player talks to the character of a story scene that a talk sets off.
     /// </summary>
     private static List<Collider2D> GetTalkStoryTriggers(Fsm fsm) {
@@ -269,83 +298,36 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Tells the player whose talk held back a story scene once every player has reached its character, closes the
-    /// prompt of one whose talk asks for what it takes as a no once another player leaves the room, and takes the local
-    /// player into the talk of a story scene that another player set off once they are next to its character and could
-    /// talk to it: as the game does when they press to talk, which the scene then goes on from (see
-    /// <see cref="TryTakeTalkStoryEvent"/>).
+    /// Ends the talk in which the local player handed over their share of a story scene that waits, and takes the local
+    /// player into the talk once it may wake and they could talk to it: as the game does when they press to talk, which
+    /// the scene then goes on from (see <see cref="TryTakeTalkStoryEvent"/>).
     /// </summary>
     private void UpdateTalkStories() {
-        if (_waitingTalkStories.Count > 0) {
-            foreach (var (fsm, held) in _waitingTalkStories.ToList()) {
-                if (fsm.GameObject == null) {
-                    ForgetWaitingTalkStory(fsm);
-                } else if (HaveAllReachedStory(held) && _readyTalkStories.Add(fsm)) {
-                    Logger.Info(
-                        $"Every player reached the story scene '{GetPath(fsm)}', which starts as it is talked to"
-                    );
-                    UiManager.InternalChatBox.AddMessage(TalkStoryReadyMessage);
-                }
-            }
-        }
-
-        if (_askingTalkStories.Count > 0) {
-            foreach (var (fsm, story) in _askingTalkStories.ToList()) {
-                if (fsm.GameObject == null || fsm.ActiveState?.Name != story.HandState) {
-                    _askingTalkStories.Remove(fsm);
-                } else if (!AreOthersInLocalScene()) {
-                    // One who left the room would lose the scene for good, since it is marked in their save too
-                    _askingTalkStories.Remove(fsm);
-                    _waitingTalkStories[fsm] = new HeldStory(story.WaitState, GetTalkStoryTriggers(fsm), null);
-                    Logger.Info($"Another player left the room of the story scene '{GetPath(fsm)}' as it asked");
-                    UiManager.InternalChatBox.AddMessage(TalkStoryWaitingMessage);
-                    CloseItemPromptAsNo();
-                }
-            }
-        }
-
-        if (_toldTalkStories.Count == 0) {
+        if (_talkStoryVisits.Count == 0) {
             return;
         }
 
-        foreach (var (fsm, told) in _toldTalkStories.ToList()) {
+        foreach (var (fsm, visit) in _talkStoryVisits.ToList()) {
             if (fsm.GameObject == null) {
-                _toldTalkStories.Remove(fsm);
+                _talkStoryVisits.Remove(fsm);
                 continue;
             }
 
-            if (told.FromOwnTalk) {
-                if (fsm.ActiveState?.Name is { } stateName &&
-                    (stateName == told.Story.AskState || stateName == told.Story.HandState)) {
-                    _toldTalkStories.Remove(fsm);
-                    Logger.Info(
-                        $"Playing the story scene '{GetPath(fsm)}' from '{told.Story.SceneState}' in the local " +
-                        "player's own talk, as another player set it off"
-                    );
-                    fsm.SetStateAsItRuns(told.Story.SceneState);
+            var stateName = fsm.ActiveState?.Name;
+            if (visit.EndsPaidTalk) {
+                visit.EndsPaidTalk = false;
+                if (stateName == visit.Story.HandState) {
+                    fsm.SetStateAsItRuns(visit.Story.EndState);
                 }
 
                 continue;
             }
 
-            // Not while the local player talks to it themselves, which goes on into the scene where it asks for what
-            // it takes, nor while they are taken into it: the game takes their control as it moves them to talk
-            if (fsm.ActiveState?.Name != told.Story.WaitState || !IsLocalHeroFree() ||
-                HeroController.instance is not { } heroController || !heroController.CanInteract()) {
-                continue;
-            }
-
-            if (!IsLocalHeroInStoryTrigger(told.Where)) {
-                if (!told.Noticed) {
-                    told.Noticed = true;
-                    UiManager.InternalChatBox.AddMessage(TalkStoryComeMessage);
-                }
-
-                continue;
-            }
-
-            var npc = fsm.GameObject.GetComponentInChildren<PlayMakerNPC>();
-            if (npc == null) {
+            // Not while the local player is in a talk, a menu or the air, nor while the game moves them to talk: it
+            // takes their control for that. Pressed again once they are free, if that came to nothing
+            if (stateName != visit.Story.WaitState || !MayTalkStoryWake(visit, false) || !IsLocalHeroFree() ||
+                HeroController.instance is not { } heroController || !heroController.CanInteract() ||
+                fsm.GameObject.GetComponentInChildren<PlayMakerNPC>() is not { } npc) {
                 continue;
             }
 
@@ -355,34 +337,12 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether every other player is in the local scene, and so is the partner of a two-player save. True when nobody
-    /// else plays.
+    /// Takes the word of another player in the local scene that they handed over their share of what the talk of a
+    /// story scene takes, now or before, and tells the local player once what the scene waits for: their own share, or
+    /// once every player handed theirs over, every player next to it. If this game marked the scene already, its
+    /// character isn't in the room.
     /// </summary>
-    private bool AreOthersInLocalScene() {
-        if (!IsHoldActive()) {
-            return true;
-        }
-
-        return !_isPartnerMissing() && _playerData.Values.All(playerData => playerData.IsInLocalScene);
-    }
-
-    /// <summary>
-    /// Answers no at the open prompt that asks the local player whether to hand over an item, as the player does, which
-    /// gives nothing and takes the talk the way it goes whenever a player declines.
-    /// </summary>
-    private static void CloseItemPromptAsNo() {
-        if (ItemPromptBoxField?.GetValue(null) is YesNoBox box && box != null) {
-            box.SelectNo();
-        }
-    }
-
-    /// <summary>
-    /// Takes the word of another player in the local scene that they handed over what the talk of a story scene takes.
-    /// Its scene plays here too, once the local player is next to its character and free to talk; if this game marked
-    /// it already, its character isn't in the room. A prompt that asks the local player for what it takes closes as a
-    /// no, which gives nothing, and their talk goes on into the scene from there.
-    /// </summary>
-    private void OnTalkStoryStarted(BossRoomUpdate update) {
+    private void OnTalkStoryPaid(BossRoomUpdate update) {
         var sceneName = SceneManager.GetActiveScene().name;
         var story = TalkStories.FirstOrDefault(each =>
             each.Path == update.Path && each.FsmName == update.FsmName &&
@@ -392,46 +352,43 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        ForgetWaitingTalkStory(fsm);
-        if (_toldTalkStories.ContainsKey(fsm)) {
+        var visit = GetTalkStoryVisit(fsm, story);
+        if (!visit.Payers.Add(update.PlayerId)) {
             return;
         }
 
-        Logger.Info(
-            $"Player {update.PlayerId} set off the story scene '{update.Path}', which plays here once the local " +
-            "player is next to it and free to talk"
-        );
-        _toldTalkStories[fsm] = new ToldTalkStory(
-            story,
-            new HeldStory(story.WaitState, GetTalkStoryTriggers(fsm), null) {
-                Position = fsm.GameObject.transform.position
+        Logger.Info($"Player {update.PlayerId} handed over their share for the story scene '{update.Path}'");
+        if (!IsLocalTalkStoryPaid(story)) {
+            if (!visit.HeardTeammatePaid) {
+                visit.HeardTeammatePaid = true;
+                UiManager.InternalChatBox.AddMessage(TalkStoryTeammatePaidMessage);
             }
-        );
-
-        // Told first, so that the no goes on into the scene (see TakeIntoToldScene)
-        if (fsm.ActiveState?.Name == story.HandState) {
-            Logger.Info($"Closing the prompt of the story scene '{update.Path}', which another player handed over");
-            _askingTalkStories.Remove(fsm);
-            CloseItemPromptAsNo();
+        } else if (!visit.HeardAllPaid && HaveOthersPaid(visit) && !MayTalkStoryWake(visit, false)) {
+            visit.HeardAllPaid = true;
+            UiManager.InternalChatBox.AddMessage(TalkStoryGatherMessage);
         }
     }
 
     /// <summary>
-    /// Forgets that the talk of a story scene waits for the other players.
+    /// Tells the other players in the local scene, as one comes in, for which story scenes of the scene the local
+    /// player handed over their share: also in another session, which those who were not there could not hear.
     /// </summary>
-    private void ForgetWaitingTalkStory(Fsm fsm) {
-        _waitingTalkStories.Remove(fsm);
-        _readyTalkStories.Remove(fsm);
+    private void TellTalkStoriesPaid() {
+        var sceneName = SceneManager.GetActiveScene().name;
+        foreach (var story in TalkStories) {
+            if (string.Equals(story.SceneName, sceneName, StringComparison.OrdinalIgnoreCase) &&
+                IsLocalTalkStoryPaid(story)) {
+                Send(BossRoomUpdateKind.TalkStoryPaid, story.Path, story.FsmName, story.HandState, "",
+                    TalkStoryHandsEventName);
+            }
+        }
     }
 
     /// <summary>
     /// Forgets the story scenes that a talk sets off of the previous scene.
     /// </summary>
     private void ClearTalkStories() {
-        _waitingTalkStories.Clear();
-        _readyTalkStories.Clear();
-        _askingTalkStories.Clear();
-        _toldTalkStories.Clear();
+        _talkStoryVisits.Clear();
     }
 
     /// <summary>
@@ -441,23 +398,28 @@ internal partial class BossRoomCoop {
     /// <param name="Path">The path in the scene of the object of its FSM.</param>
     /// <param name="FsmName">The name of its FSM.</param>
     /// <param name="WaitState">The state in which its FSM waits to be talked to.</param>
-    /// <param name="AskState">The state of the talk that asks whether the player holds what it takes.</param>
-    /// <param name="HandState">The state of the talk at whose prompt the player hands it over.</param>
+    /// <param name="HandState">The state of the talk at whose prompt the player hands over what it takes.</param>
+    /// <param name="EndState">The state in which the game ends the talk, back to waiting to be talked to.</param>
     /// <param name="SceneState">The state that the scene goes on from after the handing over.</param>
     private record TalkStory(
         string SceneName,
         string Path,
         string FsmName,
         string WaitState,
-        string AskState,
         string HandState,
+        string EndState,
         string SceneState
-    );
+    ) {
+        /// <summary>
+        /// What tells the scene apart in the marker of a save: its scene and path.
+        /// </summary>
+        public string Key => SceneName + "/" + Path;
+    }
 
     /// <summary>
-    /// A story scene that another player set off, which plays here once the local player is next to its character.
+    /// What the current scene knows of a story scene that a talk sets off.
     /// </summary>
-    private class ToldTalkStory {
+    private class TalkStoryVisit {
         /// <summary>
         /// The story scene.
         /// </summary>
@@ -469,17 +431,27 @@ internal partial class BossRoomCoop {
         public readonly HeldStory Where;
 
         /// <summary>
-        /// Whether the local player's own talk with its character waits where it asked for what it takes, or where they
-        /// declined to hand it over, to go on into the scene from there.
+        /// The IDs of the other players who said that they handed over their share for it.
         /// </summary>
-        public bool FromOwnTalk;
+        public readonly HashSet<ushort> Payers = [];
 
         /// <summary>
-        /// Whether the local player heard that they need to walk up to its character.
+        /// Whether the talk in which the local player handed over their share goes on to its end as the next frame
+        /// comes, as the scene waits.
         /// </summary>
-        public bool Noticed;
+        public bool EndsPaidTalk;
 
-        public ToldTalkStory(TalkStory story, HeldStory where) {
+        /// <summary>
+        /// Whether the local player heard that every player handed theirs over while not every player is there.
+        /// </summary>
+        public bool HeardAllPaid;
+
+        /// <summary>
+        /// Whether the local player heard that a teammate handed theirs over, before they did.
+        /// </summary>
+        public bool HeardTeammatePaid;
+
+        public TalkStoryVisit(TalkStory story, HeldStory where) {
             Story = story;
             Where = where;
         }

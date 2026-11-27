@@ -616,8 +616,9 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Forgets what the other players said about the story scenes that the game sets in several rooms once the local
-    /// player closes their save, whether connected or not.
+    /// Forgets what the other players said about the story scenes that the game sets in several rooms, and what the
+    /// local player handed over in a save that keeps no marker of it, once the local player closes their save, whether
+    /// connected or not.
     /// </summary>
     private void ClearStoryReportsOnMenu(Scene oldScene, Scene newScene) {
         if (newScene.name != MenuSceneName) {
@@ -627,6 +628,7 @@ internal partial class BossRoomCoop {
         _storyWaits.Clear();
         _storyStarts.Clear();
         _storyReportNumbers.Clear();
+        _paidTalkStories.Clear();
         ClearMissedHeartEnds();
     }
 

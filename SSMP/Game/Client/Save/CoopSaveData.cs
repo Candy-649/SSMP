@@ -83,6 +83,14 @@ internal class CoopSaveMarker {
     /// </summary>
     [JsonProperty("wishesRead")]
     public List<string> WishesRead { get; set; } = [];
+
+    /// <summary>
+    /// The story scenes that a talk sets off for which the local player handed over their own share of what they take,
+    /// by their scene and path (see BossRoomCoop.TalkStories). The scene waits for every player's share, maybe for
+    /// another session, and the game's save can't tell a player who handed theirs over from one who never had it.
+    /// </summary>
+    [JsonProperty("talkStoriesPaid")]
+    public List<string> TalkStoriesPaid { get; set; } = [];
 }
 
 /// <summary>
