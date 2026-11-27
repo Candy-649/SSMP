@@ -899,12 +899,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the death of a creature is dealt by a state machine that is not of the creature, nor of a part of it,
-    /// which runs now (InstaDeath), like the controller of a fight.
+    /// Whether the death of a creature, or of a part of one with health of its own, is dealt by a state machine that
+    /// is not of the creature, nor of a part of it, which runs now (InstaDeath), like the controller of a fight. A part
+    /// of the creature, taken for one from outside, told a death of its own that the replay of a partner's blow dealt
+    /// here, which the partner's game tells (review of 1d687b9).
     /// </summary>
     private static bool DealtFromOutside(HealthManager health) {
         return HutongGames.PlayMaker.FsmExecutionStack.ExecutingFsm?.GameObject is { } dealer && dealer != null &&
-               OwnCreatures.Owning(dealer) != health.gameObject;
+               OwnCreatures.Owning(dealer) != OwnCreatures.Owning(health.gameObject);
     }
 
     /// <summary>
