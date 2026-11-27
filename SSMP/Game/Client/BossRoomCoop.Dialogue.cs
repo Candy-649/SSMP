@@ -286,7 +286,7 @@ internal partial class BossRoomCoop {
             _dialogueFsms.Add(fsm);
             BeginsNextFight(fsm);
 
-            // The fight after the talk of a part of a creature is the creature's own (see EndsTalkByTelling)
+            // The fight after the talk of a part of a creature is the creature's own (see AddTalkHandOvers)
             if (fsm.GameObject is { } talker && Entity.OwnCreatures.Owning(talker) is { } creature &&
                 creature != talker) {
                 foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
@@ -729,9 +729,10 @@ internal partial class BossRoomCoop {
         } else if (sender != null && _dialogueFsms.Contains(sender) && GetBossRoom(fsm) is { } room &&
                    IsEventStart(room, fsm, state, eventName)) {
             isAfterDialogue = true;
-        } else if (sender != null && _dialogueFsms.Contains(sender) && EndsTalkByTelling(sender, fsm)) {
+        } else if (sender != null && _dialogueFsms.Contains(sender) && GetInfo(fsm).IsOwn &&
+                   IsFightTransition(GetFightTransitions(fsm), state.Name, eventName)) {
             // The talk of a part of a creature that every game runs by itself, out of a boss room too, that tells the
-            // creature to fight as it ends, like that of the spar in the library
+            // creature to fight as it ends, like that of the spar in the library (see AddTalkHandOvers)
             isAfterDialogue = true;
         } else if (SharedStepOf(fsm) != null && IsFightTransition(GetFightTransitions(fsm), state.Name, eventName)) {
             // A step of the story that waits for every player, whoever tells the FSM to take it, like the reward of the
@@ -790,18 +791,45 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether a talk ends by telling a creature that every game runs by itself, of which it is a part, to go on: it is
-    /// in a state that ends its dialogue with no way out, from which it tells the creature's state machine, like the
-    /// talk of the spar in the library, whose yes tells the creature to fight and switches the talk off. Ways out of
-    /// where a talk ends are what the fight waits on (see <see cref="GetFightTransitions"/>), and this talk has none:
-    /// the scene host's creature went into the spar as soon as the scene host's player said yes, while the others still
-    /// read (11-27 research of the allies).
+    /// Adds the ways of a state machine of a creature that every game runs by itself that the talk of a part of it
+    /// takes it, as the talk ends with no way out of where it ends and tells the creature to go on, like that of the
+    /// spar in the library, whose yes tells the creature to fight and switches the talk off. Ways out of where a talk
+    /// ends are what the fight waits on, and this talk has none: the scene host's creature went into the spar as soon
+    /// as the scene host's player said yes, while the others still read, and a game whose creature had no fight to get
+    /// to said at once that its player got there (11-27 research of the allies; review of c3c6288).
     /// </summary>
-    private bool EndsTalkByTelling(Fsm talk, Fsm fsm) {
-        return GetInfo(fsm).IsOwn && talk.GameObject is { } talker && fsm.GameObject is { } creature &&
-               talker != creature && Entity.OwnCreatures.Owning(talker) == creature &&
-               talk.ActiveState is { Transitions.Length: 0 } end &&
-               end.Actions.Any(action => action.Enabled && action is EndDialogue);
+    private static void AddTalkHandOvers(Fsm fsm, HashSet<string> transitions) {
+        if (fsm.GameObject is not { } creature) {
+            return;
+        }
+
+        foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            if (machine.gameObject == creature || Entity.OwnCreatures.Owning(machine.gameObject) != creature) {
+                continue;
+            }
+
+            foreach (var end in machine.Fsm.States) {
+                if (end.Transitions.Length > 0 || !end.Actions.Any(action => action.Enabled && action is EndDialogue)) {
+                    continue;
+                }
+
+                foreach (var action in end.Actions) {
+                    if (!action.Enabled || GetSentEventName(action) is not { } sent) {
+                        continue;
+                    }
+
+                    foreach (var state in fsm.States) {
+                        if (state.Transitions.Any(transition => transition.EventName == sent)) {
+                            transitions.Add(GetTransitionKey(state.Name, sent));
+                        }
+                    }
+
+                    if (fsm.GlobalTransitions.Any(transition => transition.EventName == sent)) {
+                        transitions.Add(GetTransitionKey("", sent));
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -914,6 +942,13 @@ internal partial class BossRoomCoop {
             return transitions;
         }
 
+        // What the talk of a part of a creature that every game runs by itself tells it as it ends (see
+        // AddTalkHandOvers)
+        var info = GetInfo(fsm);
+        if (info.IsOwn) {
+            AddTalkHandOvers(fsm, transitions);
+        }
+
         if (!states.Any(state => (state.Actions ?? []).Any(action => action is RunDialogueBase))) {
             return transitions;
         }
@@ -926,7 +961,6 @@ internal partial class BossRoomCoop {
         // to where the creature waits to be talked to again leads to nothing that comes after the talk, like the map
         // seller's after a no to her spar, which would hold her stand until every player was through a talk, though
         // nobody fights (see Entity.ComesBackToTalk)
-        var info = GetInfo(fsm);
         if (info.IsOwn) {
             foreach (var state in states) {
                 if (!state.Actions.Any(action => action.Enabled && action is EndDialogue)) {

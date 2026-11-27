@@ -165,8 +165,11 @@ internal sealed class ToldValues {
                     var here = creature.Find();
                     if (here != variable.Value) {
                         Logger.Info(
-                            $"[Own creatures] '{fsm.GameObject.name}' fights " +
-                            (here != null ? $"'{here.name}'" : "nothing") + " as in the scene host's game"
+                            $"[Own creatures] '{fsm.GameObject.name}' fights " + (
+                                here != null ? $"'{here.name}' as in the scene host's game"
+                                : creature.Place.Length == 0 ? "nothing, as in the scene host's game"
+                                : $"nothing: what it fights in the scene host's game, '{creature.Place}', is not here"
+                            )
                         );
                     }
 

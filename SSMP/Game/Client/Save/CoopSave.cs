@@ -617,6 +617,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that what came for an ally that came out here at their word is taken
+        try {
+            UpdateComingOut();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         if (IsGroupComplete(marker, members)) {
             UpdateCheckedPlayTime(marker);
             ReleaseHold(hero);
@@ -849,6 +856,8 @@ internal partial class CoopSave {
         _keptOut.Clear();
         _keptOutTold.Clear();
         _deathsOwed.Clear();
+        _wordsAsItComesOut.Clear();
+        _broughtOut.Clear();
         _catchStates.Clear();
         _refusedCatches.Clear();
         _lookStates.Clear();

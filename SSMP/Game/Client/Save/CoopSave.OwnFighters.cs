@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity;
+using SSMP.Networking.Packet.Data;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
@@ -79,19 +82,75 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Switches on a creature that fights the room's creatures, which is out in the scene host's game, where it is off
-    /// while what it stands in is on, and tells whether it did. What has it come out reads each player's own save or
-    /// waits for each player's own touch: whether the player asked for its aid, where they have been, whether they
-    /// walked into the part of the room where it waits. One game had it fight beside the players and another had it
-    /// nowhere, and the copy of it that the scene host's game ran had come out in every game.
+    /// The words of other games for each creature that fights the room's creatures that came out here at one of them
+    /// (see <see cref="ComesOutAsThere"/>), in the order they came, taken once its state machines run.
     /// </summary>
-    private static bool ComesOutAsThere(GameObject creature) {
+    private readonly Dictionary<GameObject, List<(ClientPlayerData Player, CoopSaveUpdate Word)>> _wordsAsItComesOut =
+        new();
+
+    /// <summary>
+    /// The creatures that fight the room's creatures that came out here at a word of another game (see
+    /// <see cref="ComesOutAsThere"/>), each once in a stay in the room: one that the room switches off again stays so.
+    /// </summary>
+    private readonly HashSet<GameObject> _broughtOut = [];
+
+    /// <summary>
+    /// Switches on a creature that fights the room's creatures, which is out in the game whose word came, where it is
+    /// off while what it stands in is on, once in a stay in the room, and tells whether it did or waits so. What has it
+    /// come out reads each player's own save or waits for each player's own touch: whether the player asked for its
+    /// aid, where they have been, whether they walked into the part of the room where it waits. One game had it fight
+    /// beside the players and another had it nowhere, and the copy of it that the scene host's game ran had come out in
+    /// every game. The word, and those that come after it, are taken once its state machines run (see
+    /// <see cref="UpdateComingOut"/>): what the word of a member who has just come in tells it does there would be lost
+    /// otherwise, and a creature at the end of its fight there sends no more of them (review of c3c6288: it stood
+    /// unseen at its start).
+    /// </summary>
+    private bool ComesOutAsThere(ClientPlayerData player, CoopSaveUpdate update, GameObject creature) {
+        if (_wordsAsItComesOut.TryGetValue(creature, out var words)) {
+            words.Add((player, update));
+            return true;
+        }
+
         if (creature.activeSelf || !OwnCreatures.FightsCreatures(creature) ||
-            creature.transform.parent is { } stand && !stand.gameObject.activeInHierarchy) {
+            creature.transform.parent is { } stand && !stand.gameObject.activeInHierarchy ||
+            !_broughtOut.Add(creature)) {
             return false;
         }
 
+        Logger.Info(
+            $"[Own creatures] '{update.ObjectPath}' is out in {player.Username}'s game, in '{update.StateName}', and " +
+            "comes out here too, to go on as there once it runs"
+        );
         creature.SetActive(true);
+        _wordsAsItComesOut[creature] = [(player, update)];
         return true;
+    }
+
+    /// <summary>
+    /// Takes the words that came for a creature that came out here at them (see <see cref="ComesOutAsThere"/>) once its
+    /// state machines run, or lets go of them if the room switched it off again.
+    /// </summary>
+    private void UpdateComingOut() {
+        if (_wordsAsItComesOut.Count == 0) {
+            return;
+        }
+
+        foreach (var pair in _wordsAsItComesOut.ToList()) {
+            var creature = pair.Key;
+            if (creature != null && creature.activeInHierarchy &&
+                creature.GetComponents<PlayMakerFSM>().Any(machine => machine.enabled && !machine.Fsm.Started)) {
+                continue;
+            }
+
+            _wordsAsItComesOut.Remove(creature!);
+            if (creature == null || !creature.activeInHierarchy) {
+                Logger.Info("[Own creatures] A creature that came out here at another game's word is gone again");
+                continue;
+            }
+
+            foreach (var (player, word) in pair.Value) {
+                OnOwnCreature(player, word);
+            }
+        }
     }
 }

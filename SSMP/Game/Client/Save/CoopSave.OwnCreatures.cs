@@ -1245,13 +1245,9 @@ internal partial class CoopSave {
             return;
         }
 
-        // A creature that fights the room's creatures beside the players is out where the scene host's is (see
-        // CoopSave.OwnFighters), and goes on from its start to where the scene host's is at the next step
-        if (update.PartCount is not (1 or 2) && ComesOutAsThere(creature)) {
-            Logger.Info(
-                $"[Own creatures] '{place}' is out in {player.Username}'s game, in '{update.StateName}', and comes " +
-                "out here too"
-            );
+        // A creature that fights the room's creatures beside the players is out where it is out in another game (see
+        // CoopSave.OwnFighters), and goes on as there once it runs
+        if (update.PartCount is not (1 or 2) && ComesOutAsThere(player, update, creature)) {
             return;
         }
 
