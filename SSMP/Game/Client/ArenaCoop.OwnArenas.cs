@@ -78,8 +78,10 @@ internal partial class ArenaCoop {
     /// it starts, sets up the floors of a wave, lets out the creatures that wait in it, flings out the arena's reward,
     /// calls an ally in or plays a scene in the back. They do it in every game in an arena of copies too, as things of
     /// the room. One that holds a creature that every game does not run by itself, or a copy, or that makes creatures,
-    /// like the sacks of the pilgrims' last stand, keeps the battle the scene host's (census of the 16 arenas whose
-    /// waves held more than creatures, 11-27: 15 hold only such machines). What it holds is found once.
+    /// keeps the battle the scene host's (census of the 16 arenas whose waves held more than creatures, 11-27: all 16
+    /// hold only such machines; the sacks and the corpse of the pilgrims' last stand make only a corpse and the silk
+    /// that possesses it, which have no health, before they let out the creature that waits in their wave). What it
+    /// holds is found once.
     /// </summary>
     private static bool IsBattleMachine(ArenaState state, Transform thing) {
         if (!state.Things.TryGetValue(thing, out var held)) {
