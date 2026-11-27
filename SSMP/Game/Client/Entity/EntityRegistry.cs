@@ -36,6 +36,12 @@ internal static class EntityRegistry {
     private static readonly HashSet<EntityType> LocalFirstTypes = [];
 
     /// <summary>
+    /// The types of entity whose entry says that they fight the room's creatures beside the players (see
+    /// <see cref="EntityRegistryEntry.FightsCreatures"/>).
+    /// </summary>
+    private static readonly HashSet<EntityType> FighterTypes = [];
+
+    /// <summary>
     /// For each type of entity whose entry names any, the FSMs that each game runs by itself (see
     /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
     /// </summary>
@@ -90,6 +96,12 @@ internal static class EntityRegistry {
     /// once by the copy's own FSMs (see <see cref="EntityRegistryEntry.LocalFirst"/>).
     /// </summary>
     public static bool IsLocalFirst(EntityType type) => LocalFirstTypes.Contains(type);
+
+    /// <summary>
+    /// Whether an entity of the given type fights the room's creatures beside the players (see
+    /// <see cref="EntityRegistryEntry.FightsCreatures"/>).
+    /// </summary>
+    public static bool FightsCreatures(EntityType type) => FighterTypes.Contains(type);
 
     /// <summary>
     /// Whether an FSM of an entity of the given type is one that each game runs by itself (see
@@ -218,6 +230,10 @@ internal static class EntityRegistry {
 
             if (entry.LocalFirst) {
                 LocalFirstTypes.Add(entry.Type);
+            }
+
+            if (entry.FightsCreatures) {
+                FighterTypes.Add(entry.Type);
             }
 
             if (entry.EachGameFsms is { Count: > 0 } eachGameFsms) {
@@ -514,6 +530,15 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("own_in_each_game")]
     public bool OwnInEachGame { get; set; }
+
+    /// <summary>
+    /// Whether the creature fights the room's creatures beside the players, as the allies of some fights do, and every
+    /// game runs it by itself (see <see cref="OwnInEachGame"/>): which creature it goes for, and what it does by where
+    /// that creature is, are the scene host's game's, as what a creature does by where a player is (see
+    /// CoopSave.OwnFighters; USER 11-27 "这么定行").
+    /// </summary>
+    [JsonProperty("fights_creatures")]
+    public bool FightsCreatures { get; set; }
 
     /// <summary>
     /// Names of objects without health, named after the creature with more words, that are still taken for it, each

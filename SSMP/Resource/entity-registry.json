@@ -1949,6 +1949,8 @@
   {
     "base_object_name": "Garmond Fighter",
     "type": "GarmondAndZaza",
+    "own_in_each_game": true,
+    "fights_creatures": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3126,6 +3128,7 @@
   {
     "base_object_name": "Roachkeeper",
     "type": "Roachkeeper",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -4111,6 +4114,8 @@
   {
     "base_object_name": "Shakra",
     "type": "Shakra",
+    "own_in_each_game": true,
+    "fights_creatures": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -4118,6 +4123,9 @@
     "internal_name": "Shakra",
     "fsm_names": [
       "Control"
+    ],
+    "each_game_fsms": [
+      "Bind Response"
     ],
     "without_health": true
   },

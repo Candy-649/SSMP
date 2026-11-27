@@ -68,6 +68,11 @@ internal static class OwnCreatures {
     private static readonly HashSet<PlayMakerFSM> EachGame = [];
 
     /// <summary>
+    /// The creatures that fight the room's creatures beside the players (see EntityRegistryEntry.FightsCreatures).
+    /// </summary>
+    private static readonly HashSet<GameObject> Fighters = [];
+
+    /// <summary>
     /// The state machines of the creatures that each game runs by itself for its own player from a state on, with that
     /// state (see EntityRegistryEntry.EachGameFrom): the end of a boss that takes the player's character, which each
     /// game plays on its own player (USER 11-26 "各演各的"; see BossRoomCoop.Endings). Taken by the scene host's steps,
@@ -538,6 +543,10 @@ internal static class OwnCreatures {
     private static int TakeAt(GameObject creature, EntityType type, string place, Func<GameObject, string> partPlace) {
         Entity.HookTalks();
         Creatures[creature] = (creature.scene.name, place);
+        if (EntityRegistry.FightsCreatures(type)) {
+            Fighters.Add(creature);
+        }
+
         var parts = 0;
         var keepsHealth = false;
         foreach (var machine in creature.GetComponentsInChildren<PlayMakerFSM>(true)) {
@@ -676,6 +685,14 @@ internal static class OwnCreatures {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether an object is, or is a part of, a creature here that fights the room's creatures beside the players (see
+    /// <see cref="Fighters"/>).
+    /// </summary>
+    public static bool FightsCreatures(GameObject part) {
+        return Fighters.Count > 0 && Owning(part) is { } creature && Fighters.Contains(creature);
     }
 
     /// <summary>
@@ -920,6 +937,7 @@ internal static class OwnCreatures {
         MadeAsTold.Clear();
         RoomMakes.Clear();
         EachGame.Clear();
+        Fighters.Clear();
         EachGameFrom.Clear();
         Tries.Clear();
         KeptHealths.Clear();

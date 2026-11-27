@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Entity;
 
@@ -15,7 +16,8 @@ namespace SSMP.Game.Client.Entity;
 /// <see cref="Entity.TakeInput"/>). Being there at all, even with nothing in it, says that an input is a catch. The
 /// same carries what the state that a creature that every game runs by itself leaves worked out, with the step of the
 /// scene host's creature (see CoopSave.OwnCreatures), and an object placed in the room that it picked, like the
-/// platform nearest the player that a creature comes up out of, by its path there (see <see cref="RoomObject"/>).
+/// platform nearest the player that a creature comes up out of, by its path there (see <see cref="RoomObject"/>), and
+/// the creature that an ally fights (see <see cref="FoughtCreature"/>).
 /// </summary>
 internal sealed class ToldValues {
     /// <summary>
@@ -99,14 +101,24 @@ internal sealed class ToldValues {
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="names">The names of the variables.</param>
-    public static ToldValues Of(HutongGames.PlayMaker.Fsm fsm, IEnumerable<string> names) {
+    /// <param name="fought">The names of those in which it keeps the creature that it fights (see
+    /// <see cref="FoughtCreature"/>).</param>
+    public static ToldValues Of(
+        HutongGames.PlayMaker.Fsm fsm,
+        IEnumerable<string> names,
+        ICollection<string>? fought = null
+    ) {
         var values = new List<(string Name, object Value)>();
         foreach (var name in names) {
             if (values.Count >= MaxValues) {
                 break;
             }
 
-            if (ValueOf(fsm.Variables.GetVariable(name)) is { } value) {
+            var variable = fsm.Variables.GetVariable(name);
+            var value = fought?.Contains(name) == true && variable is FsmGameObject creature
+                ? FoughtCreature.Of(creature.Value)
+                : ValueOf(variable);
+            if (value != null) {
                 values.Add((name, value));
             }
         }
@@ -118,9 +130,14 @@ internal sealed class ToldValues {
     /// Sets the values on the FSM of the same creature in this game, on the variables of the same name and kind.
     /// </summary>
     /// <param name="fsm">The FSM.</param>
-    public void ApplyTo(HutongGames.PlayMaker.Fsm fsm) {
+    /// <param name="only">The names of the variables to set, or null for all.</param>
+    public void ApplyTo(HutongGames.PlayMaker.Fsm fsm, ICollection<string>? only = null) {
         var variables = fsm.Variables;
         foreach (var (name, value) in _values) {
+            if (only != null && !only.Contains(name)) {
+                continue;
+            }
+
             switch (value) {
                 case float number when variables.FindFsmFloat(name) is { } variable:
                     variable.Value = number;
@@ -143,6 +160,17 @@ internal sealed class ToldValues {
                 case RoomObject thing when variables.FindFsmGameObject(name) is { } variable &&
                                            ScenePath.Find(thing.Path, thing.Scene) is { } found:
                     variable.Value = found;
+                    break;
+                case FoughtCreature creature when variables.FindFsmGameObject(name) is { } variable:
+                    var here = creature.Find();
+                    if (here != variable.Value) {
+                        Logger.Info(
+                            $"[Own creatures] '{fsm.GameObject.name}' fights " +
+                            (here != null ? $"'{here.name}'" : "nothing") + " as in the scene host's game"
+                        );
+                    }
+
+                    variable.Value = here;
                     break;
             }
         }
@@ -210,6 +238,12 @@ internal sealed class ToldValues {
                     writer.Write(thing.Scene);
                     writer.Write(thing.Path);
                     break;
+                // Under the kind of a variable of any object, which no other value is sent as
+                case FoughtCreature creature:
+                    writer.Write((byte) VariableType.Object);
+                    writer.Write(creature.Scene);
+                    writer.Write(creature.Place);
+                    break;
             }
         }
     }
@@ -231,6 +265,7 @@ internal sealed class ToldValues {
                 VariableType.Vector2 => new Vector2(reader.ReadSingle(), reader.ReadSingle()),
                 VariableType.Vector3 => new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
                 VariableType.GameObject => new RoomObject(reader.ReadString(), reader.ReadString()),
+                VariableType.Object => new FoughtCreature(reader.ReadString(), reader.ReadString()),
                 var kind => throw new IOException($"A told value of the kind {kind} is never written")
             };
             values.Add((name, value));
@@ -271,6 +306,38 @@ internal sealed class ToldValues {
 
             var path = ScenePath.Get(thing.transform);
             return path.Contains("(Clone)") ? null : new RoomObject(thing.scene.name, path);
+        }
+    }
+
+    /// <summary>
+    /// The creature that a creature that fights the room's creatures beside the players picked to fight (see
+    /// CoopSave.OwnFighters), by its scene and a name that finds it in every game: its path in the room, or the place
+    /// of a summon that every game makes by itself (see OwnCreatures.SummonPathOf); an empty one for no creature.
+    /// </summary>
+    private sealed record FoughtCreature(string Scene, string Place) {
+        /// <summary>
+        /// The creature as one fought, an empty one for none, or null for one that has no such name: kept across rooms,
+        /// or made as the room went on by one game alone, which leaves the creature that this game's picked.
+        /// </summary>
+        public static FoughtCreature? Of(GameObject? thing) {
+            if (thing == null) {
+                return new FoughtCreature("", "");
+            }
+
+            if (OwnCreatures.SummonPathOf(thing) is { } summon) {
+                return new FoughtCreature(thing.scene.name, summon);
+            }
+
+            return RoomObject.Of(thing) is { } placed ? new FoughtCreature(placed.Scene, placed.Path) : null;
+        }
+
+        /// <summary>
+        /// The creature here, or null for none, or for one that is not here.
+        /// </summary>
+        public GameObject? Find() {
+            return Place.Length == 0 ? null
+                : OwnCreatures.IsSummonPlace(Place) ? OwnCreatures.FindSummonPath(Scene, Place)
+                : ScenePath.Find(Place, Scene);
         }
     }
 

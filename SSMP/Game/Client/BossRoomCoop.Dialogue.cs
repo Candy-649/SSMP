@@ -285,6 +285,14 @@ internal partial class BossRoomCoop {
         if (fsm != null) {
             _dialogueFsms.Add(fsm);
             BeginsNextFight(fsm);
+
+            // The fight after the talk of a part of a creature is the creature's own (see EndsTalkByTelling)
+            if (fsm.GameObject is { } talker && Entity.OwnCreatures.Owning(talker) is { } creature &&
+                creature != talker) {
+                foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
+                    BeginsNextFight(machine.Fsm);
+                }
+            }
         }
 
         if (_startDialogueDepth > 0 || fsm == null || state == null) {
@@ -721,6 +729,10 @@ internal partial class BossRoomCoop {
         } else if (sender != null && _dialogueFsms.Contains(sender) && GetBossRoom(fsm) is { } room &&
                    IsEventStart(room, fsm, state, eventName)) {
             isAfterDialogue = true;
+        } else if (sender != null && _dialogueFsms.Contains(sender) && EndsTalkByTelling(sender, fsm)) {
+            // The talk of a part of a creature that every game runs by itself, out of a boss room too, that tells the
+            // creature to fight as it ends, like that of the spar in the library
+            isAfterDialogue = true;
         } else if (SharedStepOf(fsm) != null && IsFightTransition(GetFightTransitions(fsm), state.Name, eventName)) {
             // A step of the story that waits for every player, whoever tells the FSM to take it, like the reward of the
             // flea festival that ends it (see SharedSteps)
@@ -775,6 +787,21 @@ internal partial class BossRoomCoop {
 
         NotifyWaiting(readiness);
         return true;
+    }
+
+    /// <summary>
+    /// Whether a talk ends by telling a creature that every game runs by itself, of which it is a part, to go on: it is
+    /// in a state that ends its dialogue with no way out, from which it tells the creature's state machine, like the
+    /// talk of the spar in the library, whose yes tells the creature to fight and switches the talk off. Ways out of
+    /// where a talk ends are what the fight waits on (see <see cref="GetFightTransitions"/>), and this talk has none:
+    /// the scene host's creature went into the spar as soon as the scene host's player said yes, while the others still
+    /// read (11-27 research of the allies).
+    /// </summary>
+    private bool EndsTalkByTelling(Fsm talk, Fsm fsm) {
+        return GetInfo(fsm).IsOwn && talk.GameObject is { } talker && fsm.GameObject is { } creature &&
+               talker != creature && Entity.OwnCreatures.Owning(talker) == creature &&
+               talk.ActiveState is { Transitions.Length: 0 } end &&
+               end.Actions.Any(action => action.Enabled && action is EndDialogue);
     }
 
     /// <summary>

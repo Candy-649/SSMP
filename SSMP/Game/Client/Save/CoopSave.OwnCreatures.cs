@@ -953,7 +953,9 @@ internal partial class CoopSave {
         var beside = target != null ? target.transform.position - step.Place : Vector3.zero;
 
         // The first step of a state machine leaves no state. What it worked out goes, and the objects that it found by
-        // where a player is (see LooksAtPlayersAtTimes)
+        // where a player is (see LooksAtPlayersAtTimes), and with every step the creature that it fights, if it fights
+        // the room's creatures (see CoopSave.OwnFighters)
+        var fought = FoughtBy(fsm);
         var worked = fsm.ActiveState is { } state
             ? ToldValues.Of(
                 fsm,
@@ -961,7 +963,8 @@ internal partial class CoopSave {
                     action => Entity.Action.EntityFsmActions.ValueVariablesOf(action).Concat(
                         LooksAtPlayersAtTimes(action) ? ToldValues.ObjectsStoredBy(action) : []
                     )
-                ).Concat(setOnIt ?? []).Distinct()
+                ).Concat(setOnIt ?? []).Concat(fought).Distinct(),
+                fought
             )
             : ToldValues.None;
         using var stream = new MemoryStream();
@@ -1239,6 +1242,16 @@ internal partial class CoopSave {
                 );
             }
 
+            return;
+        }
+
+        // A creature that fights the room's creatures beside the players is out where the scene host's is (see
+        // CoopSave.OwnFighters), and goes on from its start to where the scene host's is at the next step
+        if (update.PartCount is not (1 or 2) && ComesOutAsThere(creature)) {
+            Logger.Info(
+                $"[Own creatures] '{place}' is out in {player.Username}'s game, in '{update.StateName}', and comes " +
+                "out here too"
+            );
             return;
         }
 
@@ -1615,10 +1628,11 @@ internal partial class CoopSave {
 
             // A member who has just come in: its walk goes on where the scene host's walks now, rather than from the
             // fresh start that the room gave it as it came in, which took it to the same step within a few frames
-            // (review), and so do its picks at random from what the scene host's kept, where it has none
+            // (review), and so do its picks at random from what the scene host's kept, where it has none, and so does
+            // the creature it fights, if it fights the room's creatures (see CoopSave.OwnFighters)
             if (newest && update.Values.Count > OwnHealthValue) {
                 using var reader = new BinaryReader(new MemoryStream(update.Bytes));
-                ToldValues.Read(reader);
+                ToldValues.Read(reader).ApplyTo(fsm, FoughtBy(fsm));
                 SharedDice.PutPastPicks(reader, fsm);
                 SharedDice.SetBounces(creature, reader.ReadInt32());
                 SkipChildPicks(reader);
@@ -1936,7 +1950,8 @@ internal partial class CoopSave {
     /// of them stored counts, whatever it looked at: a choice by where the creature is itself comes out otherwise in a
     /// game where it stands elsewhere. An action that only runs its course by it, like a flight over a time by how far
     /// it goes, chooses nothing (see Entity.Action.EntityFsmActions.ChoosesWhereItGoes): the flight ends into the same
-    /// state in every game.
+    /// state in every game. So does the pick of the creature that a creature that fights the room's creatures goes for
+    /// (see CoopSave.OwnFighters).
     /// </summary>
     private bool GoesByPlayers(FsmState state) {
         var fsm = state.Fsm;
@@ -1953,8 +1968,9 @@ internal partial class CoopSave {
             _playerWayValues[fsm] = stored;
         }
 
+        var fought = FoughtBy(fsm);
         foreach (var action in state.Actions) {
-            if (action.Enabled && (LooksAtPlayers(action) ||
+            if (action.Enabled && (LooksAtPlayers(action) || PicksFought(action, fought) ||
                                    Entity.Action.EntityFsmActions.ChoosesWhereItGoes(action) &&
                                    Entity.Action.EntityFsmActions.ValueVariablesOf(action).Any(stored.Contains))) {
                 return true;
