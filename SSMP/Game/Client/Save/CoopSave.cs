@@ -296,6 +296,7 @@ internal partial class CoopSave {
         RegisterShownPartHooks();
         RegisterRoomLayoutHooks();
         RegisterWorldRumbleHooks();
+        RegisterJournalKillHooks();
         ToldParts.RegisterHooks();
         Entity.LetGoParts.RegisterHooks();
         WishDrops.RegisterHooks();
@@ -1384,6 +1385,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.BreakingCreature:
                 OnBreakingCreature(player, update);
                 break;
+            case CoopSaveUpdateKind.JournalKill:
+                OnJournalKillElsewhere(player, update);
+                break;
         }
     }
 
@@ -2396,6 +2400,26 @@ internal partial class CoopSave {
             Send(update);
             sent = true;
         }
+    }
+
+    /// <summary>
+    /// Sends an update to each member that the saves were checked with who is in another room than the local player,
+    /// and to nobody else: what the members in the room have from their own game doesn't go to them. Gives the members
+    /// it went to.
+    /// </summary>
+    private List<ClientPlayerData> SendToMembersElsewhere(CoopSaveUpdate update) {
+        var elsewhere = GetCheckedMembers().Where(member => !member.IsInLocalScene).ToList();
+        for (var i = 0; i < elsewhere.Count; i++) {
+            if (i > 0) {
+                SendCopy(update, elsewhere[i].Id);
+                continue;
+            }
+
+            update.TargetId = elsewhere[i].Id;
+            Send(update);
+        }
+
+        return elsewhere;
     }
 
     /// <summary>

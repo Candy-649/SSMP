@@ -943,5 +943,13 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Names"/> holds the names of its children, and <see cref="CoopSaveUpdate.Amounts"/>
     /// holds 1 for each that is out and 0 for each that is not.
     /// </summary>
-    RoomPick
+    RoomPick,
+
+    /// <summary>
+    /// The game of the sender recorded a kill in the journal of creatures, which goes to the members in other rooms
+    /// (see CoopSave.JournalKills): <see cref="CoopSaveUpdate.ObjectPath"/> names the entry of the journal,
+    /// <see cref="CoopSaveUpdate.Scene"/> the room of the kill, and <see cref="CoopSaveUpdate.PartCount"/> is 1 if the
+    /// kill gave the whole entry at once, and 0 if it was one kill.
+    /// </summary>
+    JournalKill
 }
