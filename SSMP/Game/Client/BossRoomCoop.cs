@@ -512,6 +512,9 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.TalkStoryPaid:
                 OnTalkStoryPaid(update);
                 break;
+            case BossRoomUpdateKind.TalkStoryPlayed:
+                OnTalkStoryPlayed(update);
+                break;
         }
     }
 

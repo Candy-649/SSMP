@@ -28,8 +28,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// the game ends it, with what they handed over kept in the marker of the save (CoopSave.TalkStoriesPaid), as the
 /// scene may wait for a player who comes another time. Once it may wake, each game takes its player into the talk as
 /// it does when they press to talk, and the character goes on from the step after the handing over; the player who
-/// hands over the last share goes on in their own talk. Each game marks the scene in its own save as it plays it, and
-/// the mark is a flag of the shared world that a check and a join keep if either save has it.
+/// hands over the last share goes on in their own talk. A game that plays it tells the others in the room, which then
+/// wait only for their own player to be next to it, as each game sees the figures of the others a moment late. Each
+/// game marks the scene in its own save as it plays it, and the mark is a flag of the shared world that a check and a
+/// join keep if either save has it.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
@@ -93,6 +95,15 @@ internal partial class BossRoomCoop {
     );
 
     /// <summary>
+    /// The message for a player who handed over their share of what a story scene takes and isn't next to its
+    /// character, as it starts in the game of another player in the room.
+    /// </summary>
+    private static string TalkStoryComeMessage => Lang.Pick(
+        "It has started for a teammate: walk up to it to watch it too.",
+        "队友那边已经开始了，走到它旁边就能一起看。"
+    );
+
+    /// <summary>
     /// Whether the local player handed over their share for a story scene in the loaded co-op save, by its scene and
     /// path (CoopSave.IsTalkStoryPaid). Set by the game's client, as the two-player save is made after this.
     /// </summary>
@@ -138,6 +149,7 @@ internal partial class BossRoomCoop {
             // The game lets a player talk only from within its trigger, and moves them to where they talk from
             if (MayTalkStoryWake(visit, true)) {
                 Logger.Info($"Playing the story scene '{GetPath(fsm)}' from '{story.SceneState}', as all are there");
+                Send(BossRoomUpdateKind.TalkStoryPlayed, fsm, story.WaitState, story.SceneState, eventName);
                 fsm.SetStateAsItRuns(story.SceneState);
                 return true;
             }
@@ -164,6 +176,7 @@ internal partial class BossRoomCoop {
 
         if (MayTalkStoryWake(visit, true)) {
             Logger.Info($"The local player handed over the last share for the story scene '{GetPath(fsm)}'");
+            Send(BossRoomUpdateKind.TalkStoryPlayed, fsm, story.HandState, story.SceneState, eventName);
             return false;
         }
 
@@ -182,8 +195,10 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether the character of a story scene that a talk sets off may wake now: every player handed over their share,
-    /// and every player is next to it. The local player counts as next to it while they talk to it.
+    /// Whether the character of a story scene that a talk sets off may wake now for the local player, who handed over
+    /// their share: every player handed over theirs and every player is next to it, or it started in the game of
+    /// another player in the room and the local player is next to it. The local player counts as next to it while
+    /// they talk to it.
     /// </summary>
     private bool MayTalkStoryWake(TalkStoryVisit visit, bool isLocalTalking) {
         if (!IsLocalTalkStoryPaid(visit.Story)) {
@@ -192,6 +207,12 @@ internal partial class BossRoomCoop {
 
         if (!IsHoldActive()) {
             return true;
+        }
+
+        // A game sees the figures of the others a moment late, so one game may find them all there while another
+        // just doesn't: it plays here as well, rather than wait for players who were there as it started
+        if (visit.StartedElsewhere) {
+            return isLocalTalking || IsLocalHeroInStoryTrigger(visit.Where);
         }
 
         if (!HaveOthersPaid(visit) || (!isLocalTalking && !IsLocalHeroInStoryTrigger(visit.Where))) {
@@ -276,7 +297,7 @@ internal partial class BossRoomCoop {
             where.Position = fsm.GameObject.transform.position;
         }
 
-        visit = new TalkStoryVisit(story, where);
+        visit = new TalkStoryVisit(fsm, story, where);
         _talkStoryVisits[fsm] = visit;
         return visit;
     }
@@ -343,22 +364,12 @@ internal partial class BossRoomCoop {
     /// character isn't in the room.
     /// </summary>
     private void OnTalkStoryPaid(BossRoomUpdate update) {
-        var sceneName = SceneManager.GetActiveScene().name;
-        var story = TalkStories.FirstOrDefault(each =>
-            each.Path == update.Path && each.FsmName == update.FsmName &&
-            string.Equals(each.SceneName, sceneName, StringComparison.OrdinalIgnoreCase)
-        );
-        if (story == null || FindFsm(update.Path, update.FsmName) is not { } fsm || fsm.GameObject == null) {
-            return;
-        }
-
-        var visit = GetTalkStoryVisit(fsm, story);
-        if (!visit.Payers.Add(update.PlayerId)) {
+        if (FindTalkStoryVisit(update) is not { } visit || !visit.Payers.Add(update.PlayerId)) {
             return;
         }
 
         Logger.Info($"Player {update.PlayerId} handed over their share for the story scene '{update.Path}'");
-        if (!IsLocalTalkStoryPaid(story)) {
+        if (!IsLocalTalkStoryPaid(visit.Story)) {
             if (!visit.HeardTeammatePaid) {
                 visit.HeardTeammatePaid = true;
                 UiManager.InternalChatBox.AddMessage(TalkStoryTeammatePaidMessage);
@@ -367,6 +378,49 @@ internal partial class BossRoomCoop {
             visit.HeardAllPaid = true;
             UiManager.InternalChatBox.AddMessage(TalkStoryGatherMessage);
         }
+    }
+
+    /// <summary>
+    /// Takes the word of another player in the local scene that a story scene that a talk sets off started in their
+    /// game, which it then does here too once the local player is next to it, if they handed over their share. A
+    /// player who isn't next to it hears to walk up.
+    /// </summary>
+    private void OnTalkStoryPlayed(BossRoomUpdate update) {
+        if (FindTalkStoryVisit(update) is not { } visit || visit.StartedElsewhere) {
+            return;
+        }
+
+        visit.StartedElsewhere = true;
+        Logger.Info($"The story scene '{update.Path}' started in the game of player {update.PlayerId}");
+        if (IsLocalTalkStoryPaid(visit.Story) && visit.Fsm.ActiveState?.Name == visit.Story.WaitState &&
+            !IsLocalHeroInStoryTrigger(visit.Where)) {
+            UiManager.InternalChatBox.AddMessage(TalkStoryComeMessage);
+        }
+    }
+
+    /// <summary>
+    /// Forgets what a player who left the local scene said of the story scenes that a talk sets off: they say it again
+    /// as they come back in, from the save they play then.
+    /// </summary>
+    public void OnPlayerLeaveScene(ushort id) {
+        foreach (var visit in _talkStoryVisits.Values) {
+            visit.Payers.Remove(id);
+        }
+    }
+
+    /// <summary>
+    /// Finds what the current scene knows of the story scene that a word of another player in the local scene is about.
+    /// </summary>
+    /// <returns>The story scene, or null if the local scene has none such, or no longer its character.</returns>
+    private TalkStoryVisit? FindTalkStoryVisit(BossRoomUpdate update) {
+        var sceneName = SceneManager.GetActiveScene().name;
+        var story = TalkStories.FirstOrDefault(each =>
+            each.Path == update.Path && each.FsmName == update.FsmName &&
+            string.Equals(each.SceneName, sceneName, StringComparison.OrdinalIgnoreCase)
+        );
+        return story != null && FindFsm(update.Path, update.FsmName) is { GameObject: not null } fsm
+            ? GetTalkStoryVisit(fsm, story)
+            : null;
     }
 
     /// <summary>
@@ -421,6 +475,11 @@ internal partial class BossRoomCoop {
     /// </summary>
     private class TalkStoryVisit {
         /// <summary>
+        /// The FSM that plays it.
+        /// </summary>
+        public readonly Fsm Fsm;
+
+        /// <summary>
         /// The story scene.
         /// </summary>
         public readonly TalkStory Story;
@@ -431,7 +490,7 @@ internal partial class BossRoomCoop {
         public readonly HeldStory Where;
 
         /// <summary>
-        /// The IDs of the other players who said that they handed over their share for it.
+        /// The IDs of the other players in the scene who said that they handed over their share for it.
         /// </summary>
         public readonly HashSet<ushort> Payers = [];
 
@@ -440,6 +499,11 @@ internal partial class BossRoomCoop {
         /// comes, as the scene waits.
         /// </summary>
         public bool EndsPaidTalk;
+
+        /// <summary>
+        /// Whether it started in the game of another player in the scene.
+        /// </summary>
+        public bool StartedElsewhere;
 
         /// <summary>
         /// Whether the local player heard that every player handed theirs over while not every player is there.
@@ -451,7 +515,8 @@ internal partial class BossRoomCoop {
         /// </summary>
         public bool HeardTeammatePaid;
 
-        public TalkStoryVisit(TalkStory story, HeldStory where) {
+        public TalkStoryVisit(Fsm fsm, TalkStory story, HeldStory where) {
+            Fsm = fsm;
             Story = story;
             Where = where;
         }

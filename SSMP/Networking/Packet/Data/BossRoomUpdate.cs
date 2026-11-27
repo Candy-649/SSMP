@@ -271,5 +271,12 @@ internal enum BossRoomUpdateKind : byte {
     /// to a player who comes into the scene. <see cref="BossRoomUpdate.Path"/> is the character, and
     /// <see cref="BossRoomUpdate.FsmName"/> its FSM.
     /// </summary>
-    TalkStoryPaid
+    TalkStoryPaid,
+
+    /// <summary>
+    /// A story scene that a talk sets off started in the game of the sender, which the other players in the scene who
+    /// handed over their share then play too once they are next to its character (see BossRoomCoop.TalkStories):
+    /// <see cref="BossRoomUpdate.Path"/> is the character, and <see cref="BossRoomUpdate.FsmName"/> its FSM.
+    /// </summary>
+    TalkStoryPlayed
 }
