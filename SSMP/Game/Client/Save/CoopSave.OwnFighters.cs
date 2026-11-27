@@ -114,7 +114,10 @@ internal partial class CoopSave {
             return true;
         }
 
-        if (creature.activeSelf || !OwnCreatures.ComesOutAsThere(creature) ||
+        // Nor one that died there, whose death waits here for it to come out (see UpdateDeathsOwed): the flea goes on
+        // through steps of its own after its health runs out, each of which the scene host's game tells, and one of
+        // them had a member who came in then bring it out only to have it taken away again (review of 3f3cad7)
+        if (creature.activeSelf || !OwnCreatures.ComesOutAsThere(creature) || _deathsOwed.ContainsKey(creature) ||
             creature.transform.parent is { } stand && !stand.gameObject.activeInHierarchy ||
             !_broughtOut.Add(creature)) {
             return false;

@@ -49,6 +49,23 @@ internal partial class CoopSave {
     private bool _takingJournalKill;
 
     /// <summary>
+    /// How deep the game is in recording kills: one that fills an entry fills the entries that it completes with it
+    /// from within (EnemyJournalRecord.CompleteOthers), which the game of a member does as well as it takes the kill,
+    /// so only the outermost is told (review of d95b3b2: each kill that filled one of them was told on its own).
+    /// </summary>
+    private int _journalKillDepth;
+
+    /// <summary>
+    /// The event by which the wishes hear of a kill in the journal that counts for them (QuestTargetCounter.Increment),
+    /// which is held back from them while a kill that a member told is taken: their count comes over with the wishes
+    /// of the member's game (see CoopSave.Wishes), and counted here once more it would come out one higher in both
+    /// games once this game told it on as the newer (review of d95b3b2).
+    /// </summary>
+    private static readonly FieldInfo? QuestCounterHeardField = typeof(QuestTargetCounter).GetField(
+        "OnIncrement", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
+    );
+
+    /// <summary>
     /// Watches the game record kills in the journal and give entries whole.
     /// </summary>
     private void RegisterJournalKillHooks() {
@@ -86,8 +103,14 @@ internal partial class CoopSave {
         bool showPopup,
         bool forcePopup
     ) {
-        orig(record, showPopup, forcePopup);
-        if (!_takingJournalKill && !_givingWholeEntry) {
+        _journalKillDepth++;
+        try {
+            orig(record, showPopup, forcePopup);
+        } finally {
+            _journalKillDepth--;
+        }
+
+        if (_journalKillDepth == 0 && !_takingJournalKill && !_givingWholeEntry) {
             TellJournalKill(record, false);
         }
     }
@@ -172,6 +195,8 @@ internal partial class CoopSave {
             return;
         }
 
+        var heard = QuestCounterHeardField?.GetValue(null);
+        QuestCounterHeardField?.SetValue(null, null);
         _takingJournalKill = true;
         try {
             do {
@@ -179,6 +204,7 @@ internal partial class CoopSave {
             } while (whole && record.KillCount < record.KillsRequired);
         } finally {
             _takingJournalKill = false;
+            QuestCounterHeardField?.SetValue(null, heard);
         }
 
         Logger.Info($"[Journal] {told}: taken here, {had} -> {record.KillCount} of {record.KillsRequired}");
