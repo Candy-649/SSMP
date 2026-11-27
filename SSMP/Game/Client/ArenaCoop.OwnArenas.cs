@@ -8,7 +8,8 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client;
 
 /// <summary>
-/// The arenas whose every enemy is a creature that every game runs by itself (see OwnCreatures), whose battle every
+/// The arenas whose every enemy is a creature that every game runs by itself (see OwnCreatures), with nothing else in
+/// their waves but machines of the battle that do the same in every game (see IsBattleMachine), whose battle every
 /// game runs by itself too: it lets out its waves, counts its own dead, starts its next wave and wins as it does alone
 /// (USER 11-25 "这个是不是理论上可以两边自己出怪，只要骰子是一样的就行", "做吧"). What a wave lets out is the same in
 /// every game, the arena's code rolls no dice, and its next wave goes by how many of the last one died, which comes out
@@ -27,12 +28,13 @@ internal partial class ArenaCoop {
     private static readonly HashSet<BattleWave> CalledOutWaves = [];
 
     /// <summary>
-    /// Whether every enemy of the waves of an arena is a creature that every game runs by itself. Kept once found so,
-    /// and asked again until then, as an arena asked before the room's creatures were taken has none of them yet. One
-    /// found otherwise while its battle runs stays so for the stay in the room: a machine that one of its waves holds,
-    /// like the one that calls an ally in at the second wave of a fight, does what it does and is gone, which turned
-    /// the arena into one that every game runs by itself in the middle of its battle, a game that followed the scene
-    /// host's battle going on by itself from there (11-27 research of the allies).
+    /// Whether every enemy of the waves of an arena is a creature that every game runs by itself, and all else in them
+    /// a machine of the battle that does the same in every game (see <see cref="IsBattleMachine"/>). Kept once found
+    /// so, and asked again until then, as an arena asked before the room's creatures were taken has none of them yet.
+    /// One found otherwise while its battle runs stays so for the stay in the room: what keeps it so may do what it
+    /// does and be gone, which would turn the arena into one that every game runs by itself in the middle of its
+    /// battle, a game that followed the scene host's battle going on by itself from there (11-27 research of the
+    /// allies: the machine that calls an ally in at the second wave of a fight did so, before such machines counted).
     /// </summary>
     private bool IsOwnArena(BattleScene battleScene) {
         var state = GetState(battleScene);
@@ -54,7 +56,7 @@ internal partial class ArenaCoop {
             foreach (Transform enemy in wave.transform) {
                 if (OwnCreatures.Owning(enemy.gameObject) != null) {
                     taken = true;
-                } else {
+                } else if (!IsBattleMachine(state, enemy)) {
                     other = true;
                 }
             }
@@ -67,6 +69,50 @@ internal partial class ArenaCoop {
 
         state.Own = true;
         Logger.Info($"Arena '{state.Path}' has only creatures that every game runs by itself, and runs in each game");
+        return true;
+    }
+
+    /// <summary>
+    /// Whether something that a wave of an arena holds besides its creatures is a machine of the battle that does the
+    /// same in every game, which every game runs by itself with the rest of the battle: what ends a wave a while after
+    /// it starts, sets up the floors of a wave, lets out the creatures that wait in it, flings out the arena's reward,
+    /// calls an ally in or plays a scene in the back. They do it in every game in an arena of copies too, as things of
+    /// the room. One that holds a creature that every game does not run by itself, or a copy, or that makes creatures,
+    /// like the sacks of the pilgrims' last stand, keeps the battle the scene host's (census of the 16 arenas whose
+    /// waves held more than creatures, 11-27: 15 hold only such machines). What it holds is found once.
+    /// </summary>
+    private static bool IsBattleMachine(ArenaState state, Transform thing) {
+        if (!state.Things.TryGetValue(thing, out var held)) {
+            var makes = false;
+            foreach (var machine in thing.GetComponentsInChildren<PlayMakerFSM>(true)) {
+                foreach (var step in machine.FsmStates) {
+                    foreach (var action in step.Actions) {
+                        makes |= EntitySpawner.SpawnsCreature(action);
+                    }
+                }
+            }
+
+            held = (thing.GetComponentsInChildren<Transform>(true), thing.GetComponentsInChildren<HealthManager>(true),
+                makes);
+            state.Things[thing] = held;
+        }
+
+        if (held.Makes) {
+            return false;
+        }
+
+        foreach (var creature in held.Creatures) {
+            if (OwnCreatures.Owning(creature.gameObject) == null) {
+                return false;
+            }
+        }
+
+        foreach (var part in held.Parts) {
+            if (Entity.Entity.IsRoomObjectOfAnEntity(part.gameObject)) {
+                return false;
+            }
+        }
+
         return true;
     }
 

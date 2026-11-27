@@ -1760,6 +1760,14 @@ internal partial class ArenaCoop {
         public bool Mixed;
 
         /// <summary>
+        /// What each thing that its waves hold besides their creatures holds itself, as found once: its parts, the
+        /// creatures in it and whether a state machine of it makes creatures (see
+        /// <see cref="ArenaCoop.IsBattleMachine"/>).
+        /// </summary>
+        public readonly Dictionary<Transform, (Transform[] Parts, HealthManager[] Creatures, bool Makes)> Things =
+            new();
+
+        /// <summary>
         /// Whether this game follows the scene host's battle of such an arena, which ran already as the local player
         /// came into it (see <see cref="ArenaCoop.TakeOwnArenaWord"/>).
         /// </summary>
