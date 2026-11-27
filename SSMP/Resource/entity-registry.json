@@ -690,6 +690,7 @@
   {
     "base_object_name": "Coral Conch Driller Giant Mourn",
     "type": "Conchfly",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -3516,22 +3517,6 @@
     "internal_name": "Giant Flea",
     "fsm_names": [
       "Control"
-    ]
-  },
-  {
-    "base_object_name": "Giant Flea",
-    "type": "HugeFlea",
-    "parent_name": null,
-    "components": [
-      "Rotation"
-    ],
-    "internal_name": "Giant Flea",
-    "fsm_names": [
-      "Control",
-      "Bonk Hero"
-    ],
-    "each_game_fsms": [
-      "Bonk Hero"
     ]
   },
   {
