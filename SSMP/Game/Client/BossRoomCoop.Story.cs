@@ -240,7 +240,9 @@ internal partial class BossRoomCoop {
     /// the scene's triggers since it was held, or is now. Without triggers to look at, being in the scene is enough.
     /// For a scene that the game sets in several rooms, a player who waits at it in any of them, or for whom it
     /// started, has reached it too. The partner of a two-player save counts as not there while they aren't on the
-    /// server. True when nobody else plays.
+    /// server. True when nobody else plays. Every player is looked at, so that one who is in a trigger now counts as
+    /// having been there while another is still on the way (review of 17e47be: with three players, one who came and
+    /// went while the first was missing was never counted).
     /// </summary>
     private bool HaveAllReachedStory(HeldStory held) {
         if (!IsHoldActive()) {
@@ -251,13 +253,15 @@ internal partial class BossRoomCoop {
             return false;
         }
 
+        var all = true;
         foreach (var playerData in _playerData.Values) {
             if (held.Shared is { } story && HasReachedSharedStory(playerData, story)) {
                 continue;
             }
 
             if (!playerData.IsInLocalScene) {
-                return false;
+                all = false;
+                continue;
             }
 
             if (held.Triggers.Count == 0 || held.Arrived.Contains(playerData.Id)) {
@@ -265,13 +269,14 @@ internal partial class BossRoomCoop {
             }
 
             if (!IsFigureInStoryTriggers(held.Triggers, playerData)) {
-                return false;
+                all = false;
+                continue;
             }
 
             held.Arrived.Add(playerData.Id);
         }
 
-        return true;
+        return all;
     }
 
     /// <summary>
