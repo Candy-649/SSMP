@@ -38,14 +38,6 @@ internal partial class CoopSave {
     private const int HostSavePartSize = 900;
 
     /// <summary>
-    /// The field of the player data that marks that the opening of the game was played: it shows the new character
-    /// their masks, then their silk, their bind and their tools, which wait for it until it was ('Hud Canvas' of
-    /// '_GameCameras': 'health_display' First Pause, the spool's 'Animate' First?, 'Bind Orb' Display, 'Tool Icons'
-    /// Icons Scale In; 'Tutorial Intro Cutscene' of Tut_01 sends SHOW HP and sets it at its end).
-    /// </summary>
-    private const string BindCutsceneField = "bindCutscenePlayed";
-
-    /// <summary>
     /// How many parts of the host's save go out at a time, and how long, in seconds, the host waits before the next
     /// ones. Paced by time rather than by frame: everything sent between two ticks of the network goes in one packet,
     /// which is written with a 16-bit length, and a packet too long to write loses everything in it, the updates of
@@ -993,21 +985,9 @@ internal partial class CoopSave {
             BackUpSave(slot);
         }
 
-        // A character is shown their masks, silk, bind and tools for the first time in the opening, whose end marks
-        // that it was (see BindCutsceneField), and each part of the display waits for that until then, as it does
-        // again in the last act until its first scene (GameManager.StartAct3 clears the mark, the scene sets it again:
-        // PlayerData.IsAct3IntroQueued). A save without the mark that wakes elsewhere, at the host's place, gets
-        // neither scene, so the mark is set as the opening's end sets it. Without it the display stayed without silk
-        // and with one mask or none, for a new character who woke at the host's place and for their save each time it
-        // joined again (reported 11-25: "非房主一方血条只显示一个面具，有时完全不显示，灵丝条有时没有显示")
-        var playerData = merged["playerData"]!;
+        // One that wakes elsewhere, at the host's place, has the opening marked as played as it loads (see
+        // MarkOpeningPlayed)
         var wakesAsNewGame = GetWakePlace(merged) == newGameWake;
-        if (!wakesAsNewGame && (bool?) playerData[BindCutsceneField] != true &&
-            !((bool?) playerData["blackThreadWorld"] == true && (bool?) playerData["act3_wokeUp"] != true)) {
-            playerData[BindCutsceneField] = true;
-            Logger.Info($"Save slot {slot} wakes where no opening is played, which is marked as played for it");
-        }
-
         _pendingJoin = new PendingJoin {
             Slot = slot, Merged = merged, Report = report, HostName = hostName, Time = UnityEngine.Time.unscaledTime,
             Opening = !hasSave && wakesAsNewGame
@@ -1135,8 +1115,14 @@ internal partial class CoopSave {
     /// </summary>
     private static (string? Scene, string? Marker) GetWakePlace(JObject save) {
         var playerData = save["playerData"];
-        var scene = (string?) playerData?["respawnScene"];
-        var marker = (string?) playerData?["respawnMarkerName"];
+        return WakePlaceOf((string?) playerData?["respawnScene"], (string?) playerData?["respawnMarkerName"]);
+    }
+
+    /// <summary>
+    /// The place to wake at of a save by the scene and the marker that its player data names, none for an empty one
+    /// (see <see cref="GetWakePlace"/>).
+    /// </summary>
+    private static (string? Scene, string? Marker) WakePlaceOf(string? scene, string? marker) {
         return (string.IsNullOrEmpty(scene) ? null : scene, string.IsNullOrEmpty(marker) ? null : marker);
     }
 
@@ -1265,7 +1251,36 @@ internal partial class CoopSave {
             }
         }
 
+        MarkOpeningPlayed(gameData.playerData, slot);
         orig(self, gameData, slot);
+    }
+
+    /// <summary>
+    /// Where a new save wakes (see <see cref="GetWakePlace"/>), found as a save first loads.
+    /// </summary>
+    private static (string? Scene, string? Marker)? _newGameWake;
+
+    /// <summary>
+    /// Marks the opening of the game as played for a save that loads, joining or not, which wakes elsewhere than a new
+    /// save does and lacks the mark, as the opening's end marks it ('Tutorial Intro Cutscene' of Tut_01, which sends
+    /// SHOW HP before it): the opening shows the new character their masks, then their silk, their bind and their
+    /// tools, which wait for the mark until then ('Hud Canvas' of '_GameCameras': 'health_display' First Pause, the
+    /// spool's 'Animate' First?, 'Bind Orb' Display, 'Tool Icons' Icons Scale In), as they do again in the last act
+    /// until its first scene (GameManager.StartAct3 clears the mark, the scene sets it again). The game has a save
+    /// without it only there. A save that joins wakes at the host's place and gets neither, and so a new character's
+    /// display stayed without silk and with one mask or none (reported 11-25: "非房主一方血条只显示一个面具，有时完全不显示，
+    /// 灵丝条有时没有显示"), and so did that save's after, as the host's or alone as well, until its player walked back
+    /// into the opening (a player's log of 11-25; USER 11-27 "补吧").
+    /// </summary>
+    private static void MarkOpeningPlayed(PlayerData playerData, int slot) {
+        _newGameWake ??= GetWakePlace(NewSave(new JObject()));
+        if (playerData.bindCutscenePlayed || playerData.IsAct3IntroQueued ||
+            WakePlaceOf(playerData.respawnScene, playerData.respawnMarkerName) == _newGameWake.Value) {
+            return;
+        }
+
+        playerData.bindCutscenePlayed = true;
+        Logger.Info($"Save slot {slot} wakes where no opening is played, which is marked as played for it");
     }
 
     /// <summary>
