@@ -28,7 +28,11 @@ internal partial class ArenaCoop {
 
     /// <summary>
     /// Whether every enemy of the waves of an arena is a creature that every game runs by itself. Kept once found so,
-    /// and asked again until then, as an arena asked before the room's creatures were taken has none of them yet.
+    /// and asked again until then, as an arena asked before the room's creatures were taken has none of them yet. One
+    /// found otherwise while its battle runs stays so for the stay in the room: a machine that one of its waves holds,
+    /// like the one that calls an ally in at the second wave of a fight, does what it does and is gone, which turned
+    /// the arena into one that every game runs by itself in the middle of its battle, a game that followed the scene
+    /// host's battle going on by itself from there (11-27 research of the allies).
     /// </summary>
     private bool IsOwnArena(BattleScene battleScene) {
         var state = GetState(battleScene);
@@ -36,20 +40,29 @@ internal partial class ArenaCoop {
             return true;
         }
 
-        if (WavesField!.GetValue(battleScene) is not IList { Count: > 0 } waves) {
+        if (state.Mixed || WavesField!.GetValue(battleScene) is not IList { Count: > 0 } waves) {
             return false;
         }
 
+        var taken = false;
+        var other = false;
         foreach (var each in waves) {
             if (each is not BattleWave wave || wave == null) {
                 continue;
             }
 
             foreach (Transform enemy in wave.transform) {
-                if (OwnCreatures.Owning(enemy.gameObject) == null) {
-                    return false;
+                if (OwnCreatures.Owning(enemy.gameObject) != null) {
+                    taken = true;
+                } else {
+                    other = true;
                 }
             }
+        }
+
+        if (other) {
+            state.Mixed = taken && (state.Started || state.HostUpdate?.Status == BattleSceneStatus.Running);
+            return false;
         }
 
         state.Own = true;

@@ -1753,6 +1753,13 @@ internal partial class ArenaCoop {
         public bool Own;
 
         /// <summary>
+        /// Whether something of its waves is no creature that every game runs by itself while others are, as found
+        /// while its battle ran, which keeps it an arena of copies for the stay in the room (see
+        /// <see cref="ArenaCoop.IsOwnArena"/>).
+        /// </summary>
+        public bool Mixed;
+
+        /// <summary>
         /// Whether this game follows the scene host's battle of such an arena, which ran already as the local player
         /// came into it (see <see cref="ArenaCoop.TakeOwnArenaWord"/>).
         /// </summary>
