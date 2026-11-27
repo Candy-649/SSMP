@@ -829,7 +829,10 @@ internal partial class CoopSave {
         bool overrideSpecialDeath,
         bool disallowDropFlying
     ) {
-        var tells = !_dyingAsTold && !self.isDead && OwnCreatures.Has(self.gameObject);
+        // A part with health of its own, like the chomper under the lily pad of the clover woods, dies in every game
+        // too, which tells its own death to its lily pad: struck to death in one game, it lived on in another, where
+        // the blow that killed it came as it had sunk back under the water, and bit there at the next landing
+        var tells = !_dyingAsTold && !self.isDead && OwnCreatures.RollsUnderPlace(self.gameObject);
         // Where it is and how it is turned as the blow kills it, where every other game has it die too, and where the
         // player that it goes after is beside it, at whom its death looks there too
         var transform = self.transform;

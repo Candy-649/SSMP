@@ -103,6 +103,12 @@ internal partial class CoopSave {
     private static readonly Dictionary<Type, FieldInfo?> TouchObjectFields = new();
 
     /// <summary>
+    /// The field of each kind of action that feels what touches it which says on what layer it feels it, by type, or
+    /// null for a kind without one (see <see cref="FeelsOnPlayerLayer"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo?> TouchLayerFields = new();
+
+    /// <summary>
     /// Whether a state machine of a creature that every game runs by itself, in a game that follows the scene host's,
     /// goes to a state as it feels this game's player touch what it watches itself: a trigger or a collision of an
     /// action of the state it is in, which this game's player came into, they or a strike of theirs, like a creature
@@ -117,21 +123,85 @@ internal partial class CoopSave {
     /// which says nothing of the others, nor a way into a state that their leaving takes it out of again, which each
     /// player is in or out of by themselves: told the way in and never the way out, the fog that walks with whoever
     /// is in it went on in the scene host's game, and in every game that follows it, after this game's player walked
-    /// out. Nor a way into a state that does something to the player itself, as each game's strand of the silk boss
-    /// catches its own player and tells the boss so; nor the start of a boss fight, which waits for every player in
-    /// its own way (see BossRoomCoop).
+    /// out, but for one that the state leaves again at once by a test of its own (see <see cref="GoesOnAtOnce"/>),
+    /// whose leaving takes it nowhere. Nor a way into a state that does something to the player itself, as each game's
+    /// strand of the silk boss catches its own player and tells the boss so; nor the start of a boss fight, which
+    /// waits for every player in its own way (see BossRoomCoop).
+    ///
+    /// So goes a touch that the state machine feels through a component of its own object, whose tell no state
+    /// machine sends, on a layer that only this game's player is on (see <see cref="FeelsOnPlayerLayer"/>), as this
+    /// game's player touches the object: the lily pad of the clover woods that hides the chomper lands as a player
+    /// comes down on it, which only their body does, and in a game that follows the scene host's it waited for good
+    /// for the scene host's step, as its drift goes by where the players are, while its player stood on it unbitten.
     /// </summary>
     private bool FeltByLocalPlayer(Fsm fsm, FsmState toState, GameObject creature) {
-        if (Fsm.EventData?.SentByFsm != fsm || fsm.LastTransition is not { } way || way.ToState != toState.Name ||
+        var sender = Fsm.EventData?.SentByFsm;
+        if (sender != null && sender != fsm || fsm.LastTransition is not { } way || way.ToState != toState.Name ||
             fsm.ActiveState is not { } from || HeroController.SilentInstance is not { } hero ||
-            !TouchedByLocalPlayer(fsm, from, way.EventName, hero)) {
+            (sender == fsm
+                ? !TouchedByLocalPlayer(fsm, from, way.EventName, hero)
+                : !FeelsOnPlayerLayer(from, way.EventName))) {
             return false;
         }
 
         return OwnCreatures.FollowsSceneHost(creature) &&
-               !toState.Actions.Any(action => FeelsTouch(action, out _) && FeelsLeaving(action)) &&
+               (!toState.Actions.Any(action => FeelsTouch(action, out _) && FeelsLeaving(action)) ||
+                GoesOnAtOnce(toState)) &&
                !Entity.Action.EntityFsmActions.DealsWithThePlayerIn(toState) &&
-               StartsBossFight?.Invoke(fsm, from, way.EventName) != true;
+               StartsBossFight?.Invoke(fsm, from, way.EventName) != true &&
+               (sender == fsm || Entity.Entity.TouchesTheLocalPlayer(fsm.GameObject));
+    }
+
+    /// <summary>
+    /// Whether an action of a state that feels what touches the state machine's own object through a component of the
+    /// object, which no state machine sends the tell of (Collision2dEventLayer and the like, which name no object, see
+    /// <see cref="TouchObjectOf"/>), can send an event as something on the layer of the player's body or of their hit
+    /// box comes into it, or stays in it: no one but this game's player is on either, as the figures of the others are
+    /// on none (see <see cref="FeltByLocalPlayer"/>). Another such action of the state may send the same event for
+    /// something else, as the lily pad lands as well when a creature comes down on it, so whether this game's player
+    /// touches the object now is asked too.
+    /// </summary>
+    private static bool FeelsOnPlayerLayer(FsmState from, string eventName) {
+        foreach (var action in from.Actions) {
+            if (FeelsTouch(action, out _) && !FeelsLeaving(action) && TouchObjectOf(action) == null &&
+                TouchLayerOf(action) is (int) GlobalEnums.PhysLayers.PLAYER or (int) GlobalEnums.PhysLayers.HERO_BOX &&
+                Sends(action, eventName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The layer on which an action that feels what touches it feels it, or null for one that feels it on any (see
+    /// <see cref="FeelsOnPlayerLayer"/>).
+    /// </summary>
+    private static int? TouchLayerOf(FsmStateAction action) {
+        var type = action.GetType();
+        if (!TouchLayerFields.TryGetValue(type, out var layerField)) {
+            layerField = type.GetField("collideLayer", BindingFlags.Instance | BindingFlags.Public);
+            TouchLayerFields[type] = layerField;
+        }
+
+        return layerField?.GetValue(action) is FsmInt { IsNone: false } layer ? layer.Value : null;
+    }
+
+    /// <summary>
+    /// Whether a state goes on at once as it starts by a test of its own value (BoolTest), as the value is now: the
+    /// lily pad that hides the chomper goes on into its snap as a player lands on it, where an ordinary one waits on it
+    /// until they leave (see <see cref="FeltByLocalPlayer"/>).
+    /// </summary>
+    private static bool GoesOnAtOnce(FsmState state) {
+        foreach (var action in state.Actions) {
+            if (action is HutongGames.PlayMaker.Actions.BoolTest { Enabled: true, everyFrame: false } test &&
+                (test.boolVariable.Value ? test.isTrue : test.isFalse) is { } sent &&
+                state.Transitions.Any(way => way.EventName == sent.Name)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -236,9 +306,9 @@ internal partial class CoopSave {
         var fsm = machine.Fsm;
         var teller = Fsm.EventData?.SentByFsm;
 
-        // A touch of this game's player that the state machine feels itself sets nothing on it from outside (see
-        // FeltByLocalPlayer)
-        var felt = teller == fsm;
+        // A touch of this game's player that the state machine feels itself, or through a component of its own
+        // object, whose tell no state machine sends, sets nothing on it from outside (see FeltByLocalPlayer)
+        var felt = teller == null || teller == fsm;
         SharedDice.RollByName(creature, OwnCreatures.RollName(creature));
         var word = OwnCreatureUpdate(
             machine,

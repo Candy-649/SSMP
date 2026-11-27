@@ -1398,6 +1398,7 @@
   {
     "base_object_name": "Lilypad Plat Trap",
     "type": "Nuphar",
+    "own_in_each_game": true,
     "parent_name": null,
     "components": [
       "Rotation"
@@ -1405,6 +1406,9 @@
     "internal_name": "Lilypad Trap",
     "fsm_names": [
       "Control"
+    ],
+    "catch_events": [
+      "HERO"
     ]
   },
   {

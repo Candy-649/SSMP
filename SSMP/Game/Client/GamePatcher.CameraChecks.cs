@@ -1,4 +1,5 @@
 using System;
+using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using UnityEngine;
@@ -14,7 +15,9 @@ namespace SSMP.Game.Client;
 /// of the ways a creature ignored the partner (USER 10-17, "我走到它的攻击范围了都不动，打它也不动", "这样的情况不止这
 /// 个虫子会有"). For such a creature, the screen of any player in the room counts, each partner's screen worked out
 /// from where their figure is (see <see cref="EstimateCameraPosition"/>); what is on none of them is left to the
-/// game's own check.
+/// game's own check. So goes how far such a creature is from the camera (GetDistance): the lily pads of the clover
+/// woods drift, and feel a player land on them, only while the camera is near, and those of the scene host's game,
+/// whose steps every game takes, stood still as the partner landed on one far from the scene host.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
@@ -32,11 +35,19 @@ internal partial class GamePatcher {
     private Hook? _checkOutOfCameraHook;
 
     /// <summary>
+    /// The hook on how far something is from something else.
+    /// </summary>
+    private Hook? _getDistanceHook;
+
+    /// <summary>
     /// Registers the hook on the check of whether something is on screen.
     /// </summary>
     private void RegisterCameraCheckHooks() {
         _checkOutOfCameraHook = TryCreateHook(
             typeof(CheckOutOfCamera), "DoCheck", OnCheckOutOfCameraDoCheck, InstanceNonPublicFlags | InstancePublicFlags
+        );
+        _getDistanceHook = TryCreateHook(
+            typeof(GetDistance), "DoGetDistance", OnGetDistance, InstanceNonPublicFlags | InstancePublicFlags
         );
     }
 
@@ -46,6 +57,8 @@ internal partial class GamePatcher {
     private void DisposeCameraCheckHooks() {
         _checkOutOfCameraHook?.Dispose();
         _checkOutOfCameraHook = null;
+        _getDistanceHook?.Dispose();
+        _getDistanceHook = null;
     }
 
     /// <summary>
@@ -66,6 +79,38 @@ internal partial class GamePatcher {
 
         self.outsideBool?.Value = false;
         self.insideBool?.Value = true;
+    }
+
+    /// <summary>
+    /// Has how far a creature that this game runs for every game is from the camera be how far it is from the nearest
+    /// screen of a player in the room, each partner's worked out from where their figure is, at the depth of the
+    /// camera, which the distance counts.
+    /// </summary>
+    /// <param name="orig">The game's own look at the distance.</param>
+    /// <param name="self">The action.</param>
+    private static void OnGetDistance(Action<GetDistance> orig, GetDistance self) {
+        orig(self);
+        _mainCameraVariable ??= FsmVariables.GlobalVariables.FindFsmGameObject("MainCamera");
+        var camera = self.target.Value;
+        if (camera == null || camera != _mainCameraVariable?.Value || self.storeResult == null ||
+            self.Fsm?.FsmComponent is not { } fsm || !Entity.Entity.RunsHere(fsm) ||
+            self.Fsm.GetOwnerDefaultTarget(self.gameObject) is not { } measured || measured == null) {
+            return;
+        }
+
+        var hero = HeroController.instance;
+        var position = measured.transform.position;
+        var nearest = self.storeResult.Value;
+        foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
+            if (player == null || hero != null && player == hero.gameObject) {
+                continue;
+            }
+
+            var screen = EstimateCameraPosition(player.transform.position, camera.transform.position.z);
+            nearest = Mathf.Min(nearest, Vector3.Distance(position, screen));
+        }
+
+        self.storeResult.Value = nearest;
     }
 
     /// <summary>
