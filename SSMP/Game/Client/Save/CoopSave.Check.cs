@@ -46,6 +46,20 @@ internal partial class CoopSave {
     private const int EntriesPerPart = 64;
 
     /// <summary>
+    /// How many parts of the world progress go out at a time, paced with the parts of the host's save (see
+    /// UpdateHostSaveRequests). A part is a few kilobytes, and all of them at once, about 66 KB for a world played far,
+    /// went in one packet, which is written with a 16-bit length, so the packet couldn't be written and lost all that
+    /// was in it, the updates of the rest of the game included (a log of 11-27: "Packet size (132959 bytes) exceeds
+    /// the 65535 bytes limit" as the progress went to a joining player, and again at once as they still asked).
+    /// </summary>
+    private const int WorldStatePartsPerSend = 2;
+
+    /// <summary>
+    /// The parts of the world progress that are still to go out, to whom, in order.
+    /// </summary>
+    private readonly Queue<CoopSaveUpdate> _worldStateSends = new();
+
+    /// <summary>
     /// The value of a hello that starts a check, rather than one that answers the hello of the other player.
     /// </summary>
     private const ushort HelloStart = 0;
@@ -229,6 +243,7 @@ internal partial class CoopSave {
         _stateAdded = false;
         _roundFinished = false;
         _roundState = null;
+        _worldStateSends.Clear();
         _stateDropTold.Clear();
         _sentWorldItems = [];
         _sentWishEntries = [];
@@ -602,9 +617,14 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Sends the bosses that the local save has beaten, the saved objects of the world that are set in it, its wish log
-    /// and its story flags to a member: the same that every member of the round gets.
+    /// and its story flags to a member: the same that every member of the round gets. The parts go out a few at a time
+    /// (<see cref="WorldStatePartsPerSend"/>), and a member asking again while theirs are still to go gets no more.
     /// </summary>
     private void SendWorldState(ClientPlayerData member, bool again = false) {
+        if (again && _worldStateSends.Any(part => part.TargetId == member.Id)) {
+            return;
+        }
+
         var state = GetRoundState();
         var defeatIndex = 0;
         var itemIndex = 0;
@@ -640,7 +660,7 @@ internal partial class CoopSave {
                 }
             }
 
-            Send(update);
+            _worldStateSends.Enqueue(update);
         }
 
         if (!again) {

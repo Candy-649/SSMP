@@ -392,19 +392,30 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Sends the next parts that are still to go out, to the players of them who are still on the server.
+    /// </summary>
+    /// <param name="parts">The parts, in order.</param>
+    /// <param name="count">How many of them go out now.</param>
+    private void SendPacedParts(Queue<CoopSaveUpdate> parts, int count) {
+        for (var i = 0; i < count && parts.Count > 0; i++) {
+            var part = parts.Dequeue();
+            if (_playerData.ContainsKey(part.TargetId)) {
+                Send(part);
+            }
+        }
+    }
+
+    /// <summary>
     /// Sends the host's save to the players who asked for it once nothing keeps it from coming, tells them what does
-    /// while something does, and sends the parts that are still to go.
+    /// while something does, and sends the parts that are still to go: of the host's save, and of the world progress
+    /// of a check (CoopSave.Check), which go at the same pace, so that both never fill one packet together.
     /// </summary>
     private void UpdateHostSaveRequests() {
         var now = UnityEngine.Time.unscaledTime;
-        if (_hostSaveSends.Count > 0 && now >= _hostSaveNextSend) {
+        if ((_hostSaveSends.Count > 0 || _worldStateSends.Count > 0) && now >= _hostSaveNextSend) {
             _hostSaveNextSend = now + HostSaveSendInterval;
-            for (var i = 0; i < HostSavePartsPerSend && _hostSaveSends.Count > 0; i++) {
-                var part = _hostSaveSends.Dequeue();
-                if (_playerData.ContainsKey(part.TargetId)) {
-                    Send(part);
-                }
-            }
+            SendPacedParts(_hostSaveSends, HostSavePartsPerSend);
+            SendPacedParts(_worldStateSends, WorldStatePartsPerSend);
         }
 
         if (_hostSaveRequests.Count == 0) {
