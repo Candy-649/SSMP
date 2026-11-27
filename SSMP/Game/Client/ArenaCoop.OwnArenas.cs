@@ -101,14 +101,16 @@ internal partial class ArenaCoop {
             return false;
         }
 
+        // What was destroyed since is gone from it: the reward that an item placer flings out is picked up and goes,
+        // and its object, kept here, may no longer be asked for its own (review of 8982d9f)
         foreach (var creature in held.Creatures) {
-            if (OwnCreatures.Owning(creature.gameObject) == null) {
+            if (creature != null && OwnCreatures.Owning(creature.gameObject) == null) {
                 return false;
             }
         }
 
         foreach (var part in held.Parts) {
-            if (Entity.Entity.IsRoomObjectOfAnEntity(part.gameObject)) {
+            if (part != null && Entity.Entity.IsRoomObjectOfAnEntity(part.gameObject)) {
                 return false;
             }
         }
