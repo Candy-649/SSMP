@@ -1271,17 +1271,46 @@ internal partial class CoopSave {
     /// display stayed without silk and with one mask or none (reported 11-25: "非房主一方血条只显示一个面具，有时完全不显示，
     /// 灵丝条有时没有显示"), and so did that save's after, as the host's or alone as well, until its player walked back
     /// into the opening (a player's log of 11-25; USER 11-27 "补吧").
+    ///
+    /// The rest of the opening, the walk out of its rooms into the first town, is marked as walked as well for a save
+    /// that wakes outside those rooms: the end of the tutorial and the scene of the town that the walk ends in ('Set
+    /// Tutorial Completed' of Tut_03, 'Churchkeeper Intro Scene' of Bonetown: Set End), which nothing clears again.
+    /// Without them the game still had the way of the walk ready for the new character: 'Tutorial Blocker' of Tut_01
+    /// closed the shaft down from the town, which a joining character who went down it was stuck on top of, and the
+    /// walk waited in the town (USER 11-27 "还是有bug噢，这个剧情标记，我是开了一个新存档，进我朋友的存档，我回苔藓这边会有bug";
+    /// the host's log: stuck at the top of the shaft of Tut_01, where the host's character fell through). A save that
+    /// wakes in those rooms, or with no place to wake at, which starts it in the first of them, may still be on its
+    /// way through them, as no other place to wake at is set before the walk ends.
     /// </summary>
     private static void MarkOpeningPlayed(PlayerData playerData, int slot) {
         _newGameWake ??= GetWakePlace(NewSave(new JObject()));
-        if (playerData.bindCutscenePlayed || playerData.IsAct3IntroQueued ||
-            WakePlaceOf(playerData.respawnScene, playerData.respawnMarkerName) == _newGameWake.Value) {
+        var wake = WakePlaceOf(playerData.respawnScene, playerData.respawnMarkerName);
+        if (wake == _newGameWake.Value) {
             return;
         }
 
-        playerData.bindCutscenePlayed = true;
-        Logger.Info($"Save slot {slot} wakes where no opening is played, which is marked as played for it");
+        if (!playerData.bindCutscenePlayed && !playerData.IsAct3IntroQueued) {
+            playerData.bindCutscenePlayed = true;
+            Logger.Info($"Save slot {slot} wakes where no opening is played, which is marked as played for it");
+        }
+
+        if ((playerData.completedTutorial && playerData.churchKeeperIntro) ||
+            wake.Scene?.StartsWith(OpeningScenePrefix, StringComparison.Ordinal) != false) {
+            return;
+        }
+
+        playerData.completedTutorial = true;
+        playerData.churchKeeperIntro = true;
+        Logger.Info(
+            $"Save slot {slot} wakes outside the rooms of the opening without its walk into the town, which is " +
+            "marked as walked for it"
+        );
     }
+
+    /// <summary>
+    /// What the names of the rooms of the opening of the game begin with, in which the walk into the first town begins.
+    /// </summary>
+    private const string OpeningScenePrefix = "Tut_";
 
     /// <summary>
     /// Starts a new save, aligned with the host's world, with the opening of a new game, as a new game starts (USER
