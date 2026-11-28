@@ -1074,7 +1074,15 @@ internal partial class CoopSave {
                 continue;
             }
 
-            foreach (var machine in creature.GetComponents<PlayMakerFSM>()) {
+            // A state machine that waits here for a player to talk to the creature is told last, as the game has it:
+            // the map seller's talk waits for a player once her fight machine is home and tells it that she is ready.
+            // Their game walks each machine into its step through the states between (see WalkInto), and the way of
+            // another machine may switch off what the talk needs: her fight machine, still at the start of her stay
+            // away there, went through it on its way home, which switched off her prompt and her look at the player,
+            // and the states of her coming back that switch them on again lie beyond where the way ends. Told first,
+            // her talk machine was left so, and the member could not talk to her (Luminary's log of 11-28,
+            // 16:12:52.180; her chat "我不能duihua")
+            foreach (var machine in creature.GetComponents<PlayMakerFSM>().OrderBy(WaitsForTalkHere)) {
                 if (!OwnCreatures.RunsInEachGame(machine)) {
                     TellOwnState(player, machine, health);
                 }
@@ -1094,6 +1102,15 @@ internal partial class CoopSave {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a state machine of a creature is in a state where the creature waits for a player to talk to it (see
+    /// Entity.WaitsForTalk), which a member who has come into the room is told after the creature's other state
+    /// machines (see <see cref="SendOwnCreaturesTo"/>).
+    /// </summary>
+    private static bool WaitsForTalkHere(PlayMakerFSM machine) {
+        return machine.Fsm.ActiveState is { } state && Entity.Entity.WaitsForTalk(state);
     }
 
     /// <summary>
