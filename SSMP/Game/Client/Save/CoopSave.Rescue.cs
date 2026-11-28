@@ -2616,13 +2616,18 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Notes where the local player stands while they stand on the ground out of water, for WhereToStandUp: only with
-    /// the ground right below their middle, which at the edge of a platform is over the drop while the feet still touch.
+    /// the ground right below their middle, which at the edge of a platform is over the drop while the feet still touch,
+    /// and only while their feet touch it, as the game asks it (CheckTouchingGround). A silk skill that lifts the player
+    /// keeps them on the ground by their state for the start of its rise, and a player whom a spar knocked out in it lay
+    /// where it was noted, off the ground (Luminary's log of 11-28, 16:31:44.624, 0.43 above the floor; USER "离地有一定的
+    /// 距离").
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     private static void NoteGroundStoodOn(HeroController hero) {
         var state = hero.cState;
         if (!state.onGround || state.swimming || state.dead || state.transitioning ||
-            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || GetGroundRightBelow(hero, hero.transform.position) == null) {
+            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || !hero.CheckTouchingGround() ||
+            GetGroundRightBelow(hero, hero.transform.position) == null) {
             return;
         }
 
