@@ -616,12 +616,6 @@ internal partial class CoopSave {
     private GameObject? _rescueOwnCocoon;
 
     /// <summary>
-    /// The pick-up by which the local player is pulling up a member knocked out right now (see
-    /// <see cref="PullUpByHand"/>), which is taken away once that is over rather than as the member stands.
-    /// </summary>
-    private GameObject? _pullUpInHand;
-
-    /// <summary>
     /// The other members who are lying dead waiting to be pulled back up. This is kept apart from
     /// <see cref="_rescueTargets"/> on purpose: those only exist while a cocoon is in the room the local player is
     /// standing in, and a member who died somewhere else is still in no position to pull anyone up. Kept even while the
@@ -3117,11 +3111,17 @@ internal partial class CoopSave {
 
         var interaction = pullUp.GetComponent<InteractEvents>();
         interaction.InteractLabel = InteractableBase.PromptLabels.Take_Living;
-        // Run by the pick-up itself, as the game's own runs by its own (GenericPickup.Pickup): a room unloaded in the
-        // middle of it ends it with the pick-up, and the next room starts the hero's animation again
-        // (GameManager.OnNextLevelReady). Run by anything else, it played on in the next room, and its end gave the
-        // player control back in the middle of coming in (InteractEvents.EndInteraction, which gives it back).
-        interaction.Interacted += () => interaction.StartCoroutine(PullUpByHand(playerId, pullUp, interaction));
+        pullUp.AddComponent<PullUpByHand>().Set(
+            interaction,
+            () => PullUpKnockedOut(playerId),
+            () => {
+                // Left for the next try while they still lie by it, as the game leaves its own pick-up of an item that
+                // was given up (CollectableItemPickup.CancelPickup), and gone once they no longer do
+                if (!_rescueTargets.TryGetValue(playerId, out var target) || target.Cocoon != pullUp) {
+                    UnityEngine.Object.Destroy(pullUp);
+                }
+            }
+        );
 
         pullUp.name = $"Pull Up {playerId}";
         pullUp.transform.SetParent(null);
@@ -3132,51 +3132,134 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The local player pulls up a member who lies knocked out, with the clips the game plays as it picks up what lies
-    /// on the ground (GenericPickup.Pickup): bending down, taking hold, and standing up again, the member pulled up as
-    /// they take hold. A player who goes down in the middle of it lets go, and nothing more of it is played on them.
+    /// The taking of the pick-up a member who lies knocked out is pulled up by (<see cref="MakePullUp"/>), run by the
+    /// pick-up itself, as the game runs its own pick-up by its own (GenericPickup.Pickup): a room unloaded in the
+    /// middle of it ends it there, and the next room gives the player their control and animation back
+    /// (GameManager.OnNextLevelReady). Run by anything outliving the room, it played on into the next one, and its end
+    /// gave the player control back in the middle of coming in.
+    /// The game walks the local player up to the member (NPCControlBase.MovePlayer). Then come the clips the game plays
+    /// as it picks up what lies on the ground, bending down, taking hold and standing up again, and the member is
+    /// pulled up as the player takes hold. A hurt anywhere in it gives it up, as a hurt gives up the game's own pick-up
+    /// of an item (CollectableItemPickup.CancelPickup, on HeroController.OnTakenDamage) and ends what a character is
+    /// saying (InteractManager.OnHeroInterrupted, on HERO DAMAGED): given up before the player took hold, it leaves the
+    /// member lying there for the next try. Going on, it played its clips over a player the hurt had already given
+    /// their control and animation back to, and still pulled the member up from wherever the hurt threw them. The
+    /// game tells of a hurt before the death it brings (HeroController.TakeDamage), so the hurt that knocks the player
+    /// out gives it up before they go down, and nothing of it is left playing on them as they lie there.
     /// </summary>
-    /// <param name="playerId">The member.</param>
-    /// <param name="pullUp">The pick-up the member is pulled up by.</param>
-    /// <param name="interaction">Its interaction, which the pull-up is the taking of.</param>
-    private IEnumerator PullUpByHand(ushort playerId, GameObject pullUp, InteractEvents interaction) {
-        // Left where it is until this is over: taken away in the middle of it, it would end this with it, and leave the
-        // player without control and with their animation stopped, which only the end of this gives back
-        _pullUpInHand = pullUp;
-        var hero = HeroController.instance;
-        var animator = hero.animCtrl.animator;
-        bool IsDown() => PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead;
+    private sealed class PullUpByHand : MonoBehaviour {
+        /// <summary>
+        /// The interaction of the pick-up.
+        /// </summary>
+        private InteractEvents _interaction = null!;
 
-        hero.StopAnimationControl();
-        animator.Play(PickUpBendClipName);
-        yield return new WaitForSeconds(PickUpReachTime);
+        /// <summary>
+        /// Pulls the member up, as the player takes hold of them.
+        /// </summary>
+        private Action _takeHold = null!;
 
-        if (!IsDown()) {
-            PullUpKnockedOut(playerId);
-            animator.Play(PickUpHoldClipName);
-            yield return new WaitForSeconds(PickUpHoldTime);
+        /// <summary>
+        /// What is done once the taking is over, gone through or given up.
+        /// </summary>
+        private Action _over = null!;
+
+        /// <summary>
+        /// The hero of the local player while they are taking it, or null.
+        /// </summary>
+        private HeroController? _taker;
+
+        /// <summary>
+        /// The clips of the pick-up while they play, or null.
+        /// </summary>
+        private Coroutine? _pulling;
+
+        /// <summary>
+        /// Whether the local player is taking it right now, from the walk up to the member to standing up again, when
+        /// it is not taken away. Taken away in the middle of the walk, it left the footsteps of the walk on until the
+        /// next room (HeroController.ForceWalkingSound, which only the end of the walk turns off); taken away in the
+        /// middle of the clips, it left the player without control and with their animation stopped.
+        /// </summary>
+        public bool IsTaken => _taker != null;
+
+        /// <summary>
+        /// Sets up the taking of the pick-up.
+        /// </summary>
+        /// <param name="interaction">The interaction of the pick-up.</param>
+        /// <param name="takeHold">Pulls the member up, as the player takes hold of them.</param>
+        /// <param name="over">What is done once the taking is over, gone through or given up.</param>
+        public void Set(InteractEvents interaction, Action takeHold, Action over) {
+            _interaction = interaction;
+            _takeHold = takeHold;
+            _over = over;
+            interaction.StartingDialogue += Take;
+            interaction.Interacted += () => _pulling = StartCoroutine(Pull());
         }
 
-        if (!IsDown()) {
+        /// <summary>
+        /// The local player takes it, as the game starts to walk them up to the member.
+        /// </summary>
+        private void Take() {
+            _taker = HeroController.instance;
+            _taker.OnTakenDamage += GiveUp;
+        }
+
+        /// <summary>
+        /// The clips of the game's pick-up, in its order and its times (GenericPickup.Pickup).
+        /// </summary>
+        private IEnumerator Pull() {
+            var hero = _taker!;
+            var animator = hero.animCtrl.animator;
+            hero.StopAnimationControl();
+            animator.Play(PickUpBendClipName);
+            yield return new WaitForSeconds(PickUpReachTime);
+
+            _takeHold();
+            animator.Play(PickUpHoldClipName);
+            yield return new WaitForSeconds(PickUpHoldTime);
+
             var rise = animator.GetClipByName(PickUpRiseClipName);
             animator.Play(rise);
             yield return new WaitForSeconds(rise.Duration);
+
+            _pulling = null;
+            End();
         }
 
-        if (!IsDown()) {
+        /// <summary>
+        /// Gives the taking up, as the local player is hurt.
+        /// </summary>
+        private void GiveUp() {
+            if (_pulling != null) {
+                StopCoroutine(_pulling);
+                _pulling = null;
+            }
+
+            End();
+        }
+
+        /// <summary>
+        /// Ends the taking the way the game ends its own pick-up, giving the player their animation and control back,
+        /// and turns off the footsteps of a walk given up in the middle, as the end of the walk would.
+        /// </summary>
+        private void End() {
+            var hero = _taker!;
+            _taker = null;
+            hero.OnTakenDamage -= GiveUp;
+            hero.ForceWalkingSound = false;
             hero.StartAnimationControl();
-            interaction.EndInteraction();
+            _interaction.EndInteraction();
+            _over();
         }
 
-        _pullUpInHand = null;
-
-        // Still lying there, as this player went down before they took hold: a new pick-up for whoever comes next, this
-        // one being left in the middle of its interaction
-        if (_rescueTargets.TryGetValue(playerId, out var target) && target.Cocoon == pullUp) {
-            RemoveRescueTarget(playerId);
-            ShowMemberCocoon(playerId);
-        } else {
-            UnityEngine.Object.Destroy(pullUp);
+        /// <summary>
+        /// Stops listening for a hurt once it goes with its room in the middle of the taking, which the next room ends
+        /// for the player: their control and animation back, and the footsteps of a walk turned off
+        /// (GameManager.OnNextLevelReady, HeroController.FinishedEnteringScene).
+        /// </summary>
+        private void OnDestroy() {
+            if (_taker != null) {
+                _taker.OnTakenDamage -= GiveUp;
+            }
         }
     }
 
@@ -3398,7 +3481,9 @@ internal partial class CoopSave {
             return;
         }
 
-        if (target.Cocoon != null && target.Cocoon != _pullUpInHand) {
+        // Not the pick-up the local player is taking, which goes once the taking is over (PullUpByHand.IsTaken)
+        if (target.Cocoon != null &&
+            !(target.Cocoon.TryGetComponent<PullUpByHand>(out var pullUp) && pullUp.IsTaken)) {
             UnityEngine.Object.Destroy(target.Cocoon);
         }
 
