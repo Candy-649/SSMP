@@ -146,10 +146,17 @@ internal partial class CoopSave {
     private static readonly Dictionary<ushort, int> BodiesKeptHidden = new();
 
     /// <summary>
-    /// Whether the body of a player is kept off the screen as they lie in a cocoon (see
-    /// <see cref="SetPartnerBodyHidden"/>), in which nothing goes after them.
+    /// The players lying knocked out in the open here, whose body stays on the screen (see
+    /// <see cref="LetGoOfLyingPartner"/>).
     /// </summary>
-    internal static bool IsBodyKeptHidden(ushort playerId) => BodiesKeptHidden.ContainsKey(playerId);
+    private static readonly HashSet<ushort> BodiesLyingKnockedOut = [];
+
+    /// <summary>
+    /// Whether the body of a player lies down here, in a cocoon with the body kept off the screen (see
+    /// <see cref="SetPartnerBodyHidden"/>) or knocked out in the open, in which nothing goes after them.
+    /// </summary>
+    internal static bool IsBodyLyingDown(ushort playerId) =>
+        BodiesKeptHidden.ContainsKey(playerId) || BodiesLyingKnockedOut.Contains(playerId);
 
     /// <summary>
     /// How long the screen takes to come back, in seconds.
@@ -1191,7 +1198,19 @@ internal partial class CoopSave {
     private void EndWaitEveryoneDown(PendingRescue rescue, string name) {
         rescue.Outcome = RescueOutcome.Ended;
         rescue.EveryoneDown = true;
-        Logger.Info($"{name} died as well, so this wait is over and everyone goes to their bench");
+        Logger.Info($"{name} went down as well, so this wait is over and the game's own death plays out for everyone");
+
+        // Knocked out in a spar, everyone down is the spar lost, which the game ends where it wakes a beaten player
+        // rather than at a bench
+        if (rescue.KnockedOut) {
+            Chat(Lang.Pick(
+                $"{name} went down as well, so the spar is lost.",
+                $"{name} 也倒下了，这场切磋输了。"
+            ));
+
+            return;
+        }
+
         Chat(
             _checkedMembers.Count <= 1
                 ? Lang.Pick(
@@ -1326,7 +1345,7 @@ internal partial class CoopSave {
 
             var leaveNow = _modSettings.Keybinds.CoopLeave.IsPressed;
             if (leaveNow && !leaveHeld && Time.unscaledTime - waiting.StartTime >= LeaveKeyDeadTime) {
-                Logger.Info("Gave up waiting to be pulled back up and went to the bench");
+                Logger.Info("Gave up waiting to be pulled back up, so the game's own death plays out");
                 waiting.Outcome = RescueOutcome.Ended;
 
                 break;
@@ -1364,7 +1383,7 @@ internal partial class CoopSave {
         // lived through this death, whether this player gave up or could not be stood back up
         _deathPassesNoTime = !lying.EveryoneDown && GetCheckedMembers().Count > 0;
         Logger.Info(
-            "Letting the game's own death take the player to their bench, " +
+            "Letting the game's own death take the player where it brings them back, " +
             (_deathPassesNoTime ? "without time passing: a teammate is still standing" : "with time passing")
         );
 
@@ -1476,6 +1495,32 @@ internal partial class CoopSave {
         }
 
         rescue.Effect = ShowTheDeath(hero, frostDeath, rescue.KnockedOut);
+
+        if (rescue.KnockedOut) {
+            MoveKnockedOutBody(hero, rescue);
+        }
+    }
+
+    /// <summary>
+    /// Puts the body of a player whom a spar knocked out where they lie and stand up, once the knock-out is shown from
+    /// where they were struck. Their body is what the members see and strike, here and in their games, so it is at the
+    /// hit box there from the start, rather than in the air where a knock-out in a jump left it.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    /// <param name="rescue">The wait the player lies in.</param>
+    private static void MoveKnockedOutBody(HeroController hero, PendingRescue rescue) {
+        var place = new Vector3(rescue.Position.x, rescue.Position.y, hero.transform.position.z);
+        if (place == hero.transform.position) {
+            return;
+        }
+
+        hero.transform.position = place;
+        hero.rb2d.position = rescue.Position;
+        rescue.LyingAt = rescue.Position;
+
+        // Off the spot they went down on, and so out of the current they went down in, which standing up would put
+        // back on them where none is (TryRevive)
+        rescue.Current = null;
     }
 
     /// <summary>
@@ -2118,20 +2163,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Lays a player whom a spar knocked out on the ground where they lie, the way the game shows one before they get
-    /// up beside the one they sparred with (HeroController.Respawn), once the knock-out has played out over them. Their
-    /// body is what the members see and strike to pull them up, here and in their games, where it lies the same way.
+    /// Shows a player whom a spar knocked out lying on the ground, the way the game shows one before they get up beside
+    /// the one they sparred with (HeroController.Respawn), once the knock-out has played out over them. Their games
+    /// show them lying the same way, as this is what their character plays.
     /// </summary>
     /// <param name="rescue">The wait the player lies in.</param>
     private static void LieKnockedOut(PendingRescue rescue) {
         if (HeroController.instance is not { } hero) {
             return;
         }
-
-        // The body as well as the place it is drawn at: it is the body that the lying player is held to
-        hero.transform.position = new Vector3(rescue.Position.x, rescue.Position.y, hero.transform.position.z);
-        hero.rb2d.position = rescue.Position;
-        rescue.LyingAt = rescue.Position;
 
         hero.renderer.enabled = true;
         hero.animCtrl.PlayClipForced(KnockedOutClipName);
@@ -2692,7 +2732,7 @@ internal partial class CoopSave {
             // Another member is still on their feet, who can pull up everyone who is down
             var standing = JoinNames(GetStandingMembers().Select(member => member.Username));
             Chat(Lang.Pick(
-                $"{player.Username} went down as well. {standing} can still break out everyone who is down.",
+                $"{player.Username} went down as well. {standing} can still pull up everyone who is down.",
                 $"{player.Username} 也倒下了。{standing} 还能把倒下的人都救起来。"
             ));
         }
@@ -3127,6 +3167,9 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="playerId">The member.</param>
     private void LetGoOfLyingPartner(ushort playerId) {
+        // Held off the list whatever puts them on it again in the meantime, like the end of a film of theirs
+        BodiesLyingKnockedOut.Add(playerId);
+
         if (_playerData.TryGetValue(playerId, out var player) && player.PlayerObject != null) {
             LetGoOfLyingBody(player.PlayerObject);
         }
@@ -3190,6 +3233,7 @@ internal partial class CoopSave {
         _membersBeingPulledUp.Clear();
         _uiManager.CoopPrompt.Hide();
         BodiesKeptHidden.Clear();
+        BodiesLyingKnockedOut.Clear();
     }
 
     /// <summary>
@@ -3225,6 +3269,7 @@ internal partial class CoopSave {
         if (target.KnockedOut) {
             // Never taken off the screen, so only back among the players that creatures go after once they stand,
             // as their own game shows them getting up
+            BodiesLyingKnockedOut.Remove(target.PlayerId);
             if (standUp && _playerData.TryGetValue(target.PlayerId, out var player) && player.PlayerObject != null) {
                 PlayerTargetRegistry.RegisterRemotePlayer(player.PlayerObject);
             }

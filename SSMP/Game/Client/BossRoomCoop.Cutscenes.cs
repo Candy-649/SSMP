@@ -108,8 +108,8 @@ internal partial class BossRoomCoop {
         if (_playersInCutscene.Remove(update.PlayerId)) {
             Logger.Info($"Player {update.PlayerId} is out of the film of the game, or has arrived");
 
-            // Not one lying in a cocoon, whom nothing goes after either (CoopSave.SetPartnerBodyHidden)
-            if (BodyInLocalScene(update.PlayerId) is { } body && !CoopSave.IsBodyKeptHidden(update.PlayerId)) {
+            // Not one lying down, in a cocoon or knocked out, whom nothing goes after either (CoopSave.IsBodyLyingDown)
+            if (BodyInLocalScene(update.PlayerId) is { } body && !CoopSave.IsBodyLyingDown(update.PlayerId)) {
                 PlayerTargetRegistry.RegisterRemotePlayer(body);
             }
         }
