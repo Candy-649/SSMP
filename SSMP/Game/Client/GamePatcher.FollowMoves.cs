@@ -180,6 +180,10 @@ internal partial class GamePatcher {
     /// </summary>
     private static Vector2 OnMoversWays(Vector2 own, Vector2 led, FsmStateAction mover) {
         var (across, upright) = FollowMovers[mover.GetType()];
+
+        // A flyer across that is told to leave the height be moves its object across alone, and writes back the speed
+        // up and down that the body has (review of 250a22e)
+        upright &= mover is not HutongGames.PlayMaker.Actions.DistanceFlyHorizontal { dontAffectY.Value: true };
         return new Vector2(across ? led.x : own.x, upright ? led.y : own.y);
     }
 
