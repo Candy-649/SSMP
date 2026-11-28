@@ -1025,6 +1025,20 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// The creatures of the rooms loaded now, and their parts with state machines of their own (see
+    /// <see cref="Parts"/>).
+    /// </summary>
+    public static IEnumerable<GameObject> AllWithMachines() {
+        foreach (var creature in Creatures.Keys) {
+            yield return creature;
+        }
+
+        foreach (var part in Parts.Keys) {
+            yield return part;
+        }
+    }
+
+    /// <summary>
     /// Whether an object is, or is a part of, a creature that every game runs by itself, in the game of the scene host,
     /// which decides for every game whom it goes after and where it goes by where the players are.
     /// </summary>

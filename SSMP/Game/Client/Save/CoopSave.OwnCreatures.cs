@@ -357,6 +357,7 @@ internal partial class CoopSave {
         OwnCreatures.MakesAlike = machine => LayoutOf(machine.gameObject) != null;
         OwnCreatures.TellsRoomMade = (scene, place, maker) => TellOwnMade(null, scene, place, maker);
         GamePatcher.TellsWalk = TellOwnWalk;
+        GamePatcher.SceneHostsMotion = MotionBySceneHost;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
         EntityManager.PicksOwnGroup = PickOwnGroup;
@@ -1244,6 +1245,16 @@ internal partial class CoopSave {
     /// <param name="update">The update.</param>
     private void OnOwnCreature(ClientPlayerData player, CoopSaveUpdate update) {
         var place = update.ObjectPath;
+
+        // Where a creature is in a move after a player in the scene host's game, a few times a second, which nothing
+        // waits for and nothing keeps: the next one tells it again (see CoopSave.OwnFollows)
+        if (update.PartCount == OwnFollowPart) {
+            if (OwnCreatures.Find(update.Scene, place) is { } moving) {
+                TakeOwnFollow(player, moving, update);
+            }
+
+            return;
+        }
 
         // A summon that is not made or started here yet waits for it (see CoopSave.OwnSummons)
         if (OwnCreatures.IsSummonPlace(place) && KeepsSummonWord(player, update)) {

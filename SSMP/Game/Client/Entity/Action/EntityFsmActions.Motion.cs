@@ -1122,7 +1122,7 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// Whether an object is a player's character, or something on one: this game's own, or the figure of a partner.
     /// </summary>
-    private static bool IsAPlayer(GameObject gameObject) {
+    internal static bool IsAPlayer(GameObject gameObject) {
         var hero = HeroController.instance;
         if (hero != null && gameObject.transform.IsChildOf(hero.transform)) {
             return true;

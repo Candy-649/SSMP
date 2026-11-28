@@ -595,6 +595,15 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Where the creatures in moves after a player are: told, in the game that runs the room, and let go of as the
+        // words grow old, in the others; also once the partner is gone, so that one here moves by itself again (see
+        // CoopSave.OwnFollows)
+        try {
+            UpdateOwnFollows();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also once the partner is gone, so that a creature through its move here takes the steps of the scene host's
         // that came meanwhile
         try {
@@ -834,6 +843,7 @@ internal partial class CoopSave {
         _layoutPickingStates.Clear();
         _ownSteps.Clear();
         _heldOwnSteps.Clear();
+        ForgetOwnFollows();
         _playerWayValues.Clear();
         _ownValues.Clear();
         _machineSetValues.Clear();
