@@ -3117,8 +3117,11 @@ internal partial class CoopSave {
 
         var interaction = pullUp.GetComponent<InteractEvents>();
         interaction.InteractLabel = InteractableBase.PromptLabels.Take_Living;
-        interaction.Interacted += () =>
-            MonoBehaviourUtil.Instance.StartCoroutine(PullUpByHand(playerId, pullUp, interaction));
+        // Run by the pick-up itself, as the game's own runs by its own (GenericPickup.Pickup): a room unloaded in the
+        // middle of it ends it with the pick-up, and the next room starts the hero's animation again
+        // (GameManager.OnNextLevelReady). Run by anything else, it played on in the next room, and its end gave the
+        // player control back in the middle of coming in (InteractEvents.EndInteraction, which gives it back).
+        interaction.Interacted += () => interaction.StartCoroutine(PullUpByHand(playerId, pullUp, interaction));
 
         pullUp.name = $"Pull Up {playerId}";
         pullUp.transform.SetParent(null);
@@ -3137,8 +3140,8 @@ internal partial class CoopSave {
     /// <param name="pullUp">The pick-up the member is pulled up by.</param>
     /// <param name="interaction">Its interaction, which the pull-up is the taking of.</param>
     private IEnumerator PullUpByHand(ushort playerId, GameObject pullUp, InteractEvents interaction) {
-        // Left where it is until this is over: taken away in the middle of its interaction, it would leave the game
-        // waiting for an interaction to end that nothing ends
+        // Left where it is until this is over: taken away in the middle of it, it would end this with it, and leave the
+        // player without control and with their animation stopped, which only the end of this gives back
         _pullUpInHand = pullUp;
         var hero = HeroController.instance;
         var animator = hero.animCtrl.animator;
