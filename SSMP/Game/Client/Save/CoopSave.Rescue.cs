@@ -21,10 +21,10 @@ namespace SSMP.Game.Client.Save;
 /// Being pulled back up by another member after dying, instead of waking at a bench. While another member is still
 /// standing, a death of the local player is not played out at all: the player goes down where they are, the game's own
 /// death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other members can
-/// break open to put them back on their feet with half their health. Each member who is down lies in a cocoon of their
-/// own, and the hits of everyone who hits one count together. The game's own death runs, from its very first step,
-/// only once nobody is left to do that: every member is down, or the player gave up. Waiting is a choice, it lasts
-/// until one of those, and the cocoon stops being shown to the others the moment waiting ends.
+/// break open to put them back on their feet with a third of their health. Each member who is down lies in a cocoon
+/// of their own, and the hits of everyone who hits one count together. The game's own death runs, from its very first
+/// step, only once nobody is left to do that: every member is down, or the player gave up. Waiting is a choice, it
+/// lasts until one of those, and the cocoon stops being shown to the others the moment waiting ends.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -47,8 +47,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The source of the short invulnerability of a player who was just pulled back up, so that the hit that killed
-    /// them cannot land again in the same instant on half the health. While it lasts, what the room hurts with takes
-    /// no health either (see <see cref="TryRevive"/>), and the cold does not build up (<see cref="OnTickFrost"/>).
+    /// them cannot land again in the same instant on a third of the health. While it lasts, what the room hurts with
+    /// takes no health either (see <see cref="TryRevive"/>), and the cold does not build up
+    /// (<see cref="OnTickFrost"/>).
     /// </summary>
     private static readonly object RescueInvulnerability = new();
 
@@ -2034,7 +2035,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Puts the local player back on their feet where they fell, with half of their health. This undoes what going
+    /// Puts the local player back on their feet where they fell, with a third of their health. This undoes what going
     /// down did (<see cref="GoDown"/>) and what the death shown over them left on the screen and in the sound, in the
     /// order the game's own respawn does it. Their money and silk never left them.
     /// </summary>
@@ -2170,16 +2171,17 @@ internal partial class CoopSave {
             hero.ResetInput();
             hero.ResetLook();
 
-            // Half of the maximum, rounded down, but never nothing: waking up already dead would be absurd. A player
-            // under the curse stands up with one mask: half of their health back each time a partner pulled them up
-            // made the curse easy to carry (USER 11-07 "…给畸芽特殊的复活机制，比如说只能回一滴血！不然畸芽就太好打了").
+            // A third of the maximum, rounded to the nearest: two masks of five to seven, three of eight to ten (USER
+            // 11-28 "改成round(上限/3)，畸芽不变"). A player under the curse stands up with one mask: more back each
+            // time a partner pulled them up made the curse easy to carry (USER 11-07
+            // "…给畸芽特殊的复活机制，比如说只能回一滴血！不然畸芽就太好打了").
             //
             // Given the game's own way rather than written into the number, because the number is only half of what
             // health is here. The row of masks in the corner is not drawn from the field - it is redrawn when the
             // game says health has changed - so writing the field left a player standing up with health they had no
             // way of seeing, and a corner that still said they were dead.
             var cursed = playerData.IsAnyCursed;
-            var health = cursed ? 1 : Mathf.Max(1, playerData.maxHealth / 2);
+            var health = cursed ? 1 : Mathf.RoundToInt(playerData.maxHealth / 3f);
             Logger.Info(
                 $"Standing up with {health} of {playerData.maxHealth} masks{(cursed ? ", one under the curse" : "")}"
             );
@@ -2197,7 +2199,7 @@ internal partial class CoopSave {
 
             // What the room hurts with goes through any invulnerability: lava, spikes, a drop take their health and
             // send the player back to the room's safe place all the same (HeroController.TakeDamage). So a player
-            // pulled up over lava fell straight back in, losing two of the three masks a rescue gives, even when they
+            // pulled up over lava fell straight back in, losing two of the few masks a rescue gives, even when they
             // stood up at that safe place: in a boss room it can sit over a floor the boss has broken, which the game
             // brings back only on its own way back from the lava. For as long as the invulnerability lasts, the
             // game's own switch for a hit that takes no health is on as well, which nothing in the game uses. Such a
