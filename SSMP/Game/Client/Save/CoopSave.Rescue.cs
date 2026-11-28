@@ -23,9 +23,9 @@ namespace SSMP.Game.Client.Save;
 /// death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other members can
 /// break open to put them back on their feet with a third of their health. Each member who is down lies in a cocoon
 /// of their own, and the hits of everyone who hits one count together. A player knocked out in a spar, which does not
-/// kill them, lies on the ground in the open instead, struck where they lie. The game's own death runs, from its very
-/// first step, only once nobody is left to do that: every member is down, or the player gave up. Waiting is a choice,
-/// it lasts until one of those, and the cocoon stops being shown to the others the moment waiting ends.
+/// kill them, lies on the ground in the open instead, and is pulled up by hand. The game's own death runs, from its
+/// very first step, only once nobody is left to do that: every member is down, or the player gave up. Waiting is a
+/// choice, it lasts until one of those, and the cocoon stops being shown to the others the moment waiting ends.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -50,6 +50,32 @@ internal partial class CoopSave {
     /// The clip of a player knocked out getting up off the ground, as the game plays it after a spar.
     /// </summary>
     private const string WakeUpClipName = "Wake Up Ground";
+
+    /// <summary>
+    /// The clip of bending down to what lies on the ground, the first of the game's pick-up (GenericPickup.Pickup),
+    /// which a member plays as they pull up one who is knocked out.
+    /// </summary>
+    private const string PickUpBendClipName = "Collect Normal 1";
+
+    /// <summary>
+    /// The clip of the pick-up that holds what it took hold of.
+    /// </summary>
+    private const string PickUpHoldClipName = "Collect Normal 2";
+
+    /// <summary>
+    /// The clip of the pick-up that stands up again.
+    /// </summary>
+    private const string PickUpRiseClipName = "Collect Normal 3";
+
+    /// <summary>
+    /// How long the pick-up bends down before it takes hold, in seconds, as the game's does.
+    /// </summary>
+    private const float PickUpReachTime = 0.75f;
+
+    /// <summary>
+    /// How long the pick-up holds before it stands up again, in seconds, as the game's does.
+    /// </summary>
+    private const float PickUpHoldTime = 0.5f;
 
     /// <summary>
     /// How long, in seconds, at the start of a wait during which the key that gives up on it is not listened to at
@@ -361,8 +387,8 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Whether they lie knocked out in the open, their body on the screen and nothing drawn of what stands in for
-        /// their cocoon.
+        /// Whether they lie knocked out in the open, their body on the screen, to be pulled up by hand
+        /// (<see cref="MakePullUp"/>).
         /// </summary>
         public bool KnockedOut { get; }
 
@@ -377,7 +403,7 @@ internal partial class CoopSave {
         public string Scene { get; }
 
         /// <summary>
-        /// The object that stands in for their cocoon.
+        /// The object that stands in for their cocoon, or for one knocked out the pick-up they are pulled up by.
         /// </summary>
         public GameObject Cocoon { get; }
     }
@@ -588,6 +614,12 @@ internal partial class CoopSave {
     /// nowhere on their screen.
     /// </summary>
     private GameObject? _rescueOwnCocoon;
+
+    /// <summary>
+    /// The pick-up by which the local player is pulling up a member knocked out right now (see
+    /// <see cref="PullUpByHand"/>), which is taken away once that is over rather than as the member stands.
+    /// </summary>
+    private GameObject? _pullUpInHand;
 
     /// <summary>
     /// The other members who are lying dead waiting to be pulled back up. This is kept apart from
@@ -1503,8 +1535,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Puts the body of a player whom a spar knocked out where they lie and stand up, once the knock-out is shown from
-    /// where they were struck. Their body is what the members see and strike, here and in their games, so it is at the
-    /// hit box there from the start, rather than in the air where a knock-out in a jump left it.
+    /// where they were struck. Their body is what the members see and come up to, here and in their games, so it is
+    /// where the members pull them up from the start, rather than in the air where a knock-out in a jump left it.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     /// <param name="rescue">The wait the player lies in.</param>
@@ -1646,7 +1678,7 @@ internal partial class CoopSave {
         // Shown to the player themselves as well, not only to the ones who can open it. Watching the room you died in
         // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting. A
         // player knocked out has their own body lying there for that (LieKnockedOut).
-        _rescueOwnCocoon = SpawnRescueCocoon(position, null, cursed, false);
+        _rescueOwnCocoon = SpawnRescueCocoon(position, null, cursed);
 
         Logger.Info($"Waiting for {standing} to open the cocoon in '{scene}'");
 
@@ -2037,18 +2069,10 @@ internal partial class CoopSave {
         // Knocked out in a spar: pulled up rather than broken out, and giving up plays the game's own knock-out, as a
         // spar is lost, rather than taking them to their bench
         if (rescue.KnockedOut) {
-            _uiManager.CoopPrompt.Show(
-                rescue.Hits > 0
-                    ? Lang.Pick(
-                        $"{name} {(one ? "is" : "are")} pulling you up ({rescue.Hits}/{RescueHits}). " +
-                        $"Press {LeaveKeyName} to give up instead",
-                        $"{name} 正在把你拉起来（{rescue.Hits}/{RescueHits}）。按 {LeaveKeyName} 直接认输"
-                    )
-                    : Lang.Pick(
-                        $"Waiting for {name} to pull you up. Press {LeaveKeyName} to give up instead",
-                        $"等 {name} 来把你拉起来。按 {LeaveKeyName} 直接认输"
-                    )
-            );
+            _uiManager.CoopPrompt.Show(Lang.Pick(
+                $"Waiting for {name} to pull you up. Press {LeaveKeyName} to give up instead",
+                $"等 {name} 来把你拉起来。按 {LeaveKeyName} 直接认输"
+            ));
 
             return;
         }
@@ -2337,7 +2361,12 @@ internal partial class CoopSave {
             // The silk of the cocoon that its hits did not pay to those who opened it. All of it, a whole spool,
             // made a bind the moment they stood up, and with a bind that nothing interrupts that was all of their
             // health.
-            hero.AddSilk(CocoonSilk - RescueHits, true);
+            //
+            // A spar pays no silk, neither to the one pulled up nor to the one who pulled them up (USER 11-28
+            // "切磋就不要给丝了，两个人都不给").
+            if (!rescue.KnockedOut) {
+                hero.AddSilk(CocoonSilk - RescueHits, true);
+            }
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
 
@@ -2747,13 +2776,13 @@ internal partial class CoopSave {
             Chat(
                 SceneUtil.GetCurrentSceneName() == update.Scene
                     ? Lang.Pick(
-                        $"{player.Username} was knocked out. Hit them {RescueHits} times to pull them up.",
-                        $"{player.Username} 被打倒了。攻击他们 {RescueHits} 次就能把人拉起来。"
+                        $"{player.Username} was knocked out. Go up to them and press up to pull them up.",
+                        $"{player.Username} 被打倒了。走到人旁边按上就能把人拉起来。"
                     )
                     : Lang.Pick(
-                        $"{player.Username} was knocked out. They lie where they fell, and {RescueHits} hits pull " +
-                        "them up.",
-                        $"{player.Username} 被打倒了，人就躺在倒下的地方，打 {RescueHits} 次能把人拉起来。"
+                        $"{player.Username} was knocked out. They lie where they fell: go up to them and press up " +
+                        "to pull them up.",
+                        $"{player.Username} 被打倒了，人就躺在倒下的地方，走过去按上就能把人拉起来。"
                     )
             );
         } else if (!localDown) {
@@ -2794,12 +2823,9 @@ internal partial class CoopSave {
             );
             rescue.Hits = rescue.HitsBy.Values.Sum();
 
-            // The hit the member landed, shown on this side of it too, on the cocoon or on the body lying knocked out.
-            // The silk it drew went to them.
+            // The hit the member landed, shown on this side of it too. The silk it drew went to them.
             if (_rescueOwnCocoon != null) {
                 PlaySilkHitEffect(_rescueOwnCocoon, false);
-            } else if (rescue.KnockedOut && HeroController.instance is { } lyingHero) {
-                PlaySilkHitEffect(lyingHero.gameObject, false);
             }
 
             if (rescue.Hits >= needed) {
@@ -2882,10 +2908,8 @@ internal partial class CoopSave {
     /// <param name="position">Where the player died.</param>
     /// <param name="openableFor">The member whom hits on it pull back up, or null for one that takes no hits.</param>
     /// <param name="cursed">Whether the player lying in it went down under the curse.</param>
-    /// <param name="knockedOut">Whether the player was knocked out and lies in the open, which leaves of the cocoon
-    /// only what takes the hits, with nothing of it drawn.</param>
     /// <returns>The object, or null if it could not be made.</returns>
-    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor, bool cursed, bool knockedOut) {
+    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor, bool cursed) {
         var gameManager = global::GameManager.instance;
         var sceneManager = gameManager == null ? null : gameManager.GetSceneManager();
         var prefab = sceneManager == null ? null : sceneManager.GetComponent<CustomSceneManager>()?.heroCorpsePrefab;
@@ -2935,15 +2959,6 @@ internal partial class CoopSave {
             AppearanceStateName, read, () => appearance.FsmVariables.GetFsmEnum(CorpseTypeVariableName).Value = look
         );
 
-        // Lying knocked out, the player is their own body on the ground, so nothing of the cocoon is drawn: not the
-        // cocoon, the threads behind it, nor the spiders that fall from it as it appears. Its FSM only switches the
-        // objects it shows on, never what draws them.
-        if (knockedOut) {
-            foreach (var drawn in cocoon.GetComponentsInChildren<Renderer>(true)) {
-                drawn.enabled = false;
-            }
-        }
-
         cocoon.SetActive(true);
 
         // The one a player is shown of their own takes no hits. They are lying in it, they cannot swing at anything
@@ -2992,6 +3007,16 @@ internal partial class CoopSave {
             hero.SilkGain(hit);
         }
 
+        TellOwnRescueHits(playerId, waiting);
+    }
+
+    /// <summary>
+    /// Tells every member how far the local player got in pulling up a member who is down, and counts the member as
+    /// pulled up once the hits of everyone together reach the count.
+    /// </summary>
+    /// <param name="playerId">The member who is down.</param>
+    /// <param name="waiting">What is known of their wait.</param>
+    private void TellOwnRescueHits(ushort playerId, WaitingMember waiting) {
         // To every member, not only the one lying in it: the hits of everyone count together, and every game has to
         // know when the cocoon opens, or it takes the member in it for someone still down
         SendToMembers(new CoopSaveUpdate {
@@ -3022,7 +3047,7 @@ internal partial class CoopSave {
 
         _membersBeingPulledUp.Remove(player.Id);
         if (Time.unscaledTime - time <= StoodUpWordTime) {
-            Chat(Lang.Pick($"You broke {player.Username} out.", $"你把 {player.Username} 拉起来了。"));
+            Chat(Lang.Pick($"You pulled {player.Username} up.", $"你把 {player.Username} 拉起来了。"));
         }
     }
 
@@ -3038,19 +3063,22 @@ internal partial class CoopSave {
             return;
         }
 
-        if (SpawnRescueCocoon(waiting.Position, playerId, waiting.Cursed, waiting.KnockedOut) is not { } cocoon) {
-            return;
-        }
-
-        _rescueTargets[playerId] = new RescueTarget(playerId, waiting.Scene, cocoon, waiting.KnockedOut);
-
         // Knocked out, they lie on the ground in the open, the way their game shows them, so their body stays: only
-        // what hunts players lets go of them
+        // what hunts players lets go of them, and they are pulled up by hand
         if (waiting.KnockedOut) {
+            _rescueTargets[playerId] = new RescueTarget(
+                playerId, waiting.Scene, MakePullUp(playerId, waiting.Position), true
+            );
             LetGoOfLyingPartner(playerId);
 
             return;
         }
+
+        if (SpawnRescueCocoon(waiting.Position, playerId, waiting.Cursed) is not { } cocoon) {
+            return;
+        }
+
+        _rescueTargets[playerId] = new RescueTarget(playerId, waiting.Scene, cocoon, false);
 
         // Their body is in the cocoon now, so it stops standing beside it. Nothing ever took it away before: the
         // death that crosses over is an animation like any other, and the animation of a death simply stops on its
@@ -3058,6 +3086,111 @@ internal partial class CoopSave {
         // were gone from the room a few seconds later anyway, so a body frozen mid-death was never on screen long
         // enough to be noticed. A wait lasts until the cocoon is broken, everyone is down, or the player gives up.
         SetPartnerBodyHidden(playerId, true);
+    }
+
+    /// <summary>
+    /// Puts by a member who lies knocked out here what they are pulled up by: the game's own pick-up of what lies on
+    /// the ground (GlobalSettings.Gameplay.GenericPickupPrefab), which shows its prompt as the local player comes up to
+    /// them, the game's for a living thing ("抱起"), and walks them up to them as they take it. Of it only what asks to
+    /// be taken is kept: nothing of an item is drawn or saved with the room, and the game's taking of an item, with the
+    /// flash and the sound of one, gives way to the pick-up of the clips alone (<see cref="PullUpByHand"/>). Nobody
+    /// is paid silk for it (USER 11-28 "救的人可以用从地上拾起东西的动作，切磋就不要给丝了，两个人都不给").
+    /// </summary>
+    /// <param name="playerId">The member.</param>
+    /// <param name="position">Where they lie.</param>
+    /// <returns>The pick-up.</returns>
+    private GameObject MakePullUp(ushort playerId, Vector2 position) {
+        // Made under a holder that is off, so that what goes is taken out before any of it wakes up
+        var holder = new GameObject("Pull Up Holder");
+        holder.SetActive(false);
+        var prefab = global::GlobalSettings.Gameplay.GenericPickupPrefab;
+        var pickup = UnityEngine.Object.Instantiate(prefab, holder.transform);
+        var pullUp = pickup.gameObject;
+        UnityEngine.Object.DestroyImmediate(pickup);
+        UnityEngine.Object.DestroyImmediate(pullUp.GetComponent<PersistentBoolItem>());
+        UnityEngine.Object.DestroyImmediate(pullUp.GetComponent<TimedEventCaller>());
+        foreach (Transform part in pullUp.transform) {
+            if (part.GetComponent<Renderer>() != null) {
+                part.gameObject.SetActive(false);
+            }
+        }
+
+        var interaction = pullUp.GetComponent<InteractEvents>();
+        interaction.InteractLabel = InteractableBase.PromptLabels.Take_Living;
+        interaction.Interacted += () =>
+            MonoBehaviourUtil.Instance.StartCoroutine(PullUpByHand(playerId, pullUp, interaction));
+
+        pullUp.name = $"Pull Up {playerId}";
+        pullUp.transform.SetParent(null);
+        pullUp.transform.position = new Vector3(position.x, position.y, pullUp.transform.position.z);
+        UnityEngine.Object.Destroy(holder);
+
+        return pullUp;
+    }
+
+    /// <summary>
+    /// The local player pulls up a member who lies knocked out, with the clips the game plays as it picks up what lies
+    /// on the ground (GenericPickup.Pickup): bending down, taking hold, and standing up again, the member pulled up as
+    /// they take hold. A player who goes down in the middle of it lets go, and nothing more of it is played on them.
+    /// </summary>
+    /// <param name="playerId">The member.</param>
+    /// <param name="pullUp">The pick-up the member is pulled up by.</param>
+    /// <param name="interaction">Its interaction, which the pull-up is the taking of.</param>
+    private IEnumerator PullUpByHand(ushort playerId, GameObject pullUp, InteractEvents interaction) {
+        // Left where it is until this is over: taken away in the middle of its interaction, it would leave the game
+        // waiting for an interaction to end that nothing ends
+        _pullUpInHand = pullUp;
+        var hero = HeroController.instance;
+        var animator = hero.animCtrl.animator;
+        bool IsDown() => PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead;
+
+        hero.StopAnimationControl();
+        animator.Play(PickUpBendClipName);
+        yield return new WaitForSeconds(PickUpReachTime);
+
+        if (!IsDown()) {
+            PullUpKnockedOut(playerId);
+            animator.Play(PickUpHoldClipName);
+            yield return new WaitForSeconds(PickUpHoldTime);
+        }
+
+        if (!IsDown()) {
+            var rise = animator.GetClipByName(PickUpRiseClipName);
+            animator.Play(rise);
+            yield return new WaitForSeconds(rise.Duration);
+        }
+
+        if (!IsDown()) {
+            hero.StartAnimationControl();
+            interaction.EndInteraction();
+        }
+
+        _pullUpInHand = null;
+
+        // Still lying there, as this player went down before they took hold: a new pick-up for whoever comes next, this
+        // one being left in the middle of its interaction
+        if (_rescueTargets.TryGetValue(playerId, out var target) && target.Cocoon == pullUp) {
+            RemoveRescueTarget(playerId);
+            ShowMemberCocoon(playerId);
+        } else {
+            UnityEngine.Object.Destroy(pullUp);
+        }
+    }
+
+    /// <summary>
+    /// Pulls up a member who lies knocked out as the local player takes hold of them (<see cref="PullUpByHand"/>): all
+    /// of the hits that open a cocoon at once, which is how their game and those of the others hear of it.
+    /// </summary>
+    /// <param name="playerId">The member.</param>
+    private void PullUpKnockedOut(ushort playerId) {
+        if (!_rescueTargets.ContainsKey(playerId) || !_waitingMembers.TryGetValue(playerId, out var waiting) ||
+            !_checkedMembers.Contains(playerId)) {
+            return;
+        }
+
+        Logger.Info($"Pulling up player {playerId}, knocked out, by hand");
+        waiting.OwnHits = RescueHits;
+        TellOwnRescueHits(playerId, waiting);
     }
 
     /// <summary>
@@ -3262,7 +3395,7 @@ internal partial class CoopSave {
             return;
         }
 
-        if (target.Cocoon != null) {
+        if (target.Cocoon != null && target.Cocoon != _pullUpInHand) {
             UnityEngine.Object.Destroy(target.Cocoon);
         }
 
