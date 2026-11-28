@@ -122,6 +122,7 @@ internal partial class CoopHits {
         }
 
         update.Blocked = response.response == IHitResponder.Response.Invincible;
+        update.Immune = !extra && !update.Blocked && health.IsImmuneTo(hit, false);
         update.FromSceneHost = update.Blocked && OwnCreatures.RunsHere(health.gameObject);
         update.ExtraDamage = extra;
         update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);

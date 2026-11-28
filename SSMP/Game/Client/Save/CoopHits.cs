@@ -153,6 +153,12 @@ internal partial class CoopHits {
     private static readonly FieldInfo? TinkFsmField = typeof(TinkEffect).GetField("fsm", InstanceFlags);
 
     /// <summary>
+    /// Whether a creature keeps blows of the nail off itself now (see <see cref="TakeAsWound"/>).
+    /// </summary>
+    private static readonly FieldInfo? ImmuneToNailField =
+        typeof(HealthManager).GetField("immuneToNailAttacks", InstanceFlags);
+
+    /// <summary>
     /// Whether objects of a type count as objects of the room when spawned, for the types that were looked up.
     /// </summary>
     private static readonly Dictionary<Type, bool> IsReplayedWhenSpawnedByType = new();
@@ -920,12 +926,14 @@ internal partial class CoopHits {
         PutThrownWhereItWas(target, update);
 
         // A blow on a creature that every game runs by itself goes here as it went in the game of the player who
-        // struck, which says whether the creature blocked it there, and is not judged again by what the creature does
-        // here as it comes (USER 11-17 "这一刀有没有让怪物掉血本来就要让房主知道的吧", "不需要重放啊", "就让客机说有没有
-        // 被挡住"). One that it took there it takes here as the wound that it was (see TakeAsWound). One that it blocked
-        // there takes no health anywhere, and is the scene host's game's to tell (USER 11-17 "我觉得应该是房主跟其他人说
-        // boss的这一招格挡挡到了"): that game blocks it as the game does and tells the others (see RelayBlock), who block
-        // it so too as they are told (see TakeAsBlock), and leave be the word of the player who struck
+        // struck, which says whether the creature blocked it there or was immune to it there, and is not judged again
+        // by what the creature does here as it comes (USER 11-17 "这一刀有没有让怪物掉血本来就要让房主知道的吧", "不需要重
+        // 放啊", "就让客机说有没有被挡住"). One that it took there it takes here as the wound that it was (see
+        // TakeAsWound), and one that it was immune to there it takes nothing of here either (see TakeAsImmune). One
+        // that it blocked there takes no health anywhere, and is the scene host's game's to tell (USER 11-17 "我觉得应该
+        // 是房主跟其他人说boss的这一招格挡挡到了"): that game blocks it as the game does and tells the others (see
+        // RelayBlock), who block it so too as they are told (see TakeAsBlock), and leave be the word of the player who
+        // struck
         if (component is HealthManager guard && update.Blocked && !update.FromSceneHost &&
             OwnCreatures.FollowsSceneHost(guard.gameObject)) {
             NotReplayed(update, "hit", "the creature blocked it there, which the scene host's game tells");
@@ -954,9 +962,11 @@ internal partial class CoopHits {
                     ? () => TakeAsBlock(creature, hit)
                     : update.ExtraDamage
                         ? () => TakeAsExtraDamage(creature, hit)
-                        : HitCounters.Extracts(creature, hit) && OwnCreatures.Has(creature.gameObject)
-                            ? () => TakeAsExtract(creature, striker, update.PlayerId, update.Strike)
-                            : () => TakeAsWound(creature, hit);
+                        : update.Immune
+                            ? () => TakeAsImmune(creature)
+                            : HitCounters.Extracts(creature, hit) && OwnCreatures.Has(creature.gameObject)
+                                ? () => TakeAsExtract(creature, striker, update.PlayerId, update.Strike)
+                                : () => TakeAsWound(creature, hit);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
                 () => SharedDice.Throw(source.Dice, () => response = HitRoomObject(strike, component, striker))
             ), source.HitName);
@@ -1529,6 +1539,7 @@ internal partial class CoopHits {
                     breakable.hitsLeft == hitsLeft;
                 update.Blocked = responder is HealthManager &&
                                  response.response == IHitResponder.Response.Invincible;
+                update.Immune = !update.Blocked && responder is HealthManager wounded && wounded.IsImmuneTo(hit, false);
                 update.FromSceneHost = update.Blocked && OwnCreatures.RunsHere(component.gameObject);
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
                 update.Strike = LocalStrikeNumber;
@@ -1683,16 +1694,41 @@ internal partial class CoopHits {
     /// Has a creature that every game runs by itself take a blow of another player as the wound that it was in their
     /// game, which says that the creature did not block it there (see CoopHitUpdate.Blocked): the game's own wound,
     /// without the check of the creature's guard here, which the scene host's game raises a moment before the others
-    /// do: a blow that wounded in theirs glanced off it here, and the health of the two games went apart. One that
-    /// died here already takes none, as the game has it (HealthManager.Hit).
+    /// do: a blow that wounded in theirs glanced off it here, and the health of the two games went apart. Nor of its
+    /// guard against the nail here, which a state machine that each game runs by itself for its own player raises by
+    /// where that player stands, like the guard of the keeper of the roaches against blows from below (see
+    /// CoopHitUpdate.Immune): it kept off the blows of the other player standing over it as this game's stood below it.
+    /// One that died here already takes none, as the game has it (HealthManager.Hit).
     /// </summary>
     private static IHitResponder.HitResponse TakeAsWound(HealthManager creature, HitInstance hit) {
         if (creature.isDead) {
             return IHitResponder.Response.None;
         }
 
-        creature.TakeDamage(hit);
+        var guarded = ImmuneToNailField?.GetValue(creature) is true;
+        if (guarded) {
+            creature.SetImmuneToNailAttacks(false);
+        }
+
+        try {
+            creature.TakeDamage(hit);
+        } finally {
+            if (guarded) {
+                creature.SetImmuneToNailAttacks(true);
+            }
+        }
+
         return IHitResponder.Response.DamageEnemy;
+    }
+
+    /// <summary>
+    /// Has a creature that every game runs by itself take nothing of a blow of another player that it was immune to in
+    /// their game (see CoopHitUpdate.Immune), as the game has a creature take nothing of a blow that it is immune to
+    /// (HealthManager.TakeDamage), whatever its guard here against the nail of this game's player is. One that died
+    /// here already takes none, as the game has it (HealthManager.Hit).
+    /// </summary>
+    private static IHitResponder.HitResponse TakeAsImmune(HealthManager creature) {
+        return creature.isDead ? IHitResponder.Response.None : IHitResponder.Response.DamageEnemy;
     }
 
     /// <summary>

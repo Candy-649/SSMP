@@ -668,6 +668,11 @@ internal class EntityRegistryEntry {
     /// one who taunted it, an ally to get up when the player binds beside it. Each game's hears its own player, and
     /// what it tells the creature plays at once in that game and in the scene host's (Entity.OwnSign). Run by the scene
     /// host alone, it heard only the scene host's player, and the creature never dodged the other player's harpoon.
+    /// And some keep the nail off the creature by where the player stands, like the guard of the keeper of the roaches
+    /// against blows from below: each game's keeps off the blows of its own player, at whom it looks rather than at the
+    /// player the creature goes after (GamePatcher.LooksAtOwnPlayer), and a blow of another player goes as their game
+    /// judged it (CoopHits.TakeAsWound). Run by the scene host alone, the guard went up and down by where the player
+    /// whom the creature went after stood, and kept off the blows of the other one standing over it.
     /// </summary>
     [JsonProperty("each_game_fsms")]
     public List<string>? EachGameFsms { get; set; }

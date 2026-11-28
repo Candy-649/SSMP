@@ -876,6 +876,11 @@ internal partial class GamePatcher {
     /// <param name="orig">The original action enter method.</param>
     /// <param name="self">The FSM action instance.</param>
     private static void OnTargetedFsmActionEnter(Action<FsmStateAction> orig, FsmStateAction self) {
+        if (LooksAtOwnPlayer(self)) {
+            orig(self);
+            return;
+        }
+
         ForceApprovedTargetOnFsmAction(self);
 
         // Where a creature that every game runs by itself starts a step that another game took, a look at where the
@@ -1211,12 +1216,23 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Whether an action is of a state machine that each game runs by itself for its own player, of a creature that
+    /// every game runs by itself (see Entity.OwnCreatures.RunsInEachGame), which looks at that player as in a game of
+    /// one, as its ranges do (see OnAlertRangeIsHeroInRange), and is pointed at no other. Pointed at the player that
+    /// the creature goes after, the guard of the keeper of the roaches against blows from below went up and down in
+    /// every game by where that player stood, and kept off the blows of the other player standing over it.
+    /// </summary>
+    private static bool LooksAtOwnPlayer(FsmStateAction action) {
+        return action.Fsm?.FsmComponent is { } machine && Entity.OwnCreatures.RunsInEachGame(machine);
+    }
+
+    /// <summary>
     /// Forces a target-consuming FSM action to use the approved multiplayer target of its owning enemy.
     /// </summary>
     /// <param name="action">The FSM action to retarget.</param>
     private static void ForceApprovedTargetOnFsmAction(FsmStateAction action) {
         var requester = action.Fsm?.GameObject;
-        if (requester == null) {
+        if (requester == null || LooksAtOwnPlayer(action)) {
             return;
         }
 

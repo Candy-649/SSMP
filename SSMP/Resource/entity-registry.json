@@ -3140,6 +3140,9 @@
     "fsm_names": [
       "Control",
       "Protect From Below"
+    ],
+    "each_game_fsms": [
+      "Protect From Below"
     ]
   },
   {
@@ -3485,6 +3488,10 @@
     "internal_name": "Skull King",
     "fsm_names": [
       "Behaviour",
+      "Control Invincible Effect",
+      "Protect From Below"
+    ],
+    "each_game_fsms": [
       "Control Invincible Effect",
       "Protect From Below"
     ]

@@ -66,6 +66,15 @@ internal class CoopHitUpdate : IPacketData {
     public bool Blocked { get; set; }
 
     /// <summary>
+    /// For a blow on a creature that every game runs by itself: that the creature was immune to it in the game it comes
+    /// from, where it took nothing of it, as the creature's guard against the nail of a player who stands below it
+    /// keeps off their blows (HealthManager.IsImmuneTo). It takes nothing of it anywhere, and one that it was not
+    /// immune to there is a wound everywhere, whatever the guard of each game is against its own player (see
+    /// CoopHits).
+    /// </summary>
+    public bool Immune { get; set; }
+
+    /// <summary>
     /// For a blocked blow on a creature that every game runs by itself: that the scene host's game sends it, which
     /// tells the others of the blocks of the creature, of a blow of its own player or of another's that it took from
     /// them. A block that another game sends is the scene host's game's alone to take (see CoopHits).
@@ -108,6 +117,7 @@ internal class CoopHitUpdate : IPacketData {
             Index = Index,
             Uncounted = Uncounted,
             Blocked = Blocked,
+            Immune = Immune,
             FromSceneHost = FromSceneHost,
             ExtraDamage = ExtraDamage,
             Strike = Strike,
@@ -127,6 +137,7 @@ internal class CoopHitUpdate : IPacketData {
         packet.Write(Index);
         packet.Write(Uncounted);
         packet.Write(Blocked);
+        packet.Write(Immune);
         packet.Write(FromSceneHost);
         packet.Write(ExtraDamage);
         packet.Write(Strike);
@@ -146,6 +157,7 @@ internal class CoopHitUpdate : IPacketData {
         Index = packet.ReadByte();
         Uncounted = packet.ReadBool();
         Blocked = packet.ReadBool();
+        Immune = packet.ReadBool();
         FromSceneHost = packet.ReadBool();
         ExtraDamage = packet.ReadBool();
         Strike = packet.ReadUInt();
