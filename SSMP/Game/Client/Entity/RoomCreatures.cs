@@ -180,6 +180,14 @@ internal class RoomCreatures {
             if (share) {
                 creature.SetActive(wasActive);
                 Share(creature, action);
+            } else if (action is GetPreInstantiatedGameObject) {
+                // What a shell let out stays where the shell made it, switched off, as when it lets out nothing here:
+                // the scene host's word of one of a kind that every game runs by itself lets it out of the shell here
+                // (see OwnCreatures.MakeSummonAsTold), which found nothing to let out once it was taken away (review)
+                Logger.Info(
+                    $"Leaving '{creature.name}', which a shell let out here, where the shell made it: the scene " +
+                    "host's game sends it"
+                );
             } else {
                 Logger.Info($"Taking away '{creature.name}', which the room made here: the scene host's game sends it");
                 Object.Destroy(creature);

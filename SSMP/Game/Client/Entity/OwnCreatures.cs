@@ -73,6 +73,13 @@ internal static class OwnCreatures {
     private static readonly HashSet<GameObject> Fighters = [];
 
     /// <summary>
+    /// The corpses that the creatures here left as they died, with the creature of each. The game makes a creature's
+    /// corpse ahead of time under it, and lets go of it as the creature dies (EnemyDeathEffects.EmitCorpse), into the
+    /// room or under the creature's parent, where nothing tells whose it was (see <see cref="LetsOutSummon"/>).
+    /// </summary>
+    private static readonly Dictionary<GameObject, GameObject> Corpses = new();
+
+    /// <summary>
     /// The creatures that come out in every game where they are out in another (see
     /// EntityRegistryEntry.ComesOutAsThere), those that fight the room's creatures among them.
     /// </summary>
@@ -433,8 +440,7 @@ internal static class OwnCreatures {
     /// of the action and of how many it made in the room before (see <see cref="RoomMakes"/>).
     /// </summary>
     private static string NextRoomPlace(PlayMakerFSM machine, HutongGames.PlayMaker.FsmStateAction action) {
-        var made = ScenePath.Get(machine.transform) + "|" + machine.FsmName + "|" + action.State.Name + "|" +
-                   Array.IndexOf(action.State.Actions, action);
+        var made = RoomMakeOf(machine, action);
         RoomMakes.TryGetValue(made, out var before);
         RoomMakes[made] = before + 1;
         return SummonStart + "r." + StableHash.Of(made).ToString("x8", CultureInfo.InvariantCulture) + "." +
@@ -442,14 +448,23 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
+    /// What names an action of a state machine of the room, the same in every game, by which its makes are counted (see
+    /// <see cref="RoomMakes"/>).
+    /// </summary>
+    private static string RoomMakeOf(PlayMakerFSM machine, HutongGames.PlayMaker.FsmStateAction action) {
+        return ScenePath.Get(machine.transform) + "|" + machine.FsmName + "|" + action.State.Name + "|" +
+               Array.IndexOf(action.State.Actions, action);
+    }
+
+    /// <summary>
     /// Takes a creature of a kind that every game runs by itself that a part of the room made in the scene host's game,
     /// which makes such creatures alone (see RoomCreatures), like a wasp that a broken nest leaves as the room starts,
     /// as one that every game runs by itself, named as a creature that a room laid out alike makes is (see
     /// <see cref="NextRoomPlace"/>), and has the members in the room make it too, as the action made it here (see
-    /// <see cref="MakeSummonAsTold"/>); a member who comes in later is told so as of a summon (see CoopSave.OwnSummons).
-    /// Before, it was to be made an entity, which a creature of such a kind is not, and it was in the scene host's game
-    /// alone: the other player never saw it, and their blow killed it there (the user's log of 11-28, 16:26:05.457 and
-    /// 16:27:19.160; Luminary's, 16:26:05.534, "which does not run here").
+    /// <see cref="MakeSummonAsTold"/>); a member who comes in later is told so as of a summon (see
+    /// CoopSave.OwnSummons). Before, it was to be made an entity, which a creature of such a kind is not, and it was
+    /// in the scene host's game alone: the other player never saw it, and their blow killed it there (the user's log
+    /// of 11-28, 16:26:05.457 and 16:27:19.160; Luminary's, 16:26:05.534, "which does not run here").
     /// </summary>
     /// <param name="creature">The creature.</param>
     /// <param name="type">Its kind.</param>
@@ -466,9 +481,13 @@ internal static class OwnCreatures {
     }
 
     /// <summary>
-    /// The shell whose creature, made ahead of time, an action lets out (GetPreInstantiatedGameObject.OnEnter), or null.
+    /// The shell whose creature, made ahead of time, an action lets out (GetPreInstantiatedGameObject.OnEnter), or
+    /// null.
     /// </summary>
-    public static PreInstantiateGameObject? ShellOf(HutongGames.PlayMaker.Fsm fsm, GetPreInstantiatedGameObject action) {
+    public static PreInstantiateGameObject? ShellOf(
+        HutongGames.PlayMaker.Fsm fsm,
+        GetPreInstantiatedGameObject action
+    ) {
         var target = fsm.GetOwnerDefaultTarget(action.target);
         return target != null && target.TryGetComponent<PreInstantiateGameObject>(out var shell) ? shell : null;
     }
@@ -485,7 +504,7 @@ internal static class OwnCreatures {
     public static bool LetsOutSummon(Action<GetPreInstantiatedGameObject> letOut, GetPreInstantiatedGameObject action) {
         if (Creatures.Count == 0 || ShellOf(action.Fsm, action) is not { } shell || shell.prefab == null ||
             !EntityRegistry.TryGetEntry(shell.prefab, out var entry) || !entry.OwnInEachGame ||
-            Owning(shell.gameObject) is not { } owner) {
+            OwnerOf(shell.gameObject) is not { } owner) {
             return false;
         }
 
@@ -522,24 +541,56 @@ internal static class OwnCreatures {
         var machine = action.Fsm.FsmComponent;
         var made = new SummonMaker(
             PlaceOf(owner), machine.FsmName, action.State.Name, Array.IndexOf(action.State.Actions, action),
-            Component.PartsComponent.GetPath(owner.transform, machine.transform)
+            PathUnder(owner, machine.transform)
         );
-        var shellPath = made.Place + SummonPartStart + Component.PartsComponent.GetPath(owner.transform, shell.transform);
+        var shellPath = made.Place + SummonPartStart + PathUnder(owner, shell.transform);
         var place = SummonStart + "l." + StableHash.Of(shellPath).ToString("x8", CultureInfo.InvariantCulture);
         TakeSummon(creature, type, place, made, owner);
     }
 
     /// <summary>
+    /// The creature that every game runs by itself whose corpse an object is, or is under (see <see cref="Corpses"/>),
+    /// or that it is, or is a part of, or null.
+    /// </summary>
+    private static GameObject? OwnerOf(GameObject thing) {
+        for (var current = thing.transform; Corpses.Count > 0 && current != null; current = current.parent) {
+            if (Corpses.TryGetValue(current.gameObject, out var creature)) {
+                return creature;
+            }
+        }
+
+        return Owning(thing);
+    }
+
+    /// <summary>
+    /// The path under a creature that every game runs by itself of an object of it, as the creature has it while it
+    /// lives, which a member who comes in later finds under theirs: of its corpse, that the game let go of as it died,
+    /// from where the game made it, under the creature itself (EnemyDeathEffects.PreInstantiate; see
+    /// <see cref="Corpses"/>).
+    /// </summary>
+    private static string PathUnder(GameObject creature, Transform thing) {
+        for (var current = thing; current != null && current != creature.transform; current = current.parent) {
+            if (Corpses.TryGetValue(current.gameObject, out var of) && of == creature) {
+                var under = Component.PartsComponent.GetPath(current, thing);
+                return under.Length == 0 ? current.name : current.name + "/" + under;
+            }
+        }
+
+        return Component.PartsComponent.GetPath(creature.transform, thing);
+    }
+
+    /// <summary>
     /// Makes a summon that the scene host's game made before the local player came in, or a creature that a part of
     /// the room made there (see <see cref="TakeRoomMade"/>), as the action that made it there makes it (see
-    /// <see cref="MakesSummon"/>), or lets it out of the shell that made it ahead of time, as the action that let it out
-    /// there does (see <see cref="TakeLetOut"/>), and takes it at its place there.
+    /// <see cref="MakesSummon"/>), or lets it out of the shell that made it ahead of time, as the action that let it
+    /// out there does (see <see cref="TakeLetOut"/>), and takes it at its place there.
     /// </summary>
     /// <param name="place">Its place there.</param>
     /// <param name="maker">What made it there.</param>
     /// <returns>The summon, or null where its maker or the action is not here.</returns>
     public static GameObject? MakeSummonAsTold(string place, SummonMaker maker) {
-        if ((Find(null, maker.Place) ?? ScenePath.Find(maker.Place)) is not { } by ||
+        var own = Find(null, maker.Place);
+        if ((own ?? ScenePath.Find(maker.Place)) is not { } by ||
             (maker.Under.Length == 0 ? by.transform : by.transform.Find(maker.Under)) is not { } on ||
             PlayMakerFSM.FindFsmOnGameObject(on.gameObject, maker.Fsm) is not { } machine || machine == null ||
             machine.Fsm.GetState(maker.State) is not { } state || maker.Action >= state.Actions.Length) {
@@ -559,6 +610,15 @@ internal static class OwnCreatures {
             summon = made;
         } else {
             return null;
+        }
+
+        // What a part of the room made there is counted as made here too, so that what this game makes by the action
+        // once it runs the room is named after it, as there (see NextRoomPlace)
+        if (own == null) {
+            var made = RoomMakeOf(machine, state.Actions[maker.Action]);
+            RoomMakes.TryGetValue(made, out var before);
+            var number = int.Parse(place.Substring(place.LastIndexOf('.') + 1), CultureInfo.InvariantCulture);
+            RoomMakes[made] = System.Math.Max(before, number + 1);
         }
 
         TakeSummon(summon, entry.Type, place, maker, by);
@@ -625,7 +685,13 @@ internal static class OwnCreatures {
     /// <param name="place">Its name.</param>
     /// <param name="made">What made it.</param>
     /// <param name="by">The creature, or part of one, or part of the room, that made it.</param>
-    private static void TakeSummon(GameObject creature, EntityType type, string place, SummonMaker made, GameObject by) {
+    private static void TakeSummon(
+        GameObject creature,
+        EntityType type,
+        string place,
+        SummonMaker made,
+        GameObject by
+    ) {
         var parts = TakeNamed(creature, type, place);
         Makers[creature] = made;
         SummonedBy[creature] = Owning(by) ?? by;
@@ -658,6 +724,9 @@ internal static class OwnCreatures {
     private static int TakeAt(GameObject creature, EntityType type, string place, Func<GameObject, string> partPlace) {
         Entity.HookTalks();
         Creatures[creature] = (creature.scene.name, place);
+        if (creature.TryGetComponent<EnemyDeathEffects>(out var deathEffects)) {
+            deathEffects.CorpseEmitted += corpse => Corpses[corpse] = creature;
+        }
         if (EntityRegistry.FightsCreatures(type)) {
             Fighters.Add(creature);
         }
@@ -1058,6 +1127,7 @@ internal static class OwnCreatures {
         Creatures.Clear();
         Parts.Clear();
         CreaturesUnder.Clear();
+        Corpses.Clear();
         Makers.Clear();
         SummonedBy.Clear();
         MadeAsTold.Clear();
