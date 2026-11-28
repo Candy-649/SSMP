@@ -33,6 +33,13 @@ internal partial class CoopSave {
     private const int RescueHits = 5;
 
     /// <summary>
+    /// How much silk a cocoon holds: what the game's own gives back as it is broken (HeroController.CocoonBroken).
+    /// The hits that open one pay a silk each to whoever struck (<see cref="OnRescueCocoonHit"/>), and the player in
+    /// it stands up with the rest (USER 11-28 "复活的人给4格吧，比较符合一个茧=9格丝的设定").
+    /// </summary>
+    private const int CocoonSilk = 9;
+
+    /// <summary>
     /// How long, in seconds, at the start of a wait during which the key that gives up on it is not listened to at
     /// all. A death happens in the middle of a fight, and the first moments after one are the likeliest to carry a
     /// press that was meant for something else entirely.
@@ -2190,10 +2197,10 @@ internal partial class CoopSave {
                 hero.AddHealth(missing);
             }
 
-            // A silk for every hit it took to open the cocoon. Those who opened it got one for each of their hits as
-            // well (OnRescueCocoonHit): a whole spool, which is what the game gives for breaking one's own cocoon, made a
-            // bind the moment they stood up, and with a bind that nothing interrupts that was all of their health.
-            hero.AddSilk(RescueHits, true);
+            // The silk of the cocoon that its hits did not pay to those who opened it. All of it, a whole spool,
+            // made a bind the moment they stood up, and with a bind that nothing interrupts that was all of their
+            // health.
+            hero.AddSilk(CocoonSilk - RescueHits, true);
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
 
