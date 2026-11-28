@@ -153,12 +153,6 @@ internal partial class CoopHits {
     private static readonly FieldInfo? TinkFsmField = typeof(TinkEffect).GetField("fsm", InstanceFlags);
 
     /// <summary>
-    /// Whether a creature keeps blows of the nail off itself now (see <see cref="TakeAsWound"/>).
-    /// </summary>
-    private static readonly FieldInfo? ImmuneToNailField =
-        typeof(HealthManager).GetField("immuneToNailAttacks", InstanceFlags);
-
-    /// <summary>
     /// Whether objects of a type count as objects of the room when spawned, for the types that were looked up.
     /// </summary>
     private static readonly Dictionary<Type, bool> IsReplayedWhenSpawnedByType = new();
@@ -1705,7 +1699,7 @@ internal partial class CoopHits {
             return IHitResponder.Response.None;
         }
 
-        var guarded = ImmuneToNailField?.GetValue(creature) is true;
+        var guarded = creature.immuneToNailAttacks;
         if (guarded) {
             creature.SetImmuneToNailAttacks(false);
         }
