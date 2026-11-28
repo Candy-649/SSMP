@@ -9,6 +9,7 @@ using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
+using RunFSM = HutongGames.PlayMaker.Actions.RunFSM;
 
 namespace SSMP.Game.Client;
 
@@ -149,11 +150,12 @@ internal static class CreatureMoves {
             }
 
             track = found;
+            track.Machine = MachineName(fsm);
             Tracks[fsm] = track;
             WatchFrames();
             Start(track, stateName, now);
             Write(
-                $"[Creatures] '{track.Name}' '{fsm.Name}' is first seen in '{stateName}' at " +
+                $"[Creatures] '{track.Name}' '{track.Machine}' is first seen in '{stateName}' at " +
                 $"({track.From.x:F1}, {track.From.y:F1}){cause()}{About(track)}"
             );
             return;
@@ -166,7 +168,7 @@ internal static class CreatureMoves {
         var at = (Vector2) track.Body.transform.position;
         Grow(track, at);
         Write(
-            $"[Creatures] '{track.Name}' '{fsm.Name}': '{track.State}' {now - track.Since:F2} s, " +
+            $"[Creatures] '{track.Name}' '{track.Machine}': '{track.State}' {now - track.Since:F2} s, " +
             $"({track.From.x:F1}, {track.From.y:F1}) to ({at.x:F1}, {at.y:F1}), " +
             $"x {track.Min.x:F1}..{track.Max.x:F1}, y {track.Min.y:F1}..{track.Max.y:F1}; " +
             $"then '{stateName}'{cause()}{About(track)}"
@@ -195,6 +197,29 @@ internal static class CreatureMoves {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The name of a state machine for the log. One that a state of another runs as a part of it (RunFSM) is named by
+    /// that state machine, the state and the template that it is made of: its states are none of the one that runs
+    /// it, though some have the same names, like 'Grab Start' of the grab with which a creature's grab hurts and holds
+    /// the player, and were written as that one's.
+    /// </summary>
+    private static string MachineName(HutongGames.PlayMaker.Fsm fsm) {
+        if (fsm.Host is not { } host) {
+            return fsm.Name;
+        }
+
+        foreach (var state in host.States) {
+            foreach (var action in state.Actions) {
+                if (action is RunFSM { fsmTemplateControl.fsmTemplate: { } template } run &&
+                    Entity.Action.EntityFsmActions.SubFsmOf(run) == fsm) {
+                    return $"{host.Name}' > '{state.Name}' > '{template.name}";
+                }
+            }
+        }
+
+        return $"{host.Name}' > '{fsm.Name}";
     }
 
     /// <summary>
@@ -318,6 +343,11 @@ internal static class CreatureMoves {
         /// The health of the creature, or null for one with none.
         /// </summary>
         public readonly HealthManager? Health = health;
+
+        /// <summary>
+        /// The name of the state machine, for the log (see <see cref="MachineName"/>).
+        /// </summary>
+        public string Machine = "";
 
         /// <summary>
         /// The state it is in.

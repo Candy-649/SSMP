@@ -411,6 +411,20 @@ internal partial class CoopSave {
             return;
         }
 
+        // A state machine that a state of the creature's runs as a part of that state (RunFSM), like the one with which
+        // a grab hurts and holds the player it grabbed, or the one with which a centipede digs under the ground to where
+        // it comes out, goes as the game has it in every game, as what that state does: its steps are none of the
+        // creature's, and its states none of the state machine that runs it, of which only the state that runs it and
+        // what it tells that state are steps. Taken as steps of the creature, they ended at once the grab that the game
+        // of the player grabbed leads, which then took the old steps of the scene host's over it and grabbed again, and
+        // the scene host's game, told them as steps of the grab, could take none, refused the second and held the grab
+        // for good: the creature went on away from the player it held in the air for 6.5 s, until it died (Luminary's
+        // log of 11-28, 16:38:57.610; USER "罪途这个会抓人的小怪有问题，抓人就给人带走了而且不放，然后在另一边显示也有问题")
+        if (self.Host != null) {
+            orig(self, toState);
+            return;
+        }
+
         // The way of a catch of another player's that this game plays is one from outside the state machine, which
         // it takes as it runs (see CoopSave.OwnCatches), and which stays marked as such through the switch
         if (_othersCatchWay is { } othersCatch && othersCatch.Fsm == self && self.LastTransition == othersCatch.Way &&
