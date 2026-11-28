@@ -363,6 +363,7 @@ internal class EntityManager {
         // Immediately refresh targeting fields for all active enemies
         GamePatcher.ForceImmediateRetarget();
         OwnThreads.OnRoleSettled();
+        GamePatcher.RetellOwnWalks();
     }
 
     /// <summary>

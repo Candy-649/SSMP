@@ -66,11 +66,12 @@ internal class CoopHitUpdate : IPacketData {
     public bool Blocked { get; set; }
 
     /// <summary>
-    /// For a blow on a creature that every game runs by itself: that the creature was immune to it in the game it comes
-    /// from, where it took nothing of it, as the creature's guard against the nail of a player who stands below it
-    /// keeps off their blows (HealthManager.IsImmuneTo). It takes nothing of it anywhere, and one that it was not
-    /// immune to there is a wound everywhere, whatever the guard of each game is against its own player (see
-    /// CoopHits).
+    /// For a blow on a creature that every game runs by itself: that the creature kept it off itself in the game it
+    /// comes from by its guard against the nail, and took nothing of it there, as the keeper of the roaches keeps off
+    /// the nail of a player who stands below it (HealthManager.immuneToNailAttacks, as the blow came). It takes nothing
+    /// of it anywhere, and one that it did not keep off so there is a wound everywhere, whatever the guard of each game
+    /// is against its own player (see CoopHits). Its other guards, against explosions and the like, are the same in
+    /// every game, which judges them as the game does.
     /// </summary>
     public bool Immune { get; set; }
 

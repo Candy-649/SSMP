@@ -920,10 +920,10 @@ internal partial class CoopHits {
         PutThrownWhereItWas(target, update);
 
         // A blow on a creature that every game runs by itself goes here as it went in the game of the player who
-        // struck, which says whether the creature blocked it there or was immune to it there, and is not judged again
-        // by what the creature does here as it comes (USER 11-17 "这一刀有没有让怪物掉血本来就要让房主知道的吧", "不需要重
-        // 放啊", "就让客机说有没有被挡住"). One that it took there it takes here as the wound that it was (see
-        // TakeAsWound), and one that it was immune to there it takes nothing of here either (see TakeAsImmune). One
+        // struck, which says whether the creature blocked it there or kept the nail off itself there, and is not judged
+        // again by what the creature does here as it comes (USER 11-17 "这一刀有没有让怪物掉血本来就要让房主知道的吧", "不
+        // 需要重放啊", "就让客机说有没有被挡住"). One that it took there it takes here as the wound that it was (see
+        // TakeAsWound), and one that it kept off so there it takes nothing of here either (see TakeAsImmune). One
         // that it blocked there takes no health anywhere, and is the scene host's game's to tell (USER 11-17 "我觉得应该
         // 是房主跟其他人说boss的这一招格挡挡到了"): that game blocks it as the game does and tells the others (see
         // RelayBlock), who block it so too as they are told (see TakeAsBlock), and leave be the word of the player who
@@ -1521,6 +1521,7 @@ internal partial class CoopHits {
             var hitsLeft = breakable != null ? breakable.hitsLeft : 0;
             var hero = own ? HeroController.SilentInstance : null;
             var striker = hero != null ? hero.gameObject : null;
+            var nailGuarded = responder is HealthManager guarded && NailGuarded(guarded, hit);
             var answered = AnswersAttack(
                 () => dice = SharedDice.Record(
                     () => response = HitRoomObject(() => responder.Hit(hit), component, striker)
@@ -1533,7 +1534,7 @@ internal partial class CoopHits {
                     breakable.hitsLeft == hitsLeft;
                 update.Blocked = responder is HealthManager &&
                                  response.response == IHitResponder.Response.Invincible;
-                update.Immune = !update.Blocked && responder is HealthManager wounded && wounded.IsImmuneTo(hit, false);
+                update.Immune = !update.Blocked && nailGuarded;
                 update.FromSceneHost = update.Blocked && OwnCreatures.RunsHere(component.gameObject);
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
                 update.Strike = LocalStrikeNumber;
@@ -1716,13 +1717,25 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Has a creature that every game runs by itself take nothing of a blow of another player that it was immune to in
-    /// their game (see CoopHitUpdate.Immune), as the game has a creature take nothing of a blow that it is immune to
-    /// (HealthManager.TakeDamage), whatever its guard here against the nail of this game's player is. One that died
-    /// here already takes none, as the game has it (HealthManager.Hit).
+    /// Has a creature that every game runs by itself take nothing of a blow of another player that it kept off itself
+    /// in their game by its guard against the nail (see CoopHitUpdate.Immune), as the game has a creature take nothing
+    /// of a blow that it is guarded against (HealthManager.TakeDamage), whatever its guard here against the nail of
+    /// this game's player is. One that died here already takes none, as the game has it (HealthManager.Hit).
     /// </summary>
     private static IHitResponder.HitResponse TakeAsImmune(HealthManager creature) {
         return creature.isDead ? IHitResponder.Response.None : IHitResponder.Response.DamageEnemy;
+    }
+
+    /// <summary>
+    /// Whether a creature keeps a blow of the nail off itself as it comes by its guard against the nail
+    /// (HealthManager.IsImmuneTo), which a state machine that each game runs by itself for its own player can raise by
+    /// where that player stands, like the guard of the keeper of the roaches against blows from below (see
+    /// CoopHitUpdate.Immune). It is read before the blow, which can raise or drop the guard as it goes. The creature's
+    /// other guards, against explosions, acid and the like, are the same in every game, which keeps such a blow off
+    /// as the game does (review of 1471a50).
+    /// </summary>
+    private static bool NailGuarded(HealthManager creature, HitInstance hit) {
+        return hit.AttackType == AttackTypes.Nail && creature.immuneToNailAttacks;
     }
 
     /// <summary>

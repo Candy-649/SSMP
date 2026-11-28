@@ -22,8 +22,9 @@ namespace SSMP.Game.Client;
 /// off afresh, and both walk alike from there, set straight at the steps that come. Where it walks by a player, it does
 /// so by the scene host's game (USER 11-16 "总之不看人的优先采用两边同种子掷骰子然后轻微矫正的方式，看人的就房主传过来招式"):
 /// it turns to one it sees behind it there alone, which tells the others its walk as it turns (see
-/// <see cref="TurnedToFace"/>), and walks on in every game while the scene host's sees one, which that game tells as it
-/// comes to see one and no longer does (see <see cref="SeesToWalkOn"/>).
+/// <see cref="TurnToFace"/>), and walks on in every game while the scene host's sees one in its range and its sight,
+/// which that game tells as it comes to see one and no longer does (see <see cref="SeesToWalkOn"/>,
+/// <see cref="SightAsItWalks"/>).
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
@@ -48,11 +49,12 @@ internal partial class GamePatcher {
     private static readonly HashSet<Walker> SeenThere = [];
 
     /// <summary>
-    /// Whether the Walker of a creature that every game runs by itself saw a player in its range when this game, the
-    /// scene host's, last told the members in the room, for those that it told it saw one (see
-    /// <see cref="NoteSight"/>).
+    /// What the Walker of each creature that every game runs by itself saw when this game, the scene host's, last told
+    /// the members in the room, a player in its range and its sight or none (see <see cref="NoteSight"/>). One that is
+    /// not here is told at its next look, whatever it sees then: one never told, or told by another game before this
+    /// one came to run the room (see <see cref="RetellOwnWalks"/>).
     /// </summary>
-    private static readonly HashSet<Walker> SightTold = [];
+    private static readonly Dictionary<Walker, bool> SightTold = [];
 
     /// <summary>
     /// Tells the members in the room where the walk of a creature that every game runs by itself is in the scene host's
@@ -139,26 +141,43 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// IL hook for a method of the Walker that looks at whether a player stands in its range as it walks: the answer of
-    /// the look by which it turns to face a player behind it, the first as it walks, goes through
-    /// <see cref="SeesToFace"/>, and the turn that it begins then through <see cref="TurnedToFace"/>; the others, by
-    /// which it walks on while it sees one, through <see cref="SeesToWalkOn"/>.
+    /// IL hook for a method of the Walker that looks at whether a player stands in its range and in its sight. As it
+    /// walks (UpdateWalking), the answer of the look at its range by which it turns to face a player behind it, the
+    /// first, goes through <see cref="SeesToFace"/>, and the turn that it begins then through
+    /// <see cref="TurnToFace"/>; that of the other, by which it walks on while it sees one, through
+    /// <see cref="SeesToWalkOn"/>; and those of its sight, which it looks at before its range, through
+    /// <see cref="SightAsItWalks"/>. As it turns (Update), by which it holds off its next turn at an edge while it
+    /// sees one, through <see cref="SeesAsItTurns"/> and <see cref="SightAsItTurns"/>.
     /// </summary>
     private static void ILOwnWalkLooks(ILContext il, string method) {
         try {
+            var walking = method == "UpdateWalking";
+            Func<bool, Walker, bool> sight = walking ? SightAsItWalks : SightAsItTurns;
             var c = new ILCursor(il);
+            var sights = 0;
+            while (c.TryGotoNext(
+                       MoveType.After, i => i.MatchCallvirt(typeof(LineOfSightDetector), "get_CanSeeHero")
+                   )) {
+                c.Emit(OpCodes.Ldarg_0);
+                c.EmitDelegate(sight);
+                sights++;
+            }
+
+            c.Index = 0;
             var looks = 0;
             while (c.TryGotoNext(
                        MoveType.After, i => i.MatchCallvirt(typeof(AlertRange), nameof(AlertRange.IsHeroInRange))
                    )) {
                 c.Emit(OpCodes.Ldarg_0);
-                if (method != "UpdateWalking" || looks > 0) {
+                if (!walking) {
+                    c.EmitDelegate<Func<bool, Walker, bool>>(SeesAsItTurns);
+                } else if (looks > 0) {
                     c.EmitDelegate<Func<bool, Walker, bool>>(SeesToWalkOn);
                 } else {
                     c.EmitDelegate<Func<bool, Walker, bool>>(SeesToFace);
-                    if (c.TryGotoNext(MoveType.After, i => i.MatchCall(typeof(Walker), nameof(Walker.BeginTurning)))) {
-                        c.Emit(OpCodes.Ldarg_0);
-                        c.EmitDelegate<Action<Walker>>(TurnedToFace);
+                    if (c.TryGotoNext(i => i.MatchCall(typeof(Walker), nameof(Walker.BeginTurning)))) {
+                        c.Remove();
+                        c.EmitDelegate<Action<Walker, int>>(TurnToFace);
                     } else {
                         Logger.Warn("Walker#UpdateWalking no longer turns where it looks at its range");
                     }
@@ -167,8 +186,8 @@ internal partial class GamePatcher {
                 looks++;
             }
 
-            if (looks == 0) {
-                Logger.Warn($"Walker#{method} no longer looks at its range where it was looked for");
+            if (looks == 0 || sights == 0) {
+                Logger.Warn($"Walker#{method} no longer looks at its range and its sight where they were looked for");
             }
         } catch (Exception e) {
             Logger.Error($"Could not change Walker#{method} IL:\n{e}");
@@ -178,7 +197,7 @@ internal partial class GamePatcher {
     /// <summary>
     /// Whether a player stands in the range of a Walker, for its turn to face one that it sees behind it as it walks.
     /// Never in a game that follows the scene host's, for a creature that every game runs by itself: the scene host's
-    /// sees the player, and tells its turn as it begins (see <see cref="TurnedToFace"/>), and its state machine looks
+    /// sees the player, and tells its turn as it begins (see <see cref="TurnToFace"/>), and its state machine looks
     /// through the same sight and goes after them at once (the pilgrims' Walk stores CheckCanSeeHero and goes on
     /// ATTACK by a BoolTest), by a step that the others are told. One that looked by itself turned by where it had the
     /// players, a moment late and a little elsewhere, and rolled its walk otherwise from then on, as the scene host's
@@ -195,9 +214,9 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Whether a player stands in the range of a Walker, for its walking on while it sees one rather than standing a
-    /// while, and for the cooldown of its turns while it does. In a game that follows the scene host's, for a creature
-    /// that every game runs by itself, whether the scene host's creature sees one there, as that game told (see
-    /// <see cref="TakeWalkWord"/>): one that saw none here stood a while by itself as the scene host's walked on.
+    /// while. In a game that follows the scene host's, for a creature that every game runs by itself, whether the scene
+    /// host's creature sees one there, as that game told (see <see cref="TakeWalkWord"/>): one that saw none here
+    /// stood a while by itself as the scene host's walked on.
     /// </summary>
     private static bool SeesToWalkOn(bool seen, Walker walker) {
         if (Entity.OwnCreatures.FollowsSceneHost(walker.gameObject)) {
@@ -209,34 +228,77 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Notes what the Walker of a creature that every game runs by itself sees in its range in the scene host's game,
-    /// this one, and tells the members in the room as it comes to see a player or no longer does (see
-    /// <see cref="TellsWalk"/>), but for a creature that walks for no other game, whose sight is told to the first who
-    /// comes in as it looks next.
+    /// Whether a Walker sees a player through its line of sight as it walks, which it looks at before its range. In a
+    /// game that follows the scene host's, for a creature that every game runs by itself, it does: whether it sees one
+    /// there is the scene host's word, which the look at its range that comes next takes (see
+    /// <see cref="SeesToWalkOn"/>), and one that lost sight here of a player whom the scene host's still saw stood a
+    /// while by itself as that one walked on. In the scene host's game, one that sees no one so sees no one in its
+    /// range either, which is told as it comes (see <see cref="NoteSight"/>): it does not look at its range then, and
+    /// the others walked on by the word that it saw one as it stood a while there.
+    /// </summary>
+    private static bool SightAsItWalks(bool canSee, Walker walker) {
+        if (Entity.OwnCreatures.FollowsSceneHost(walker.gameObject)) {
+            return true;
+        }
+
+        if (!canSee) {
+            NoteSight(walker, false);
+        }
+
+        return canSee;
+    }
+
+    /// <summary>
+    /// Whether a player stands in the range of a Walker as it turns, by which it holds off its next turn at an edge
+    /// while it sees one. In a game that follows the scene host's, for a creature that every game runs by itself,
+    /// whether the scene host's creature sees one there, as that game told as it walked (see
+    /// <see cref="SeesToWalkOn"/>). That game tells nothing of what it sees as it turns, as it looks at its range
+    /// before its sight then: it would tell that it sees one and that it does not at every frame of the turn while a
+    /// player stood in its range out of its sight.
+    /// </summary>
+    private static bool SeesAsItTurns(bool seen, Walker walker) {
+        return Entity.OwnCreatures.FollowsSceneHost(walker.gameObject) ? SeenThere.Contains(walker) : seen;
+    }
+
+    /// <summary>
+    /// Whether a Walker sees a player through its line of sight as it turns, after its range (see
+    /// <see cref="SeesAsItTurns"/>). In a game that follows the scene host's, for a creature that every game runs by
+    /// itself, it does: the word of the scene host's game, which the look at its range took, says it all.
+    /// </summary>
+    private static bool SightAsItTurns(bool canSee, Walker walker) {
+        return Entity.OwnCreatures.FollowsSceneHost(walker.gameObject) || canSee;
+    }
+
+    /// <summary>
+    /// Notes what the Walker of a creature that every game runs by itself sees in the scene host's game, this one, and
+    /// tells the members in the room as it comes to see a player or no longer does (see <see cref="TellsWalk"/>), or
+    /// whatever it sees at its first look since they were last told (see <see cref="SightTold"/>), but for a creature
+    /// that walks for no other game, whose sight is told to the first who comes in as it looks next.
     /// </summary>
     private static void NoteSight(Walker walker, bool seen) {
-        if (TellsWalk == null || SightTold.Contains(walker) == seen ||
+        if (TellsWalk == null || SightTold.TryGetValue(walker, out var told) && told == seen ||
             Entity.OwnCreatures.Owning(walker.gameObject) is not { } creature || !TellsWalk(creature, seen, false)) {
             return;
         }
 
-        if (seen) {
-            SightTold.Add(walker);
-        } else {
-            SightTold.Remove(walker);
-        }
+        SightTold[walker] = seen;
     }
 
     /// <summary>
-    /// Tells the members in the room the turn of the Walker of a creature that every game runs by itself to face a
-    /// player that it saw behind it, in the scene host's game, this one, as it begins: no other game turns it by
-    /// itself (see <see cref="SeesToFace"/>), and one that did not have it went on walking away from the player that
-    /// the scene host's turned to, 17 units by the scene host's next step, where it was set (the user's log of 11-28,
-    /// 16:44:08.735, the keeper of the roaches, which walked to x 232.3 as Luminary's turned at 223.6; USER "这个怪会凭空
-    /// 闪现").
+    /// Begins the turn of a Walker to face a player that it saw behind it, as the game does (Walker.BeginTurning), and
+    /// tells the members in the room where the walk of a creature that every game runs by itself is as the turn
+    /// begins in the scene host's game, this one: no other game turns it by itself (see <see cref="SeesToFace"/>), and
+    /// one that did not have it went on walking away from the player that the scene host's turned to, 17 units by the
+    /// scene host's next step, where it was set (the user's log of 11-28, 16:44:08.735, the keeper of the roaches,
+    /// which walked to x 232.3 as Luminary's turned at 223.6; USER "这个怪会凭空闪现"). A turn that the game does not
+    /// begin, with no ground below the creature, tells nothing: the creature tries it again at every frame (review of
+    /// 06b0a8e).
     /// </summary>
-    private static void TurnedToFace(Walker walker) {
-        if (TellsWalk != null && Entity.OwnCreatures.Owning(walker.gameObject) is { } creature) {
+    private static void TurnToFace(Walker walker, int facing) {
+        var was = (walker.state, walker.currentFacing);
+        walker.BeginTurning(facing);
+        if ((walker.state, walker.currentFacing) != was && TellsWalk != null &&
+            Entity.OwnCreatures.Owning(walker.gameObject) is { } creature) {
             TellsWalk(creature, true, true);
         }
     }
@@ -282,8 +344,10 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Has what the Walkers of the creatures here that every game runs by itself see in this game, the scene host's,
-    /// told again to the members in the room at their next look (see <see cref="NoteSight"/>), as a member comes in,
-    /// who was told nothing of it before.
+    /// told again to the members in the room at their next look (see <see cref="NoteSight"/>): as a member comes in,
+    /// who was told nothing of it before, and as this game comes to run the room, whose members went by the word of the
+    /// game that ran it before, which is not told that it no longer does: one that it told saw a player walked on in
+    /// their games for good as this one's stood a while, which saw none (review of 06b0a8e).
     /// </summary>
     internal static void RetellOwnWalks() {
         SightTold.Clear();

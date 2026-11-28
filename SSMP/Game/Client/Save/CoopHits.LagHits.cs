@@ -114,6 +114,7 @@ internal partial class CoopHits {
         var seeds = update != null ? new NamedSeeds() : null;
         var hero = HeroController.SilentInstance;
         var striker = hero != null ? hero.gameObject : null;
+        var nailGuarded = !extra && NailGuarded(health, hit);
         var answered = AnswersAttack(
             () => dice = SharedDice.Record(() => response = HitRoomObject(deal, health, striker)), hitName, seeds
         ) || response.response != IHitResponder.Response.None;
@@ -122,7 +123,7 @@ internal partial class CoopHits {
         }
 
         update.Blocked = response.response == IHitResponder.Response.Invincible;
-        update.Immune = !extra && !update.Blocked && health.IsImmuneTo(hit, false);
+        update.Immune = !update.Blocked && nailGuarded;
         update.FromSceneHost = update.Blocked && OwnCreatures.RunsHere(health.gameObject);
         update.ExtraDamage = extra;
         update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
