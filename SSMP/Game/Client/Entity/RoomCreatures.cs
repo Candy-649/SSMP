@@ -18,7 +18,9 @@ namespace SSMP.Game.Client.Entity;
 /// What makes them is a part of the room and not an entity, so it runs in both games alike, and each game made
 /// creatures of its own that the other player never saw - each player fought their own. They are now made in the scene
 /// host's game only, where they are made entities and sent to the other game as spawned by
-/// <see cref="EntityType.Room"/>, and the scene client makes none of its own.
+/// <see cref="EntityType.Room"/>, and the scene client makes none of its own. Those of a kind that every game runs by
+/// itself are no entities: every other game makes them as they were made there, at the scene host's word (see
+/// OwnCreatures.TakeRoomMade).
 /// </summary>
 internal class RoomCreatures {
     /// <summary>
@@ -44,7 +46,8 @@ internal class RoomCreatures {
     /// them. They are held switched off until then, as the room's own creatures are (see <see cref="Entity"/>), and
     /// only the scene host's are switched on and made entities; the others are taken away (<see cref="Settle"/>).
     /// </summary>
-    private readonly List<(GameObject Creature, bool WasActive)> _madeBeforeTheRoomWasSettled = [];
+    private readonly List<(GameObject Creature, bool WasActive, FsmStateAction Action)> _madeBeforeTheRoomWasSettled =
+        [];
 
     /// <summary>
     /// Detour hook for the FSM action that makes an object from a prefab.
@@ -141,7 +144,7 @@ internal class RoomCreatures {
         void Find(GameObject? prefab, UnityEngine.Component maker, CreateObject? create) {
             // A creature's own FSMs run in one game only, and what they spawn is sent already. A creature that every
             // game runs by itself makes a creature of a kind that every game runs by itself in every game, as its
-            // summon (see OwnCreatures.MakesSummon)
+            // summon, and so does its shell (see OwnCreatures.MakesSummon, OwnCreatures.LetsOutSummon)
             if (prefab == null ||
                 !EntityRegistry.TryGetEntry(prefab, out var entry) ||
                 !EntitySpawner.IsSpawnedAsEntity(prefab) ||
@@ -169,14 +172,14 @@ internal class RoomCreatures {
     /// </summary>
     /// <param name="share">Whether this game runs the room.</param>
     public void Settle(bool share) {
-        foreach (var (creature, wasActive) in _madeBeforeTheRoomWasSettled) {
+        foreach (var (creature, wasActive, action) in _madeBeforeTheRoomWasSettled) {
             if (creature == null) {
                 continue;
             }
 
             if (share) {
                 creature.SetActive(wasActive);
-                Share(creature);
+                Share(creature, action);
             } else {
                 Logger.Info($"Taking away '{creature.name}', which the room made here: the scene host's game sends it");
                 Object.Destroy(creature);
@@ -233,10 +236,12 @@ internal class RoomCreatures {
     /// game only. The other game's shell lets out nothing, and what it made stays switched off where it was made.
     /// </summary>
     private void OnLetOut(Action<GetPreInstantiatedGameObject> orig, GetPreInstantiatedGameObject self) {
-        var shell = self.Fsm.GetOwnerDefaultTarget(self.target);
-        var prefab = shell != null && shell.TryGetComponent<PreInstantiateGameObject>(out var maker)
-            ? maker.prefab
-            : null;
+        // What the shell of a creature that every game runs by itself lets out is let out in every game, as its summon
+        if (OwnCreatures.LetsOutSummon(orig, self)) {
+            return;
+        }
+
+        var prefab = OwnCreatures.ShellOf(self.Fsm, self) is { } shell ? shell.prefab : null;
         if (prefab == null || !IsMadeByTheRoom(prefab) || EntityProcessor.IsRegistered(self.Fsm.GameObject)) {
             orig(self);
             return;
@@ -289,12 +294,12 @@ internal class RoomCreatures {
         // could get hold of the player - one hides the player's character and holds on until its own FSM lets go - and
         // then be taken away, or started over when it is made an entity, with the player never let go of
         if (!_entityManager.IsSceneRoleDetermined) {
-            _madeBeforeTheRoomWasSettled.Add((creature, creature.activeSelf));
+            _madeBeforeTheRoomWasSettled.Add((creature, creature.activeSelf, action));
             creature.SetActive(false);
             return;
         }
 
-        Share(creature);
+        Share(creature, action);
     }
 
     /// <summary>
@@ -311,9 +316,18 @@ internal class RoomCreatures {
     }
 
     /// <summary>
-    /// Makes a creature that the room made in this game, which runs the room, an entity, and tells the other game.
+    /// Makes a creature that the room made in this game, which runs the room, an entity, and tells the other game. One
+    /// of a kind that every game runs by itself is no entity: every game makes it as the action made it here, at the
+    /// word of this one (see OwnCreatures.TakeRoomMade).
     /// </summary>
-    private void Share(GameObject creature) {
+    /// <param name="creature">The creature.</param>
+    /// <param name="action">The action that made it.</param>
+    private void Share(GameObject creature, FsmStateAction action) {
+        if (EntityRegistry.TryGetEntry(creature, out var entry) && entry.OwnInEachGame) {
+            OwnCreatures.TakeRoomMade(creature, entry.Type, action);
+            return;
+        }
+
         var processor = new EntityProcessor {
             GameObject = creature,
             IsSceneHost = true,

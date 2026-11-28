@@ -111,32 +111,44 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells a member who has come into the room what made a summon here (see <see cref="TakeOwnMade"/>), before what
-    /// it does.
+    /// it does, or the members in the room what made a creature that a part of the room made here, as this game runs
+    /// the room (see OwnCreatures.TakeRoomMade).
     /// </summary>
-    private void TellOwnMade(ClientPlayerData player, string scene, string place, OwnCreatures.SummonMaker maker) {
-        Logger.Info(
-            $"[Own creatures] {player.Username} is told that '{maker.Place}' made '{place}' here in " +
-            $"'{maker.State}' of '{maker.Fsm}'"
-        );
-        Send(new CoopSaveUpdate {
-            TargetId = player.Id,
+    /// <param name="player">The member, or null for the members in the room.</param>
+    /// <param name="scene">The scene of the creature.</param>
+    /// <param name="place">Its place.</param>
+    /// <param name="maker">What made it.</param>
+    private void TellOwnMade(ClientPlayerData? player, string scene, string place, OwnCreatures.SummonMaker maker) {
+        var update = new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.OwnCreature,
             Scene = scene,
             ObjectPath = place,
             PartCount = OwnMadePart,
-            Names = [maker.Place, maker.Fsm, maker.State],
+            Names = [maker.Place, maker.Fsm, maker.State, maker.Under],
             Key = (ulong) maker.Action
-        });
+        };
+        var made = $"'{maker.Place}' made '{place}' here in '{maker.State}' of '{maker.Fsm}'";
+        if (player == null) {
+            Logger.Info($"[Own creatures] The members in the room are told that {made}");
+            SendToRoomMembers(update);
+            return;
+        }
+
+        Logger.Info($"[Own creatures] {player.Username} is told that {made}");
+        update.TargetId = player.Id;
+        Send(update);
     }
 
     /// <summary>
-    /// Makes a summon that the scene host's game made before the local player came in, as the action that made it there
-    /// makes it (see OwnCreatures.MakeSummonAsTold), whose state comes next. One that is here already, as its maker
-    /// here made it as it started, as it did there, is that one.
+    /// Makes a summon that the scene host's game made before the local player came in, or a creature that a part of
+    /// the room made there, as the action that made it there makes it (see OwnCreatures.MakeSummonAsTold), whose state
+    /// comes next. One that is here already, as its maker here made it as it started, as it did there, is that one.
     /// </summary>
     private static void TakeOwnMade(CoopSaveUpdate update) {
         var place = update.ObjectPath;
-        var maker = new OwnCreatures.SummonMaker(update.Names[0], update.Names[1], update.Names[2], (int) update.Key);
+        var maker = new OwnCreatures.SummonMaker(
+            update.Names[0], update.Names[1], update.Names[2], (int) update.Key, update.Names[3]
+        );
         var told = $"'{maker.Place}' made '{place}' in '{maker.State}' of '{maker.Fsm}' in the scene host's game";
         if (OwnCreatures.Find(update.Scene, place) != null) {
             Logger.Info($"[Own creatures] {told}, which is here already");

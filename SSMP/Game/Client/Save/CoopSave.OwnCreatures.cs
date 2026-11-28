@@ -355,6 +355,7 @@ internal partial class CoopSave {
         OwnCreatures.KeepsLocalPlayerOut = KeepsLocalPlayerOut;
         OwnCreatures.HasNoHealthAsTold = HasNoHealthAsTold;
         OwnCreatures.MakesAlike = machine => LayoutOf(machine.gameObject) != null;
+        OwnCreatures.TellsRoomMade = (scene, place, maker) => TellOwnMade(null, scene, place, maker);
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
         EntityManager.PicksOwnGroup = PickOwnGroup;
