@@ -22,9 +22,10 @@ namespace SSMP.Game.Client.Save;
 /// standing, a death of the local player is not played out at all: the player goes down where they are, the game's own
 /// death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other members can
 /// break open to put them back on their feet with a third of their health. Each member who is down lies in a cocoon
-/// of their own, and the hits of everyone who hits one count together. The game's own death runs, from its very first
-/// step, only once nobody is left to do that: every member is down, or the player gave up. Waiting is a choice, it
-/// lasts until one of those, and the cocoon stops being shown to the others the moment waiting ends.
+/// of their own, and the hits of everyone who hits one count together. A player knocked out in a spar, which does not
+/// kill them, lies on the ground in the open instead, struck where they lie. The game's own death runs, from its very
+/// first step, only once nobody is left to do that: every member is down, or the player gave up. Waiting is a choice,
+/// it lasts until one of those, and the cocoon stops being shown to the others the moment waiting ends.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -38,6 +39,17 @@ internal partial class CoopSave {
     /// it stands up with the rest (USER 11-28 "复活的人给4格吧，比较符合一个茧=9格丝的设定").
     /// </summary>
     private const int CocoonSilk = 9;
+
+    /// <summary>
+    /// The clip of a player lying on the ground knocked out, as the game shows one beaten in a spar before they get up
+    /// beside the one they sparred with (HeroController.Respawn).
+    /// </summary>
+    private const string KnockedOutClipName = "Prostrate";
+
+    /// <summary>
+    /// The clip of a player knocked out getting up off the ground, as the game plays it after a spar.
+    /// </summary>
+    private const string WakeUpClipName = "Wake Up Ground";
 
     /// <summary>
     /// How long, in seconds, at the start of a wait during which the key that gives up on it is not listened to at
@@ -209,7 +221,7 @@ internal partial class CoopSave {
         public string Scene { get; }
 
         /// <summary>
-        /// Where the cocoon was left.
+        /// Where the cocoon was left, or where a player who was knocked out lies.
         /// </summary>
         public Vector2 Position { get; }
 
@@ -271,6 +283,14 @@ internal partial class CoopSave {
         public bool Chase { get; set; }
 
         /// <summary>
+        /// Whether a spar knocked the player out rather than killed them: the hurt that took the last of their health
+        /// is one that does not kill (DamagePropertyFlags.NonLethal), which only the characters who spar deal. They
+        /// lie on the ground in the open, as the game shows a player beaten in a spar, rather than in a cocoon (USER
+        /// 11-28 "和沙克拉还有加蒙德切磋不应该中途会变成茧来着，毕竟设定上人家没有把大黄蜂打死").
+        /// </summary>
+        public bool KnockedOut { get; set; }
+
+        /// <summary>
         /// Where the member who stood them up said to stand up, for a death in the chase, or null to stand up where
         /// they fell.
         /// </summary>
@@ -326,11 +346,18 @@ internal partial class CoopSave {
     /// The cocoon of another member, shown in this game only while they are waiting to be pulled back up.
     /// </summary>
     private sealed class RescueTarget {
-        public RescueTarget(ushort playerId, string scene, GameObject cocoon) {
+        public RescueTarget(ushort playerId, string scene, GameObject cocoon, bool knockedOut) {
             PlayerId = playerId;
             Scene = scene;
             Cocoon = cocoon;
+            KnockedOut = knockedOut;
         }
+
+        /// <summary>
+        /// Whether they lie knocked out in the open, their body on the screen and nothing drawn of what stands in for
+        /// their cocoon.
+        /// </summary>
+        public bool KnockedOut { get; }
 
         /// <summary>
         /// The player who is waiting.
@@ -352,12 +379,18 @@ internal partial class CoopSave {
     /// Another member who is lying down waiting to be pulled back up, as far as this game has heard.
     /// </summary>
     private sealed class WaitingMember {
-        public WaitingMember(string scene, Vector2 position, ulong key, bool cursed) {
+        public WaitingMember(string scene, Vector2 position, ulong key, bool cursed, bool knockedOut) {
             Scene = scene;
             Position = position;
             Key = key;
             Cursed = cursed;
+            KnockedOut = knockedOut;
         }
+
+        /// <summary>
+        /// Whether a spar knocked them out, which leaves them lying in the open rather than in a cocoon.
+        /// </summary>
+        public bool KnockedOut { get; }
 
         /// <summary>
         /// The room their cocoon is in, or empty for a death in the chase of a lava, which leaves none.
@@ -995,6 +1028,10 @@ internal partial class CoopSave {
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private IEnumerator WrapDeath(IEnumerator death, bool nonLethal, bool frostDeath) {
+        // As the hurt itself said, before a memory is counted in: only a hurt that does not kill knocks the player out
+        // (PendingRescue.KnockedOut)
+        var knockedOut = nonLethal;
+
         // The game makes every death in a memory non-lethal itself, inside the death and so after this is asked
         // (HeroController.Die)
         nonLethal |= global::GameManager.instance != null && global::GameManager.instance.IsMemoryScene();
@@ -1044,7 +1081,7 @@ internal partial class CoopSave {
         // room was already showing
         NoteWhatIsOnAroundThePlayer();
 
-        return LieDown(death, frostDeath);
+        return LieDown(death, frostDeath, knockedOut);
     }
 
     /// <summary>
@@ -1227,9 +1264,10 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="death">The coroutine of the game that plays out the death, not started yet.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
-    private IEnumerator LieDown(IEnumerator death, bool frostDeath) {
+    /// <param name="knockedOut">Whether a spar knocked the player out (see PendingRescue.KnockedOut).</param>
+    private IEnumerator LieDown(IEnumerator death, bool frostDeath, bool knockedOut) {
         var hero = HeroController.instance;
-        if (hero == null || !StartRescueWait(hero) || _rescue is not { } lying) {
+        if (hero == null || !StartRescueWait(hero, knockedOut) || _rescue is not { } lying) {
             // Nothing is waiting, so the death plays out the way it always did
             while (death.MoveNext()) {
                 yield return death.Current;
@@ -1437,7 +1475,7 @@ internal partial class CoopSave {
             hero.vibrationCtrl.PlayHeroDeath();
         }
 
-        rescue.Effect = ShowTheDeath(hero, frostDeath);
+        rescue.Effect = ShowTheDeath(hero, frostDeath, rescue.KnockedOut);
     }
 
     /// <summary>
@@ -1452,9 +1490,11 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
+    /// <param name="knockedOut">Whether a spar knocked the player out, which the game shows as a knock-out of its own:
+    /// thrown off their feet and the screen wiped black, without the threads and the cocoon of a death.</param>
     /// <returns>The copy, which takes itself away once it has played out.</returns>
-    private static GameObject ShowTheDeath(HeroController hero, bool frostDeath) {
-        var prefab = hero.GetHeroDeathPrefab(false, false, frostDeath);
+    private static GameObject ShowTheDeath(HeroController hero, bool frostDeath, bool knockedOut) {
+        var prefab = hero.GetHeroDeathPrefab(knockedOut, false, frostDeath);
         var effect = UnityEngine.Object.Instantiate(prefab, hero.transform.position, prefab.transform.rotation);
         effect.transform.localScale = Vector3.Scale(hero.transform.localScale, prefab.transform.localScale);
         effect.SetActive(true);
@@ -1504,13 +1544,17 @@ internal partial class CoopSave {
     /// </summary>
     /// <returns>Whether a wait was started.</returns>
     /// <param name="hero">The hero controller.</param>
-    private bool StartRescueWait(HeroController hero) {
+    /// <param name="knockedOut">Whether a spar knocked the player out (see PendingRescue.KnockedOut).</param>
+    private bool StartRescueWait(HeroController hero, bool knockedOut) {
         if (GetCheckedMembers().Count == 0) {
             return false;
         }
 
-        // Where the cocoon lies, decided here so that every game points at the same spot
-        var (scene, position) = WhereTheCocoonLies(hero);
+        // Where the cocoon lies, decided here so that every game points at the same spot. A player knocked out lies
+        // where they stand up, on the ground, with no cocoon for the room to send anywhere.
+        var (scene, position) = knockedOut
+            ? (hero.gm.GetSceneNameString(), (Vector2) WhereToStandUp(hero).Place)
+            : WhereTheCocoonLies(hero);
         if (string.IsNullOrEmpty(scene)) {
             return false;
         }
@@ -1526,15 +1570,17 @@ internal partial class CoopSave {
             // the room rather than the music of the death
             Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue,
             Key = ++_lastRescueKey,
-            Chase = chase
+            Chase = chase,
+            KnockedOut = knockedOut && !chase
         };
 
-        // Whether the player went down under the curse, which their cocoon shows here and in the games of the members
+        // Whether the player went down under the curse, which their cocoon shows here and in the games of the members,
+        // and whether they were knocked out, which leaves them lying in the open there instead
         var cursed = hero.playerData.IsAnyCursed;
         SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.RescueOffer,
             Scene = scene,
-            Values = [position.x, position.y, chase ? 1f : 0f, cursed ? 1f : 0f],
+            Values = [position.x, position.y, chase ? 1f : 0f, cursed ? 1f : 0f, _rescue.KnockedOut ? 1f : 0f],
             Key = _rescue.Key
         });
         SayTheLocalPlayerIsDown(true);
@@ -1546,9 +1592,16 @@ internal partial class CoopSave {
             return true;
         }
 
+        if (_rescue.KnockedOut) {
+            Logger.Info($"Knocked out in '{scene}', so lying at {position} until {standing} pulls them up");
+
+            return true;
+        }
+
         // Shown to the player themselves as well, not only to the ones who can open it. Watching the room you died in
-        // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
-        _rescueOwnCocoon = SpawnRescueCocoon(position, null, cursed);
+        // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting. A
+        // player knocked out has their own body lying there for that (LieKnockedOut).
+        _rescueOwnCocoon = SpawnRescueCocoon(position, null, cursed, false);
 
         Logger.Info($"Waiting for {standing} to open the cocoon in '{scene}'");
 
@@ -1936,6 +1989,25 @@ internal partial class CoopSave {
             return;
         }
 
+        // Knocked out in a spar: pulled up rather than broken out, and giving up plays the game's own knock-out, as a
+        // spar is lost, rather than taking them to their bench
+        if (rescue.KnockedOut) {
+            _uiManager.CoopPrompt.Show(
+                rescue.Hits > 0
+                    ? Lang.Pick(
+                        $"{name} {(one ? "is" : "are")} pulling you up ({rescue.Hits}/{RescueHits}). " +
+                        $"Press {LeaveKeyName} to give up instead",
+                        $"{name} 正在把你拉起来（{rescue.Hits}/{RescueHits}）。按 {LeaveKeyName} 直接认输"
+                    )
+                    : Lang.Pick(
+                        $"Waiting for {name} to pull you up. Press {LeaveKeyName} to give up instead",
+                        $"等 {name} 来把你拉起来。按 {LeaveKeyName} 直接认输"
+                    )
+            );
+
+            return;
+        }
+
         _uiManager.CoopPrompt.Show(
             rescue.Hits > 0
                 ? Lang.Pick(
@@ -2036,9 +2108,34 @@ internal partial class CoopSave {
         try {
             rescue.ScreenBack = true;
             RestoreScreen();
+
+            if (rescue.KnockedOut) {
+                LieKnockedOut(rescue);
+            }
         } catch (Exception e) {
             LogRescueError(e);
         }
+    }
+
+    /// <summary>
+    /// Lays a player whom a spar knocked out on the ground where they lie, the way the game shows one before they get
+    /// up beside the one they sparred with (HeroController.Respawn), once the knock-out has played out over them. Their
+    /// body is what the members see and strike to pull them up, here and in their games, where it lies the same way.
+    /// </summary>
+    /// <param name="rescue">The wait the player lies in.</param>
+    private static void LieKnockedOut(PendingRescue rescue) {
+        if (HeroController.instance is not { } hero) {
+            return;
+        }
+
+        // The body as well as the place it is drawn at: it is the body that the lying player is held to
+        hero.transform.position = new Vector3(rescue.Position.x, rescue.Position.y, hero.transform.position.z);
+        hero.rb2d.position = rescue.Position;
+        rescue.LyingAt = rescue.Position;
+
+        hero.renderer.enabled = true;
+        hero.animCtrl.PlayClipForced(KnockedOutClipName);
+        Logger.Info($"Lying knocked out at {rescue.Position}");
     }
 
     /// <summary>
@@ -2240,7 +2337,18 @@ internal partial class CoopSave {
             // that decides which animation belongs to that state. Left alone it stays on the last thing it was told,
             // which is the death - so a player who is pulled up and then stands still is still lying there dead on
             // the screen of the other player. This is what the game's own respawn does about it.
-            hero.StartAnimationControlToIdle();
+            //
+            // A player knocked out gets up off the ground first, as the game gets them up after a spar, and the control
+            // of the animation is started the way the game starts it there (HeroController.Respawn): it goes to
+            // standing once the getting up is over (HeroAnimationController.CanPlayIdle), or as soon as the player
+            // moves. Started to standing at once, it would play the end of a run over the getting up
+            // (HeroAnimationController.StartControlToIdle).
+            if (rescue.KnockedOut) {
+                hero.animCtrl.PlayClipForced(WakeUpClipName);
+                hero.StartAnimationControl();
+            } else {
+                hero.StartAnimationControlToIdle();
+            }
 
             // The cold the player went down in is let go of, as the game's own death does a moment in
             // (HeroController.Die). Left alone, a player who froze stood up frozen and started freezing again.
@@ -2545,8 +2653,9 @@ internal partial class CoopSave {
         // lava leaves no cocoon to show, now or on walking into that room later.
         var chase = update.Values[2] > 0f;
         var cursed = update.Values[3] > 0f;
+        var knockedOut = update.Values[4] > 0f;
         _waitingMembers[player.Id] = new WaitingMember(
-            chase ? "" : update.Scene, new Vector2(update.Values[0], update.Values[1]), update.Key, cursed
+            chase ? "" : update.Scene, new Vector2(update.Values[0], update.Values[1]), update.Key, cursed, knockedOut
         );
 
         // A death in the chase of a lava says that it has started there, which stands up the local player lying in
@@ -2594,7 +2703,20 @@ internal partial class CoopSave {
             return;
         }
 
-        if (!localDown) {
+        if (!localDown && knockedOut) {
+            Chat(
+                SceneUtil.GetCurrentSceneName() == update.Scene
+                    ? Lang.Pick(
+                        $"{player.Username} was knocked out. Hit them {RescueHits} times to pull them up.",
+                        $"{player.Username} 被打倒了。攻击他们 {RescueHits} 次就能把人拉起来。"
+                    )
+                    : Lang.Pick(
+                        $"{player.Username} was knocked out. They lie where they fell, and {RescueHits} hits pull " +
+                        "them up.",
+                        $"{player.Username} 被打倒了，人就躺在倒下的地方，打 {RescueHits} 次能把人拉起来。"
+                    )
+            );
+        } else if (!localDown) {
             Chat(
                 SceneUtil.GetCurrentSceneName() == update.Scene
                     ? Lang.Pick(
@@ -2632,9 +2754,12 @@ internal partial class CoopSave {
             );
             rescue.Hits = rescue.HitsBy.Values.Sum();
 
-            // The hit the member landed, shown on this side of it too. The silk it drew went to them.
+            // The hit the member landed, shown on this side of it too, on the cocoon or on the body lying knocked out.
+            // The silk it drew went to them.
             if (_rescueOwnCocoon != null) {
                 PlaySilkHitEffect(_rescueOwnCocoon, false);
+            } else if (rescue.KnockedOut && HeroController.instance is { } lyingHero) {
+                PlaySilkHitEffect(lyingHero.gameObject, false);
             }
 
             if (rescue.Hits >= needed) {
@@ -2717,8 +2842,10 @@ internal partial class CoopSave {
     /// <param name="position">Where the player died.</param>
     /// <param name="openableFor">The member whom hits on it pull back up, or null for one that takes no hits.</param>
     /// <param name="cursed">Whether the player lying in it went down under the curse.</param>
+    /// <param name="knockedOut">Whether the player was knocked out and lies in the open, which leaves of the cocoon
+    /// only what takes the hits, with nothing of it drawn.</param>
     /// <returns>The object, or null if it could not be made.</returns>
-    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor, bool cursed) {
+    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor, bool cursed, bool knockedOut) {
         var gameManager = global::GameManager.instance;
         var sceneManager = gameManager == null ? null : gameManager.GetSceneManager();
         var prefab = sceneManager == null ? null : sceneManager.GetComponent<CustomSceneManager>()?.heroCorpsePrefab;
@@ -2767,6 +2894,15 @@ internal partial class CoopSave {
         appearance.InsertMethod(
             AppearanceStateName, read, () => appearance.FsmVariables.GetFsmEnum(CorpseTypeVariableName).Value = look
         );
+
+        // Lying knocked out, the player is their own body on the ground, so nothing of the cocoon is drawn: not the
+        // cocoon, the threads behind it, nor the spiders that fall from it as it appears. Its FSM only switches the
+        // objects it shows on, never what draws them.
+        if (knockedOut) {
+            foreach (var drawn in cocoon.GetComponentsInChildren<Renderer>(true)) {
+                drawn.enabled = false;
+            }
+        }
 
         cocoon.SetActive(true);
 
@@ -2862,11 +2998,19 @@ internal partial class CoopSave {
             return;
         }
 
-        if (SpawnRescueCocoon(waiting.Position, playerId, waiting.Cursed) is not { } cocoon) {
+        if (SpawnRescueCocoon(waiting.Position, playerId, waiting.Cursed, waiting.KnockedOut) is not { } cocoon) {
             return;
         }
 
-        _rescueTargets[playerId] = new RescueTarget(playerId, waiting.Scene, cocoon);
+        _rescueTargets[playerId] = new RescueTarget(playerId, waiting.Scene, cocoon, waiting.KnockedOut);
+
+        // Knocked out, they lie on the ground in the open, the way their game shows them, so their body stays: only
+        // what hunts players lets go of them
+        if (waiting.KnockedOut) {
+            LetGoOfLyingPartner(playerId);
+
+            return;
+        }
 
         // Their body is in the cocoon now, so it stops standing beside it. Nothing ever took it away before: the
         // death that crosses over is an animation like any other, and the animation of a death simply stops on its
@@ -2894,7 +3038,16 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="player">The player whose character was just put in the room.</param>
     internal void HideCharacterOfPartnerInCocoon(ClientPlayerData player) {
-        if (!_rescueTargets.ContainsKey(player.Id)) {
+        if (!_rescueTargets.TryGetValue(player.Id, out var target)) {
+            return;
+        }
+
+        // One knocked out comes lying there, which is how they are shown, and is only let go of again by what hunts
+        // players, which takes a character newly put in the room for one to go after
+        if (target.KnockedOut) {
+            Logger.Info($"{player.Username} came into view lying knocked out here, so nothing goes after them");
+            LetGoOfLyingPartner(player.Id);
+
             return;
         }
 
@@ -2937,8 +3090,7 @@ internal partial class CoopSave {
             // its sight, which is all of the wait: a boss went on striking the cocoon of the member it had
             // been fighting while the player still standing was right there. Done before their body is hidden,
             // so that it holds whatever becomes of that.
-            PlayerTargetRegistry.UnregisterRemotePlayer(body);
-            GamePatcher.ForgetPlayerAsTarget(body);
+            LetGoOfLyingBody(body);
 
             AnimationEffect.HidePlayer(body);
             return;
@@ -2957,6 +3109,26 @@ internal partial class CoopSave {
         var idle = animator.GetClipByName(IdleClipName);
         if (idle != null) {
             animator.Play(idle);
+        }
+    }
+
+    /// <summary>
+    /// Takes the body of a member who is lying down off the list of the players that creatures choose from, and lets
+    /// go of them in a creature that had chosen them already, as for this game's own player going down.
+    /// </summary>
+    /// <param name="body">Their body.</param>
+    private static void LetGoOfLyingBody(GameObject body) {
+        PlayerTargetRegistry.UnregisterRemotePlayer(body);
+        GamePatcher.ForgetPlayerAsTarget(body);
+    }
+
+    /// <summary>
+    /// Lets go of a member lying knocked out here (<see cref="LetGoOfLyingBody"/>), whose body stays on the screen.
+    /// </summary>
+    /// <param name="playerId">The member.</param>
+    private void LetGoOfLyingPartner(ushort playerId) {
+        if (_playerData.TryGetValue(playerId, out var player) && player.PlayerObject != null) {
+            LetGoOfLyingBody(player.PlayerObject);
         }
     }
 
@@ -3050,7 +3222,13 @@ internal partial class CoopSave {
             UnityEngine.Object.Destroy(target.Cocoon);
         }
 
-        if (standUp) {
+        if (target.KnockedOut) {
+            // Never taken off the screen, so only back among the players that creatures go after once they stand,
+            // as their own game shows them getting up
+            if (standUp && _playerData.TryGetValue(target.PlayerId, out var player) && player.PlayerObject != null) {
+                PlayerTargetRegistry.RegisterRemotePlayer(player.PlayerObject);
+            }
+        } else if (standUp) {
             // Whatever else took the cocoon away - they were pulled up, the fall of a boss stood them up, they gave
             // up, or this player walked out of the room - their body belongs back on the screen
             SetPartnerBodyHidden(target.PlayerId, false);
