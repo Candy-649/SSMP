@@ -1142,5 +1142,6 @@ internal static class OwnCreatures {
         Deaths.Clear();
         DeathLooks.Clear();
         OwnThreads.Clear();
+        GamePatcher.ForgetOwnWalks();
     }
 }

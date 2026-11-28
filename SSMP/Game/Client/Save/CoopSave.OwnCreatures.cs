@@ -356,6 +356,7 @@ internal partial class CoopSave {
         OwnCreatures.HasNoHealthAsTold = HasNoHealthAsTold;
         OwnCreatures.MakesAlike = machine => LayoutOf(machine.gameObject) != null;
         OwnCreatures.TellsRoomMade = (scene, place, maker) => TellOwnMade(null, scene, place, maker);
+        GamePatcher.TellsWalk = TellOwnWalk;
         ToldParts.OwnPick = OwnPickOf;
         ToldParts.ToldOwnPick = TellOwnPick;
         EntityManager.PicksOwnGroup = PickOwnGroup;
@@ -1034,6 +1035,10 @@ internal partial class CoopSave {
             return;
         }
 
+        // Whether the creature of a walk here sees a player, which this game tells as it changes (see
+        // CoopSave.OwnWalks), is told again at its next look, to the member as to the others in the room
+        GamePatcher.RetellOwnWalks();
+
         // What made each summon that is alive here, before what any creature here does, which their game makes as it
         // did here (see CoopSave.OwnSummons), and which its maker there takes for its own as the step of its own here
         // takes it there through the state that made it (see OwnCreatures.MakesSummon; review of 3653911)
@@ -1374,6 +1379,13 @@ internal partial class CoopSave {
         // which one success is everyone's (see CoopSave.OwnTries)
         if (update.PartCount == OwnTryPart) {
             TakeTry(player, creature, update);
+            return;
+        }
+
+        // Where its walk is in the scene host's game as it comes to see a player or no longer does, or turns to face
+        // one, which is no step of a state machine (see CoopSave.OwnWalks)
+        if (update.PartCount == OwnWalkPart) {
+            TakeOwnWalk(player, creature, update);
             return;
         }
 
