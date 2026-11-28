@@ -53,6 +53,17 @@ internal static class OwnCreatures {
     private static readonly Dictionary<GameObject, (GameObject Creature, string Scene, string Place)> Parts = new();
 
     /// <summary>
+    /// What hangs under the creatures as the rooms loaded them, with its scene and its place in the room then, as their
+    /// parts are named (see <see cref="PieceOf"/>), and by that scene and place: the points between which a flying
+    /// creature goes on its round, which it lets go of into the room as it starts, where they hang among the points of
+    /// the other creatures of the same name, in an order of their own in each game.
+    /// </summary>
+    private static readonly Dictionary<GameObject, (string Scene, string Place)> Pieces = new();
+
+    /// <inheritdoc cref="Pieces"/>
+    private static readonly Dictionary<(string Scene, string Place), GameObject> PiecesAt = new();
+
+    /// <summary>
     /// The creatures of their own that hang under a creature that every game runs by itself, as the room loaded them,
     /// copies too: the bats of a flock, the wasps that a hive keeps, the group of creatures that a black thread core
     /// lets out. Neither they nor anything under them is of the creature above: taken as its parts, a creature under
@@ -764,7 +775,34 @@ internal static class OwnCreatures {
             KeptHealths.Add(health);
         }
 
+        foreach (var under in creature.GetComponentsInChildren<Transform>(true)) {
+            var piece = under.gameObject;
+            if (piece != creature && !IsOfCreatureUnder(creature, piece)) {
+                var at = (creature.scene.name, partPlace(piece));
+                Pieces[piece] = at;
+                PiecesAt[at] = piece;
+            }
+        }
+
         return parts;
+    }
+
+    /// <summary>
+    /// The place in the room of something that hung under a creature that every game runs by itself as the room loaded
+    /// it, wherever it hangs now, which names it in every game (see <see cref="FindPiece"/>), or null for anything
+    /// else. A creature lets go of the points of its round into the room, among those of the others of its kind, where
+    /// each game has them in another order: the path that they have there named another one in another game.
+    /// </summary>
+    public static string? PieceOf(GameObject thing) {
+        return Pieces.TryGetValue(thing, out var at) ? at.Place : null;
+    }
+
+    /// <summary>
+    /// What hung under a creature that every game runs by itself at a place in a room as the room loaded it (see
+    /// <see cref="PieceOf"/>), or null for no such thing here.
+    /// </summary>
+    public static GameObject? FindPiece(string scene, string place) {
+        return PiecesAt.TryGetValue((scene, place), out var piece) && piece != null ? piece : null;
     }
 
     /// <summary>
@@ -1126,6 +1164,8 @@ internal static class OwnCreatures {
     public static void Clear() {
         Creatures.Clear();
         Parts.Clear();
+        Pieces.Clear();
+        PiecesAt.Clear();
         CreaturesUnder.Clear();
         Corpses.Clear();
         Makers.Clear();

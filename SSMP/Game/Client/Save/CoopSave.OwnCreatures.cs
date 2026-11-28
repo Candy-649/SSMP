@@ -973,8 +973,9 @@ internal partial class CoopSave {
         var beside = target != null ? target.transform.position - step.Place : Vector3.zero;
 
         // The first step of a state machine leaves no state. What it worked out goes, and the objects that it found by
-        // where a player is (see LooksAtPlayersAtTimes), and with every step the creature that it fights, if it fights
-        // the room's creatures (see CoopSave.OwnFighters)
+        // where a player is (see LooksAtPlayersAtTimes), and what of the creature it holds, like the point of its round
+        // that it makes for (see ToldValues.OwnPiecesHeldBy), and with every step the creature that it fights, if it
+        // fights the room's creatures (see CoopSave.OwnFighters)
         var fought = FoughtBy(fsm);
         var worked = fsm.ActiveState is { } state
             ? ToldValues.Of(
@@ -982,7 +983,7 @@ internal partial class CoopSave {
                 state.Actions.Where(action => action.Enabled).SelectMany(
                     action => Entity.Action.EntityFsmActions.ValueVariablesOf(action).Concat(
                         LooksAtPlayersAtTimes(action) ? ToldValues.ObjectsStoredBy(action) : []
-                    )
+                    ).Concat(ToldValues.OwnPiecesHeldBy(action))
                 ).Concat(setOnIt ?? []).Concat(fought).Distinct(),
                 fought
             )

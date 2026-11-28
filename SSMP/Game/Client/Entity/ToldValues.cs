@@ -44,6 +44,11 @@ internal sealed class ToldValues {
     private static readonly Dictionary<Type, FieldInfo[]> ObjectStoreFields = new();
 
     /// <summary>
+    /// The fields of each kind of action in which it is given an object, by type (see <see cref="OwnPiecesHeldBy"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ObjectFields = new();
+
+    /// <summary>
     /// The values, by the name of their variable.
     /// </summary>
     private readonly List<(string Name, object Value)> _values;
@@ -158,7 +163,15 @@ internal sealed class ToldValues {
                     variable.Value = vector;
                     break;
                 case RoomObject thing when variables.FindFsmGameObject(name) is { } variable &&
-                                           ScenePath.Find(thing.Path, thing.Scene) is { } found:
+                                           (OwnCreatures.FindPiece(thing.Scene, thing.Path) ??
+                                            ScenePath.Find(thing.Path, thing.Scene)) is { } found:
+                    if (variable.Value != found) {
+                        Logger.Info(
+                            $"[Told values] '{fsm.GameObject.name}' '{fsm.Name}' holds '{found.name}' in '{name}' as " +
+                            $"told, rather than '{(variable.Value != null ? variable.Value.name : "nothing")}'"
+                        );
+                    }
+
                     variable.Value = found;
                     break;
                 case FoughtCreature creature when variables.FindFsmGameObject(name) is { } variable:
@@ -197,6 +210,32 @@ internal sealed class ToldValues {
         foreach (var field in fields) {
             if (field.GetValue(action) is FsmGameObject { UseVariable: true, Name.Length: > 0 } variable) {
                 yield return variable.Name;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The names of the variables of its FSM that an action is given an object in, which hold something of a creature
+    /// that every game runs by itself, like the point that a flying creature makes for on its round, which it changes
+    /// for the other at each end of it (see OwnCreatures.PieceOf). A step of the scene host's that set a member's
+    /// creature where that one was, at the far end of its round, left its point as it was: the two flew to opposite
+    /// ends, and swapped at each end, the member's put 8 units back at each (the user's log of 11-28, 16:40:28 to
+    /// 16:40:34, the flying feeders of Dust_02).
+    /// </summary>
+    public static IEnumerable<string> OwnPiecesHeldBy(FsmStateAction action) {
+        var type = action.GetType();
+        if (!ObjectFields.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(
+                type.GetFields(BindingFlags.Instance | BindingFlags.Public),
+                field => field.FieldType == typeof(FsmGameObject)
+            );
+            ObjectFields[type] = fields;
+        }
+
+        foreach (var field in fields) {
+            if (field.GetValue(action) is FsmGameObject { UseVariable: true, Name.Length: > 0, Value: { } thing } held
+                && thing != null && OwnCreatures.PieceOf(thing) != null) {
+                yield return held.Name;
             }
         }
     }
@@ -300,11 +339,17 @@ internal sealed class ToldValues {
     private sealed record RoomObject(string Scene, string Path) {
         /// <summary>
         /// The object as one placed in the room, or null for one that is not: a player, kept across rooms, or one made
-        /// as the room went on, which each game makes by itself.
+        /// as the room went on, which each game makes by itself. What hung under a creature that every game runs by
+        /// itself as the room loaded it goes by its place then, wherever the creature put it (see
+        /// OwnCreatures.PieceOf).
         /// </summary>
         public static RoomObject? Of(GameObject thing) {
             if (!thing.scene.IsValid() || thing.scene.name == "DontDestroyOnLoad") {
                 return null;
+            }
+
+            if (OwnCreatures.PieceOf(thing) is { } place) {
+                return new RoomObject(thing.scene.name, place);
             }
 
             var path = ScenePath.Get(thing.transform);
